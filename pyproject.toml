@@ -1,0 +1,87 @@
+[project]
+name = "semantic-log-denoiser"
+version = "0.1.0"
+description = "CLI tool for semantic log clustering, noise reduction, and anomaly detection"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [
+    { name = "Atul" },
+]
+keywords = ["logs", "sre", "devops", "anomaly-detection", "clustering", "observability"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "Topic :: System :: Logging",
+    "Topic :: System :: Monitoring",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    # --- Data Processing ---
+    "polars>=1.0.0",
+
+    # --- AI / ML ---
+    "sentence-transformers>=3.0.0",
+    "hdbscan>=0.8.38",
+    "scikit-learn>=1.5.0",
+    "numpy>=1.26.0",
+
+    # --- Vector Storage ---
+    "lancedb>=0.9.0",
+
+    # --- CLI & TUI ---
+    "typer>=0.12.0",
+    "shellingham>=1.5.0",
+    "rich>=13.7.0",
+
+    # --- Utilities ---
+    "pydantic>=2.7.0",
+    "pydantic-settings>=2.3.0",
+    "orjson>=3.10.0",
+
+    # --- Intelligence (Phase 2) ---
+    "openai>=1.0.0",
+
+    # --- Integrations (Phase 3) ---
+    "kubernetes>=29.0.0",
+    "boto3>=1.34.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.2.0",
+    "pytest-cov>=5.0.0",
+    "ruff>=0.4.0",
+    "mypy>=1.10.0",
+]
+
+[project.scripts]
+semantic-log = "denoiser.cli.main:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/denoiser"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "RUF"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_return_any = true
+warn_unused_configs = true

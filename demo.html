@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body {
+    background-color: #1e1e1e;
+    color: #00ff00;
+    font-family: 'Courier New', Courier, monospace;
+    padding: 20px;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .prompt { color: #5fd7ff; }
+  .command { color: #ffffff; }
+  .box { border: 1px solid #555; padding: 10px; margin-top: 10px; margin-bottom: 10px; border-radius: 5px; color: #fff;}
+  .box-title { color: #87afff; font-weight: bold; margin-bottom: 10px;}
+  .table { width: 100%; border-collapse: collapse; margin-top: 20px; color: #fff;}
+  .table th, .table td { border: 1px solid #555; padding: 8px; text-align: left; }
+  .table th { color: #ffaf00; }
+  .dim { color: #888; }
+</style>
+</head>
+<body>
+  <div><span class="prompt">(base) atul@Atuls-MacBook-Air semantic-log-denoiser %</span> <span class="command">uv run semantic-log analyze k8s://default/demo-pod --intelligence</span></div>
+  <br>
+  <div id="output"></div>
+
+  <script>
+    const outputHtml = `
+Semantic Log Analysis (23 logs processed)<br><br>
+
+<div class="box">
+  <div class="box-title">╭────────────────────────── AI Incident Intelligence ──────────────────────────╮</div>
+  Failure Domain: None<br><br>
+  
+  Summary:<br>
+  A system event occurred, but the root cause is unclear due to a lack of<br>
+  information in the provided log clusters.<br><br>
+  
+  Next Steps / Hints:<br>
+  ["Investigate the 'new_pattern' or 'high_risk_anomaly' clusters for<br>
+  potential root causes.", "Check the 'team_label' and 'is_acknowledged'<br>
+  fields for organization-specific context.", "Examine the<br>
+  'representative_log' field for clues about the system component or process<br>
+  involved."]<br>
+  <div class="box-title" style="margin-top: 10px; margin-bottom: 0;">╰──────────────────────────────────────────────────────────────────────────────╯</div>
+</div>
+
+<table class="table">
+  <tr>
+    <th>Cluster</th>
+    <th>Count</th>
+    <th>Anomaly</th>
+    <th>Dist</th>
+    <th>Representative Log</th>
+  </tr>
+  <tr>
+    <td>NOISE</td>
+    <td>18</td>
+    <td>-</td>
+    <td>-</td>
+    <td>2026/05/08 17:13:28  1#1: start worker process 29</td>
+  </tr>
+  <tr>
+    <td>0</td>
+    <td>5</td>
+    <td>-</td>
+    <td>-</td>
+    <td>/docker-entrypoint.sh: Looking for shell scripts in /docker-entrypoint.d/</td>
+  </tr>
+</table>
+<br>
+<div><span class="prompt">(base) atul@Atuls-MacBook-Air semantic-log-denoiser %</span> <span class="command"></span><span style="animation: blink 1s step-end infinite;">█</span></div>
+`;
+    
+    // Simulate typing/rendering delay
+    setTimeout(() => {
+      document.getElementById('output').innerHTML = outputHtml;
+    }, 1000);
+  </script>
+</body>
+</html>

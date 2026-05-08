@@ -1,0 +1,55 @@
+
+Semantic Log Analysis (172 logs processed)
+
+╭────────────────────────── AI Incident Intelligence ──────────────────────────╮
+│ Failure Domain: Kernel                                                       │
+│                                                                              │
+│ Summary:                                                                     │
+│ High-risk anomaly detected in kernel logs, potentially causing system        │
+│ instability.                                                                 │
+│                                                                              │
+│ Next Steps / Hints:                                                          │
+│ ['Investigate kernel stack trace for root cause.', 'Check for recent kernel  │
+│ updates or configuration changes.', 'Verify system resource availability     │
+│ (CPU, Mem)']                                                                 │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+┏━━━━━━━━━━┳━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━┓
+┃          ┃     ┃                 ┃    ┃                                ┃ Re… ┃
+┃ Cluster  ┃ Co… ┃ Anomaly         ┃ D… ┃ Semantic Summary               ┃ Log ┃
+┡━━━━━━━━━━╇━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━┩
+│ 0        │  62 │ new_pattern     │ 0… │ Database query executed within │ 20… │
+│          │     │                 │    │ normal time frame.             │ DE… │
+│          │     │                 │    │                                │ [D… │
+│          │     │                 │    │                                │ Qu… │
+│          │     │                 │    │                                │ ex… │
+│          │     │                 │    │                                │ in  │
+│          │     │                 │    │                                │ 10… │
+│          │     │                 │    │                                │ SE… │
+│          │     │                 │    │                                │ *.… │
+│ NOISE    │  50 │ high_risk_anom… │ 1… │ Kernel FATAL error with stack  │ 20… │
+│          │     │                 │    │ trace.                         │ FA… │
+│          │     │                 │    │                                │ [K… │
+│          │     │                 │    │                                │ St… │
+│          │     │                 │    │                                │ tr… │
+│          │     │                 │    │                                │ #0  │
+│          │     │                 │    │                                │ 0x… │
+│          │     │                 │    │                                │ ... │
+│ 2        │  33 │ known           │ 0… │ Health check service status    │ 20… │
+│          │     │                 │    │ OK, normal CPU and Mem usage.  │ IN… │
+│          │     │                 │    │                                │ [H… │
+│          │     │                 │    │                                │ Se… │
+│          │     │                 │    │                                │ st… │
+│          │     │                 │    │                                │ OK, │
+│          │     │                 │    │                                │ CP… │
+│          │     │                 │    │                                │ 12… │
+│ 1        │  27 │ known           │ 0… │ Cache hit for user profile,    │ 20… │
+│          │     │                 │    │ normal operation.              │ DE… │
+│          │     │                 │    │                                │ [C… │
+│          │     │                 │    │                                │ Ca… │
+│          │     │                 │    │                                │ hit │
+│          │     │                 │    │                                │ for │
+│          │     │                 │    │                                │ ke… │
+│          │     │                 │    │                                │ us… │
+└──────────┴─────┴─────────────────┴────┴────────────────────────────────┴─────┘
+

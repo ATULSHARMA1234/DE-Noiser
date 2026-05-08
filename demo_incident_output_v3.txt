@@ -1,0 +1,53 @@
+
+Semantic Log Analysis (172 logs processed)
+
+╭────────────────────────── AI Incident Intelligence ──────────────────────────╮
+│ Failure Domain: Kernel                                                       │
+│                                                                              │
+│ Summary:                                                                     │
+│ High-risk anomaly detected in kernel logs, investigation required.           │
+│                                                                              │
+│ Next Steps / Hints:                                                          │
+│ ['Investigate kernel stack trace for root cause', 'Check system logs for     │
+│ related errors', 'Verify kernel updates and patches']                        │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+┏━━━━━━━━━━┳━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━┓
+┃          ┃     ┃                 ┃    ┃                                ┃ Re… ┃
+┃ Cluster  ┃ Co… ┃ Anomaly         ┃ D… ┃ Semantic Summary               ┃ Log ┃
+┡━━━━━━━━━━╇━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━┩
+│ 0        │  62 │ new_pattern     │ 0… │ Executed without error         │ 20… │
+│          │     │                 │    │                                │ DE… │
+│          │     │                 │    │                                │ [D… │
+│          │     │                 │    │                                │ Qu… │
+│          │     │                 │    │                                │ ex… │
+│          │     │                 │    │                                │ in  │
+│          │     │                 │    │                                │ 10… │
+│          │     │                 │    │                                │ SE… │
+│          │     │                 │    │                                │ *.… │
+│ NOISE    │  50 │ high_risk_anom… │ 1… │ High-risk anomaly detected in  │ 20… │
+│          │     │                 │    │ kernel logs                    │ FA… │
+│          │     │                 │    │                                │ [K… │
+│          │     │                 │    │                                │ St… │
+│          │     │                 │    │                                │ tr… │
+│          │     │                 │    │                                │ #0  │
+│          │     │                 │    │                                │ 0x… │
+│          │     │                 │    │                                │ ... │
+│ 2        │  33 │ known           │ 0… │ Executed without error         │ 20… │
+│          │     │                 │    │                                │ IN… │
+│          │     │                 │    │                                │ [H… │
+│          │     │                 │    │                                │ Se… │
+│          │     │                 │    │                                │ st… │
+│          │     │                 │    │                                │ OK, │
+│          │     │                 │    │                                │ CP… │
+│          │     │                 │    │                                │ 12… │
+│ 1        │  27 │ known           │ 0… │ Executed without error         │ 20… │
+│          │     │                 │    │                                │ DE… │
+│          │     │                 │    │                                │ [C… │
+│          │     │                 │    │                                │ Ca… │
+│          │     │                 │    │                                │ hit │
+│          │     │                 │    │                                │ for │
+│          │     │                 │    │                                │ ke… │
+│          │     │                 │    │                                │ us… │
+└──────────┴─────┴─────────────────┴────┴────────────────────────────────┴─────┘
+

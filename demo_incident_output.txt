@@ -1,0 +1,34 @@
+
+Semantic Log Analysis (172 logs processed)
+
+╭────────────────────────── AI Incident Intelligence ──────────────────────────╮
+│ Failure Domain: Kernel                                                       │
+│                                                                              │
+│ Summary:                                                                     │
+│ A high-risk anomaly occurred in the system, potentially indicating a         │
+│ critical failure in the Kernel component.                                    │
+│                                                                              │
+│ Next Steps / Hints:                                                          │
+│ ['Investigate the stack trace for clues about the failure.', "Check the      │
+│ system's configuration and logs for any recent changes that may have         │
+│ contributed to the failure.", "Verify the system's dependencies and          │
+│ libraries for any potential issues."]                                        │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+┏━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Cluster  ┃ Count ┃ Anomaly         ┃ Dist ┃ Representative Log               ┃
+┡━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ 0        │    62 │ new_pattern     │ 0.79 │ 2026-05-08T21:25:17.517266Z      │
+│          │       │                 │      │ DEBUG [Database] Query executed  │
+│          │       │                 │      │ in 10ms: SELECT *...             │
+│ NOISE    │    50 │ high_risk_anom… │ 1.24 │ 2026-05-08T21:53:59.517266Z      │
+│          │       │                 │      │ FATAL [Kernel] Stack trace: #0   │
+│          │       │                 │      │ 0x00007f8e12b3c4d ...            │
+│ 2        │    33 │ known           │ 0.02 │ 2026-05-08T21:26:31.517266Z INFO │
+│          │       │                 │      │ [HealthCheck] Service status:    │
+│          │       │                 │      │ OK, CPU: 12%,...                 │
+│ 1        │    27 │ known           │ 0.10 │ 2026-05-08T21:27:37.517266Z      │
+│          │       │                 │      │ DEBUG [Cache] Cache hit for key: │
+│          │       │                 │      │ user_profile_6958                │
+└──────────┴───────┴─────────────────┴──────┴──────────────────────────────────┘
+

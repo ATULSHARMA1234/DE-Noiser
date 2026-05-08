@@ -1,0 +1,150 @@
+2026-05-08T21:23:59.516165Z INFO  [API Gateway] 200 OK GET /v1/products/194
+2026-05-08T21:24:01.516165Z INFO  [API Gateway] 200 OK GET /v1/products/199
+2026-05-08T21:24:03.516165Z DEBUG [Cache] Cache hit for key: user_profile_1212
+2026-05-08T21:24:05.516165Z INFO  [HealthCheck] Service status: OK, CPU: 6%, Mem: 297MB
+2026-05-08T21:24:07.516165Z INFO  [UserSession] User 9365 logged in from 192.168.1.216
+2026-05-08T21:24:09.516165Z DEBUG [Database] Query executed in 5ms: SELECT * FROM products WHERE id=207
+2026-05-08T21:24:11.516165Z INFO  [UserSession] User 4925 logged in from 192.168.1.160
+2026-05-08T21:24:13.516165Z INFO  [API Gateway] 200 OK GET /v1/products/449
+2026-05-08T21:24:15.516165Z INFO  [API Gateway] 200 OK GET /v1/products/415
+2026-05-08T21:24:17.516165Z INFO  [UserSession] User 5841 logged in from 192.168.1.68
+2026-05-08T21:24:19.516165Z INFO  [UserSession] User 9830 logged in from 192.168.1.200
+2026-05-08T21:24:21.516165Z DEBUG [Cache] Cache hit for key: user_profile_7811
+2026-05-08T21:24:23.516165Z DEBUG [Database] Query executed in 1ms: SELECT * FROM products WHERE id=101
+2026-05-08T21:24:25.516165Z INFO  [HealthCheck] Service status: OK, CPU: 11%, Mem: 313MB
+2026-05-08T21:24:27.516165Z DEBUG [Database] Query executed in 7ms: SELECT * FROM products WHERE id=133
+2026-05-08T21:24:29.516165Z INFO  [HealthCheck] Service status: OK, CPU: 8%, Mem: 351MB
+2026-05-08T21:24:31.516165Z INFO  [HealthCheck] Service status: OK, CPU: 6%, Mem: 334MB
+2026-05-08T21:24:33.516165Z INFO  [UserSession] User 5463 logged in from 192.168.1.41
+2026-05-08T21:24:35.516165Z DEBUG [Cache] Cache hit for key: user_profile_6358
+2026-05-08T21:24:37.516165Z INFO  [HealthCheck] Service status: OK, CPU: 12%, Mem: 385MB
+2026-05-08T21:24:39.516165Z DEBUG [Cache] Cache hit for key: user_profile_9078
+2026-05-08T21:24:41.516165Z INFO  [UserSession] User 2121 logged in from 192.168.1.231
+2026-05-08T21:24:43.516165Z INFO  [UserSession] User 8549 logged in from 192.168.1.230
+2026-05-08T21:24:45.516165Z INFO  [API Gateway] 200 OK GET /v1/products/368
+2026-05-08T21:24:47.516165Z DEBUG [Database] Query executed in 3ms: SELECT * FROM products WHERE id=421
+2026-05-08T21:24:49.516165Z INFO  [UserSession] User 6301 logged in from 192.168.1.136
+2026-05-08T21:24:51.516165Z DEBUG [Cache] Cache hit for key: user_profile_2449
+2026-05-08T21:24:53.516165Z INFO  [API Gateway] 200 OK GET /v1/products/126
+2026-05-08T21:24:55.516165Z INFO  [UserSession] User 6352 logged in from 192.168.1.203
+2026-05-08T21:24:57.516165Z DEBUG [Database] Query executed in 5ms: SELECT * FROM products WHERE id=367
+2026-05-08T21:24:59.516165Z DEBUG [Cache] Cache hit for key: user_profile_3043
+2026-05-08T21:25:01.516165Z INFO  [UserSession] User 2585 logged in from 192.168.1.96
+2026-05-08T21:25:03.516165Z INFO  [UserSession] User 6813 logged in from 192.168.1.83
+2026-05-08T21:25:05.516165Z INFO  [HealthCheck] Service status: OK, CPU: 11%, Mem: 246MB
+2026-05-08T21:25:07.516165Z DEBUG [Cache] Cache hit for key: user_profile_7922
+2026-05-08T21:25:09.516165Z DEBUG [Database] Query executed in 9ms: SELECT * FROM products WHERE id=104
+2026-05-08T21:25:11.516165Z INFO  [API Gateway] 200 OK GET /v1/products/189
+2026-05-08T21:25:13.516165Z INFO  [API Gateway] 200 OK GET /v1/products/453
+2026-05-08T21:25:15.516165Z INFO  [API Gateway] 200 OK GET /v1/products/142
+2026-05-08T21:25:17.516165Z DEBUG [Database] Query executed in 10ms: SELECT * FROM products WHERE id=319
+2026-05-08T21:25:19.516165Z DEBUG [Database] Query executed in 2ms: SELECT * FROM products WHERE id=17
+2026-05-08T21:25:21.516165Z DEBUG [Cache] Cache hit for key: user_profile_9577
+2026-05-08T21:25:23.516165Z DEBUG [Database] Query executed in 6ms: SELECT * FROM products WHERE id=443
+2026-05-08T21:25:25.516165Z DEBUG [Cache] Cache hit for key: user_profile_8561
+2026-05-08T21:25:27.516165Z DEBUG [Database] Query executed in 6ms: SELECT * FROM products WHERE id=392
+2026-05-08T21:25:29.516165Z INFO  [HealthCheck] Service status: OK, CPU: 9%, Mem: 377MB
+2026-05-08T21:25:31.516165Z INFO  [API Gateway] 200 OK GET /v1/products/289
+2026-05-08T21:25:33.516165Z DEBUG [Cache] Cache hit for key: user_profile_6847
+2026-05-08T21:25:35.516165Z INFO  [UserSession] User 1804 logged in from 192.168.1.239
+2026-05-08T21:25:37.516165Z INFO  [UserSession] User 5289 logged in from 192.168.1.177
+2026-05-08T21:25:39.516165Z DEBUG [Database] Query executed in 8ms: SELECT * FROM products WHERE id=324
+2026-05-08T21:25:41.516165Z DEBUG [Cache] Cache hit for key: user_profile_4723
+2026-05-08T21:25:43.516165Z INFO  [API Gateway] 200 OK GET /v1/products/28
+2026-05-08T21:25:45.516165Z DEBUG [Database] Query executed in 2ms: SELECT * FROM products WHERE id=301
+2026-05-08T21:25:47.516165Z DEBUG [Cache] Cache hit for key: user_profile_7025
+2026-05-08T21:25:49.516165Z INFO  [HealthCheck] Service status: OK, CPU: 11%, Mem: 304MB
+2026-05-08T21:25:51.516165Z DEBUG [Database] Query executed in 7ms: SELECT * FROM products WHERE id=115
+2026-05-08T21:25:53.516165Z INFO  [HealthCheck] Service status: OK, CPU: 9%, Mem: 385MB
+2026-05-08T21:25:55.516165Z DEBUG [Cache] Cache hit for key: user_profile_6878
+2026-05-08T21:25:57.516165Z DEBUG [Cache] Cache hit for key: user_profile_4805
+2026-05-08T21:25:59.516165Z INFO  [HealthCheck] Service status: OK, CPU: 9%, Mem: 372MB
+2026-05-08T21:26:01.516165Z INFO  [HealthCheck] Service status: OK, CPU: 7%, Mem: 291MB
+2026-05-08T21:26:03.516165Z DEBUG [Database] Query executed in 5ms: SELECT * FROM products WHERE id=362
+2026-05-08T21:26:05.516165Z INFO  [API Gateway] 200 OK GET /v1/products/186
+2026-05-08T21:26:07.516165Z DEBUG [Database] Query executed in 7ms: SELECT * FROM products WHERE id=269
+2026-05-08T21:26:09.516165Z INFO  [UserSession] User 3167 logged in from 192.168.1.173
+2026-05-08T21:26:11.516165Z INFO  [HealthCheck] Service status: OK, CPU: 9%, Mem: 249MB
+2026-05-08T21:26:13.516165Z INFO  [HealthCheck] Service status: OK, CPU: 11%, Mem: 290MB
+2026-05-08T21:26:15.516165Z DEBUG [Database] Query executed in 6ms: SELECT * FROM products WHERE id=94
+2026-05-08T21:26:17.516165Z INFO  [UserSession] User 1211 logged in from 192.168.1.52
+2026-05-08T21:26:19.516165Z INFO  [UserSession] User 2394 logged in from 192.168.1.144
+2026-05-08T21:26:21.516165Z INFO  [UserSession] User 8818 logged in from 192.168.1.153
+2026-05-08T21:26:23.516165Z DEBUG [Database] Query executed in 6ms: SELECT * FROM products WHERE id=150
+2026-05-08T21:26:25.516165Z INFO  [HealthCheck] Service status: OK, CPU: 14%, Mem: 283MB
+2026-05-08T21:26:27.516165Z DEBUG [Cache] Cache hit for key: user_profile_6214
+2026-05-08T21:26:29.516165Z DEBUG [Database] Query executed in 6ms: SELECT * FROM products WHERE id=329
+2026-05-08T21:26:31.516165Z INFO  [HealthCheck] Service status: OK, CPU: 8%, Mem: 300MB
+2026-05-08T21:26:33.516165Z INFO  [UserSession] User 9810 logged in from 192.168.1.143
+2026-05-08T21:26:35.516165Z DEBUG [Cache] Cache hit for key: user_profile_9922
+2026-05-08T21:26:37.516165Z INFO  [UserSession] User 1394 logged in from 192.168.1.21
+2026-05-08T21:26:39.516165Z INFO  [API Gateway] 200 OK GET /v1/products/450
+2026-05-08T21:26:41.516165Z DEBUG [Cache] Cache hit for key: user_profile_8119
+2026-05-08T21:26:43.516165Z INFO  [UserSession] User 1278 logged in from 192.168.1.192
+2026-05-08T21:26:45.516165Z DEBUG [Database] Query executed in 1ms: SELECT * FROM products WHERE id=469
+2026-05-08T21:26:47.516165Z DEBUG [Database] Query executed in 7ms: SELECT * FROM products WHERE id=75
+2026-05-08T21:26:49.516165Z INFO  [API Gateway] 200 OK GET /v1/products/37
+2026-05-08T21:26:51.516165Z INFO  [HealthCheck] Service status: OK, CPU: 5%, Mem: 256MB
+2026-05-08T21:26:53.516165Z INFO  [UserSession] User 7530 logged in from 192.168.1.96
+2026-05-08T21:26:55.516165Z INFO  [UserSession] User 9180 logged in from 192.168.1.145
+2026-05-08T21:26:57.516165Z DEBUG [Cache] Cache hit for key: user_profile_5608
+2026-05-08T21:26:59.516165Z INFO  [UserSession] User 8438 logged in from 192.168.1.176
+2026-05-08T21:27:01.516165Z DEBUG [Cache] Cache hit for key: user_profile_1767
+2026-05-08T21:27:03.516165Z DEBUG [Cache] Cache hit for key: user_profile_2007
+2026-05-08T21:27:05.516165Z DEBUG [Database] Query executed in 7ms: SELECT * FROM products WHERE id=240
+2026-05-08T21:27:07.516165Z INFO  [UserSession] User 4445 logged in from 192.168.1.206
+2026-05-08T21:27:09.516165Z INFO  [HealthCheck] Service status: OK, CPU: 11%, Mem: 225MB
+2026-05-08T21:27:11.516165Z INFO  [API Gateway] 200 OK GET /v1/products/470
+2026-05-08T21:27:13.516165Z DEBUG [Database] Query executed in 7ms: SELECT * FROM products WHERE id=328
+2026-05-08T21:27:15.516165Z DEBUG [Database] Query executed in 9ms: SELECT * FROM products WHERE id=252
+2026-05-08T21:27:17.516165Z DEBUG [Cache] Cache hit for key: user_profile_7172
+2026-05-08T21:27:19.516165Z INFO  [API Gateway] 200 OK GET /v1/products/163
+2026-05-08T21:27:21.516165Z DEBUG [Cache] Cache hit for key: user_profile_4084
+2026-05-08T21:27:23.516165Z DEBUG [Cache] Cache hit for key: user_profile_9493
+2026-05-08T21:27:25.516165Z DEBUG [Cache] Cache hit for key: user_profile_6076
+2026-05-08T21:27:27.516165Z INFO  [HealthCheck] Service status: OK, CPU: 6%, Mem: 345MB
+2026-05-08T21:27:29.516165Z INFO  [HealthCheck] Service status: OK, CPU: 13%, Mem: 300MB
+2026-05-08T21:27:31.516165Z DEBUG [Cache] Cache hit for key: user_profile_1491
+2026-05-08T21:27:33.516165Z INFO  [UserSession] User 2696 logged in from 192.168.1.40
+2026-05-08T21:27:35.516165Z INFO  [UserSession] User 9810 logged in from 192.168.1.234
+2026-05-08T21:27:37.516165Z INFO  [HealthCheck] Service status: OK, CPU: 10%, Mem: 329MB
+2026-05-08T21:27:39.516165Z INFO  [API Gateway] 200 OK GET /v1/products/98
+2026-05-08T21:27:41.516165Z DEBUG [Cache] Cache hit for key: user_profile_1439
+2026-05-08T21:27:43.516165Z DEBUG [Database] Query executed in 2ms: SELECT * FROM products WHERE id=456
+2026-05-08T21:27:45.516165Z DEBUG [Database] Query executed in 6ms: SELECT * FROM products WHERE id=223
+2026-05-08T21:27:47.516165Z INFO  [API Gateway] 200 OK GET /v1/products/341
+2026-05-08T21:27:49.516165Z INFO  [API Gateway] 200 OK GET /v1/products/461
+2026-05-08T21:27:51.516165Z INFO  [UserSession] User 9590 logged in from 192.168.1.245
+2026-05-08T21:27:53.516165Z DEBUG [Database] Query executed in 2ms: SELECT * FROM products WHERE id=361
+2026-05-08T21:27:55.516165Z DEBUG [Cache] Cache hit for key: user_profile_3441
+2026-05-08T21:27:57.516165Z INFO  [HealthCheck] Service status: OK, CPU: 13%, Mem: 327MB
+2026-05-08T21:27:59.516165Z INFO  [UserSession] User 6710 logged in from 192.168.1.196
+2026-05-08T21:28:01.516165Z DEBUG [Database] Query executed in 2ms: SELECT * FROM products WHERE id=6
+2026-05-08T21:28:03.516165Z DEBUG [Cache] Cache hit for key: user_profile_7853
+2026-05-08T21:28:05.516165Z INFO  [HealthCheck] Service status: OK, CPU: 6%, Mem: 209MB
+2026-05-08T21:28:07.516165Z INFO  [HealthCheck] Service status: OK, CPU: 7%, Mem: 388MB
+2026-05-08T21:28:09.516165Z DEBUG [Database] Query executed in 7ms: SELECT * FROM products WHERE id=404
+2026-05-08T21:28:11.516165Z DEBUG [Database] Query executed in 2ms: SELECT * FROM products WHERE id=214
+2026-05-08T21:28:13.516165Z DEBUG [Database] Query executed in 8ms: SELECT * FROM products WHERE id=495
+2026-05-08T21:28:15.516165Z INFO  [API Gateway] 200 OK GET /v1/products/254
+2026-05-08T21:28:17.516165Z INFO  [UserSession] User 7804 logged in from 192.168.1.45
+2026-05-08T21:28:19.516165Z DEBUG [Cache] Cache hit for key: user_profile_3086
+2026-05-08T21:28:21.516165Z DEBUG [Cache] Cache hit for key: user_profile_2514
+2026-05-08T21:28:23.516165Z DEBUG [Cache] Cache hit for key: user_profile_8925
+2026-05-08T21:28:25.516165Z DEBUG [Cache] Cache hit for key: user_profile_9769
+2026-05-08T21:28:27.516165Z INFO  [HealthCheck] Service status: OK, CPU: 7%, Mem: 296MB
+2026-05-08T21:28:29.516165Z INFO  [API Gateway] 200 OK GET /v1/products/264
+2026-05-08T21:28:31.516165Z DEBUG [Cache] Cache hit for key: user_profile_8166
+2026-05-08T21:28:33.516165Z DEBUG [Cache] Cache hit for key: user_profile_6507
+2026-05-08T21:28:35.516165Z DEBUG [Database] Query executed in 4ms: SELECT * FROM products WHERE id=366
+2026-05-08T21:28:37.516165Z DEBUG [Cache] Cache hit for key: user_profile_3798
+2026-05-08T21:28:39.516165Z INFO  [UserSession] User 9696 logged in from 192.168.1.5
+2026-05-08T21:28:41.516165Z INFO  [API Gateway] 200 OK GET /v1/products/336
+2026-05-08T21:28:43.516165Z INFO  [API Gateway] 200 OK GET /v1/products/208
+2026-05-08T21:28:45.516165Z DEBUG [Cache] Cache hit for key: user_profile_9884
+2026-05-08T21:28:47.516165Z INFO  [API Gateway] 200 OK GET /v1/products/157
+2026-05-08T21:28:49.516165Z INFO  [HealthCheck] Service status: OK, CPU: 6%, Mem: 234MB
+2026-05-08T21:28:51.516165Z DEBUG [Database] Query executed in 6ms: SELECT * FROM products WHERE id=498
+2026-05-08T21:28:53.516165Z INFO  [HealthCheck] Service status: OK, CPU: 12%, Mem: 270MB
+2026-05-08T21:28:55.516165Z DEBUG [Cache] Cache hit for key: user_profile_7237
+2026-05-08T21:28:57.516165Z DEBUG [Cache] Cache hit for key: user_profile_6610

@@ -1,0 +1,9 @@
+2023-10-25T14:30:00Z INFO User 1234 logged in from 192.168.1.5
+2023-10-25T14:30:01Z INFO User 5678 logged in from 10.0.0.1
+2023-10-25T14:30:02Z INFO User 9012 logged in from 172.16.0.2
+2023-10-25T14:30:05Z ERROR Database connection failed: timeout after 3000ms
+2023-10-25T14:30:06Z ERROR Database connection failed: timeout after 3000ms
+2023-10-25T14:30:07Z ERROR Database connection failed: timeout after 3000ms
+2023-10-25T14:30:10Z WARN High memory usage: 85%
+2023-10-25T14:30:11Z WARN High memory usage: 86%
+2023-10-25T14:30:15Z FATAL Segfault at memory address 0x1a2b3c4d
