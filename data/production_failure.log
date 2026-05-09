@@ -1,0 +1,300 @@
+2026-05-09 12:51:18 INFO [Auth] User login successful - session_id=2206
+2026-05-09 12:51:19 INFO [Payment] Transaction 937 processed
+2026-05-09 12:51:20 INFO [Payment] Transaction 349 processed
+2026-05-09 12:51:21 INFO [Metrics] CPU Usage: 37%
+2026-05-09 12:51:22 INFO [Payment] Transaction 460 processed
+2026-05-09 12:51:23 INFO [Auth] User login successful - session_id=1022
+2026-05-09 12:51:24 INFO [Metrics] CPU Usage: 16%
+2026-05-09 12:51:25 INFO [Payment] Transaction 383 processed
+2026-05-09 12:51:26 INFO [Payment] Transaction 338 processed
+2026-05-09 12:51:27 INFO [Metrics] CPU Usage: 23%
+2026-05-09 12:51:28 INFO [Auth] User login successful - session_id=6649
+2026-05-09 12:51:29 INFO [Payment] Transaction 528 processed
+2026-05-09 12:51:30 INFO [Metrics] CPU Usage: 26%
+2026-05-09 12:51:31 INFO [Payment] Transaction 736 processed
+2026-05-09 12:51:32 INFO [Payment] Transaction 425 processed
+2026-05-09 12:51:33 INFO [Auth] User login successful - session_id=2810
+2026-05-09 12:51:34 INFO [Payment] Transaction 152 processed
+2026-05-09 12:51:35 INFO [Payment] Transaction 390 processed
+2026-05-09 12:51:36 INFO [Metrics] CPU Usage: 29%
+2026-05-09 12:51:37 INFO [Payment] Transaction 229 processed
+2026-05-09 12:51:38 INFO [Auth] User login successful - session_id=9945
+2026-05-09 12:51:39 INFO [Metrics] CPU Usage: 20%
+2026-05-09 12:51:40 INFO [Payment] Transaction 213 processed
+2026-05-09 12:51:41 INFO [Payment] Transaction 247 processed
+2026-05-09 12:51:42 INFO [Metrics] CPU Usage: 37%
+2026-05-09 12:51:43 INFO [Auth] User login successful - session_id=5710
+2026-05-09 12:51:44 INFO [Payment] Transaction 729 processed
+2026-05-09 12:51:45 INFO [Metrics] CPU Usage: 35%
+2026-05-09 12:51:46 INFO [Payment] Transaction 129 processed
+2026-05-09 12:51:47 INFO [Payment] Transaction 808 processed
+2026-05-09 12:51:48 INFO [Auth] User login successful - session_id=2234
+2026-05-09 12:51:49 INFO [Payment] Transaction 862 processed
+2026-05-09 12:51:50 INFO [Payment] Transaction 722 processed
+2026-05-09 12:51:51 INFO [Metrics] CPU Usage: 40%
+2026-05-09 12:51:52 INFO [Payment] Transaction 980 processed
+2026-05-09 12:51:53 INFO [Auth] User login successful - session_id=5317
+2026-05-09 12:51:54 INFO [Metrics] CPU Usage: 30%
+2026-05-09 12:51:55 INFO [Payment] Transaction 638 processed
+2026-05-09 12:51:56 INFO [Payment] Transaction 709 processed
+2026-05-09 12:51:57 INFO [Metrics] CPU Usage: 24%
+2026-05-09 12:51:58 INFO [Auth] User login successful - session_id=7071
+2026-05-09 12:51:59 INFO [Payment] Transaction 826 processed
+2026-05-09 12:52:00 INFO [Metrics] CPU Usage: 35%
+2026-05-09 12:52:01 INFO [Payment] Transaction 540 processed
+2026-05-09 12:52:02 INFO [Payment] Transaction 390 processed
+2026-05-09 12:52:03 INFO [Auth] User login successful - session_id=9761
+2026-05-09 12:52:04 INFO [Payment] Transaction 845 processed
+2026-05-09 12:52:05 INFO [Payment] Transaction 907 processed
+2026-05-09 12:52:06 INFO [Metrics] CPU Usage: 37%
+2026-05-09 12:52:07 INFO [Payment] Transaction 184 processed
+2026-05-09 12:52:08 INFO [Auth] User login successful - session_id=1730
+2026-05-09 12:52:09 INFO [Metrics] CPU Usage: 39%
+2026-05-09 12:52:10 INFO [Payment] Transaction 677 processed
+2026-05-09 12:52:11 INFO [Payment] Transaction 777 processed
+2026-05-09 12:52:12 INFO [Metrics] CPU Usage: 19%
+2026-05-09 12:52:13 INFO [Auth] User login successful - session_id=6669
+2026-05-09 12:52:14 INFO [Payment] Transaction 735 processed
+2026-05-09 12:52:15 INFO [Metrics] CPU Usage: 32%
+2026-05-09 12:52:16 INFO [Payment] Transaction 955 processed
+2026-05-09 12:52:17 INFO [Payment] Transaction 461 processed
+2026-05-09 12:52:18 INFO [Auth] User login successful - session_id=7287
+2026-05-09 12:52:19 INFO [Payment] Transaction 204 processed
+2026-05-09 12:52:20 INFO [Payment] Transaction 332 processed
+2026-05-09 12:52:21 INFO [Metrics] CPU Usage: 11%
+2026-05-09 12:52:22 INFO [Payment] Transaction 792 processed
+2026-05-09 12:52:23 INFO [Auth] User login successful - session_id=9310
+2026-05-09 12:52:24 INFO [Metrics] CPU Usage: 14%
+2026-05-09 12:52:25 INFO [Payment] Transaction 839 processed
+2026-05-09 12:52:26 INFO [Payment] Transaction 970 processed
+2026-05-09 12:52:27 INFO [Metrics] CPU Usage: 17%
+2026-05-09 12:52:28 INFO [Auth] User login successful - session_id=6258
+2026-05-09 12:52:29 INFO [Payment] Transaction 895 processed
+2026-05-09 12:52:30 INFO [Metrics] CPU Usage: 16%
+2026-05-09 12:52:31 INFO [Payment] Transaction 600 processed
+2026-05-09 12:52:32 INFO [Payment] Transaction 315 processed
+2026-05-09 12:52:33 INFO [Auth] User login successful - session_id=6282
+2026-05-09 12:52:34 INFO [Payment] Transaction 755 processed
+2026-05-09 12:52:35 INFO [Payment] Transaction 564 processed
+2026-05-09 12:52:36 INFO [Metrics] CPU Usage: 19%
+2026-05-09 12:52:37 INFO [Payment] Transaction 684 processed
+2026-05-09 12:52:38 INFO [Auth] User login successful - session_id=4122
+2026-05-09 12:52:39 INFO [Metrics] CPU Usage: 25%
+2026-05-09 12:52:40 INFO [Payment] Transaction 513 processed
+2026-05-09 12:52:41 INFO [Payment] Transaction 710 processed
+2026-05-09 12:52:42 INFO [Metrics] CPU Usage: 11%
+2026-05-09 12:52:43 INFO [Auth] User login successful - session_id=5939
+2026-05-09 12:52:44 INFO [Payment] Transaction 433 processed
+2026-05-09 12:52:45 INFO [Metrics] CPU Usage: 18%
+2026-05-09 12:52:46 INFO [Payment] Transaction 775 processed
+2026-05-09 12:52:47 INFO [Payment] Transaction 522 processed
+2026-05-09 12:52:48 INFO [Auth] User login successful - session_id=2484
+2026-05-09 12:52:49 INFO [Payment] Transaction 492 processed
+2026-05-09 12:52:50 INFO [Payment] Transaction 116 processed
+2026-05-09 12:52:51 INFO [Metrics] CPU Usage: 39%
+2026-05-09 12:52:52 INFO [Payment] Transaction 336 processed
+2026-05-09 12:52:53 INFO [Auth] User login successful - session_id=4580
+2026-05-09 12:52:54 INFO [Metrics] CPU Usage: 11%
+2026-05-09 12:52:55 INFO [Payment] Transaction 142 processed
+2026-05-09 12:52:56 INFO [Payment] Transaction 934 processed
+2026-05-09 12:52:57 INFO [Metrics] CPU Usage: 36%
+2026-05-09 12:52:58 INFO [Auth] User login successful - session_id=5467
+2026-05-09 12:52:59 INFO [Payment] Transaction 517 processed
+2026-05-09 12:53:00 INFO [Metrics] CPU Usage: 24%
+2026-05-09 12:53:01 INFO [Payment] Transaction 551 processed
+2026-05-09 12:53:02 INFO [Payment] Transaction 286 processed
+2026-05-09 12:53:03 INFO [Auth] User login successful - session_id=4984
+2026-05-09 12:53:04 INFO [Payment] Transaction 883 processed
+2026-05-09 12:53:05 INFO [Payment] Transaction 751 processed
+2026-05-09 12:53:06 INFO [Metrics] CPU Usage: 31%
+2026-05-09 12:53:07 INFO [Payment] Transaction 931 processed
+2026-05-09 12:53:08 INFO [Auth] User login successful - session_id=9233
+2026-05-09 12:53:09 INFO [Metrics] CPU Usage: 12%
+2026-05-09 12:53:10 INFO [Payment] Transaction 722 processed
+2026-05-09 12:53:11 INFO [Payment] Transaction 336 processed
+2026-05-09 12:53:12 INFO [Metrics] CPU Usage: 21%
+2026-05-09 12:53:13 INFO [Auth] User login successful - session_id=7583
+2026-05-09 12:53:14 INFO [Payment] Transaction 314 processed
+2026-05-09 12:53:15 INFO [Metrics] CPU Usage: 22%
+2026-05-09 12:53:16 INFO [Payment] Transaction 897 processed
+2026-05-09 12:53:17 INFO [Payment] Transaction 204 processed
+2026-05-09 12:53:18 INFO [Auth] User login successful - session_id=3421
+2026-05-09 12:53:19 INFO [Payment] Transaction 364 processed
+2026-05-09 12:53:20 INFO [Payment] Transaction 523 processed
+2026-05-09 12:53:21 INFO [Metrics] CPU Usage: 30%
+2026-05-09 12:53:22 INFO [Payment] Transaction 923 processed
+2026-05-09 12:53:23 INFO [Auth] User login successful - session_id=2112
+2026-05-09 12:53:24 INFO [Metrics] CPU Usage: 25%
+2026-05-09 12:53:25 INFO [Payment] Transaction 444 processed
+2026-05-09 12:53:26 INFO [Payment] Transaction 400 processed
+2026-05-09 12:53:27 INFO [Metrics] CPU Usage: 28%
+2026-05-09 12:53:28 INFO [Auth] User login successful - session_id=7944
+2026-05-09 12:53:29 INFO [Payment] Transaction 617 processed
+2026-05-09 12:53:30 INFO [Metrics] CPU Usage: 17%
+2026-05-09 12:53:31 INFO [Payment] Transaction 663 processed
+2026-05-09 12:53:32 INFO [Payment] Transaction 629 processed
+2026-05-09 12:53:33 INFO [Auth] User login successful - session_id=2149
+2026-05-09 12:53:34 INFO [Payment] Transaction 965 processed
+2026-05-09 12:53:35 INFO [Payment] Transaction 140 processed
+2026-05-09 12:53:36 INFO [Metrics] CPU Usage: 27%
+2026-05-09 12:53:37 INFO [Payment] Transaction 586 processed
+2026-05-09 12:53:38 INFO [Auth] User login successful - session_id=9902
+2026-05-09 12:53:39 INFO [Metrics] CPU Usage: 16%
+2026-05-09 12:53:40 INFO [Payment] Transaction 995 processed
+2026-05-09 12:53:41 INFO [Payment] Transaction 985 processed
+2026-05-09 12:53:42 INFO [Metrics] CPU Usage: 30%
+2026-05-09 12:53:43 INFO [Auth] User login successful - session_id=2547
+2026-05-09 12:53:44 INFO [Payment] Transaction 865 processed
+2026-05-09 12:53:45 INFO [Metrics] CPU Usage: 37%
+2026-05-09 12:53:46 INFO [Payment] Transaction 440 processed
+2026-05-09 12:53:47 INFO [Payment] Transaction 408 processed
+2026-05-09 12:53:48 INFO [Auth] User login successful - session_id=1609
+2026-05-09 12:53:49 INFO [Payment] Transaction 602 processed
+2026-05-09 12:53:50 INFO [Payment] Transaction 836 processed
+2026-05-09 12:53:51 INFO [Metrics] CPU Usage: 28%
+2026-05-09 12:53:52 INFO [Payment] Transaction 400 processed
+2026-05-09 12:53:53 INFO [Auth] User login successful - session_id=5952
+2026-05-09 12:53:54 INFO [Metrics] CPU Usage: 33%
+2026-05-09 12:53:55 INFO [Payment] Transaction 430 processed
+2026-05-09 12:53:56 INFO [Payment] Transaction 838 processed
+2026-05-09 12:53:57 INFO [Metrics] CPU Usage: 11%
+2026-05-09 12:53:58 INFO [Auth] User login successful - session_id=4753
+2026-05-09 12:53:59 INFO [Payment] Transaction 863 processed
+2026-05-09 12:54:00 INFO [Metrics] CPU Usage: 38%
+2026-05-09 12:54:01 INFO [Payment] Transaction 502 processed
+2026-05-09 12:54:02 INFO [Payment] Transaction 266 processed
+2026-05-09 12:54:03 INFO [Auth] User login successful - session_id=9095
+2026-05-09 12:54:04 INFO [Payment] Transaction 165 processed
+2026-05-09 12:54:05 INFO [Payment] Transaction 276 processed
+2026-05-09 12:54:06 INFO [Metrics] CPU Usage: 34%
+2026-05-09 12:54:07 INFO [Payment] Transaction 685 processed
+2026-05-09 12:54:08 INFO [Auth] User login successful - session_id=5557
+2026-05-09 12:54:09 INFO [Metrics] CPU Usage: 23%
+2026-05-09 12:54:10 INFO [Payment] Transaction 761 processed
+2026-05-09 12:54:11 INFO [Payment] Transaction 288 processed
+2026-05-09 12:54:12 INFO [Metrics] CPU Usage: 35%
+2026-05-09 12:54:13 INFO [Auth] User login successful - session_id=3693
+2026-05-09 12:54:14 INFO [Payment] Transaction 162 processed
+2026-05-09 12:54:15 INFO [Metrics] CPU Usage: 18%
+2026-05-09 12:54:16 INFO [Payment] Transaction 121 processed
+2026-05-09 12:54:17 INFO [Payment] Transaction 427 processed
+2026-05-09 12:54:18 INFO [Auth] User login successful - session_id=3977
+2026-05-09 12:54:19 INFO [Payment] Transaction 122 processed
+2026-05-09 12:54:20 INFO [Payment] Transaction 986 processed
+2026-05-09 12:54:21 INFO [Metrics] CPU Usage: 26%
+2026-05-09 12:54:22 INFO [Payment] Transaction 474 processed
+2026-05-09 12:54:23 INFO [Auth] User login successful - session_id=2627
+2026-05-09 12:54:24 INFO [Metrics] CPU Usage: 18%
+2026-05-09 12:54:25 INFO [Payment] Transaction 443 processed
+2026-05-09 12:54:26 INFO [Payment] Transaction 399 processed
+2026-05-09 12:54:27 INFO [Metrics] CPU Usage: 27%
+2026-05-09 12:54:28 INFO [Auth] User login successful - session_id=9712
+2026-05-09 12:54:29 INFO [Payment] Transaction 746 processed
+2026-05-09 12:54:30 INFO [Metrics] CPU Usage: 27%
+2026-05-09 12:54:31 INFO [Payment] Transaction 738 processed
+2026-05-09 12:54:32 INFO [Payment] Transaction 937 processed
+2026-05-09 12:54:33 INFO [Auth] User login successful - session_id=5636
+2026-05-09 12:54:34 INFO [Payment] Transaction 573 processed
+2026-05-09 12:54:35 INFO [Payment] Transaction 771 processed
+2026-05-09 12:54:36 INFO [Metrics] CPU Usage: 21%
+2026-05-09 12:54:37 INFO [Payment] Transaction 795 processed
+2026-05-09 12:54:38 INFO [Auth] User login successful - session_id=6761
+2026-05-09 12:54:39 INFO [Metrics] CPU Usage: 10%
+2026-05-09 12:54:40 INFO [Payment] Transaction 808 processed
+2026-05-09 12:54:41 INFO [Payment] Transaction 307 processed
+2026-05-09 12:54:42 INFO [Metrics] CPU Usage: 37%
+2026-05-09 12:54:43 INFO [Auth] User login successful - session_id=5303
+2026-05-09 12:54:44 INFO [Payment] Transaction 699 processed
+2026-05-09 12:54:45 INFO [Metrics] CPU Usage: 27%
+2026-05-09 12:54:46 INFO [Payment] Transaction 540 processed
+2026-05-09 12:54:47 INFO [Payment] Transaction 612 processed
+2026-05-09 12:54:48 INFO [Auth] User login successful - session_id=6815
+2026-05-09 12:54:49 INFO [Payment] Transaction 610 processed
+2026-05-09 12:54:50 INFO [Payment] Transaction 654 processed
+2026-05-09 12:54:51 INFO [Metrics] CPU Usage: 22%
+2026-05-09 12:54:52 INFO [Payment] Transaction 883 processed
+2026-05-09 12:54:53 INFO [Auth] User login successful - session_id=7916
+2026-05-09 12:54:54 INFO [Metrics] CPU Usage: 28%
+2026-05-09 12:54:55 INFO [Payment] Transaction 901 processed
+2026-05-09 12:54:56 INFO [Payment] Transaction 356 processed
+2026-05-09 12:54:57 INFO [Metrics] CPU Usage: 13%
+2026-05-09 12:54:58 INFO [Auth] User login successful - session_id=1407
+2026-05-09 12:54:59 INFO [Payment] Transaction 365 processed
+2026-05-09 12:55:00 INFO [Metrics] CPU Usage: 33%
+2026-05-09 12:55:01 INFO [Payment] Transaction 482 processed
+2026-05-09 12:55:02 INFO [Payment] Transaction 968 processed
+2026-05-09 12:55:03 INFO [Auth] User login successful - session_id=7619
+2026-05-09 12:55:04 INFO [Payment] Transaction 973 processed
+2026-05-09 12:55:05 INFO [Payment] Transaction 707 processed
+2026-05-09 12:55:06 INFO [Metrics] CPU Usage: 32%
+2026-05-09 12:55:07 INFO [Payment] Transaction 920 processed
+2026-05-09 12:55:08 INFO [Auth] User login successful - session_id=4418
+2026-05-09 12:55:09 INFO [Metrics] CPU Usage: 21%
+2026-05-09 12:55:10 INFO [Payment] Transaction 515 processed
+2026-05-09 12:55:11 INFO [Payment] Transaction 165 processed
+2026-05-09 12:55:12 INFO [Metrics] CPU Usage: 18%
+2026-05-09 12:55:13 INFO [Auth] User login successful - session_id=1381
+2026-05-09 12:55:14 INFO [Payment] Transaction 606 processed
+2026-05-09 12:55:15 INFO [Metrics] CPU Usage: 32%
+2026-05-09 12:55:16 INFO [Payment] Transaction 638 processed
+2026-05-09 12:55:17 INFO [Payment] Transaction 282 processed
+2026-05-09 12:55:18 INFO [Auth] User login successful - session_id=6112
+2026-05-09 12:55:19 INFO [Payment] Transaction 924 processed
+2026-05-09 12:55:20 INFO [Payment] Transaction 193 processed
+2026-05-09 12:55:21 INFO [Metrics] CPU Usage: 19%
+2026-05-09 12:55:22 INFO [Payment] Transaction 235 processed
+2026-05-09 12:55:23 INFO [Auth] User login successful - session_id=4413
+2026-05-09 12:55:24 INFO [Metrics] CPU Usage: 37%
+2026-05-09 12:55:25 INFO [Payment] Transaction 594 processed
+2026-05-09 12:55:26 INFO [Payment] Transaction 725 processed
+2026-05-09 12:55:27 INFO [Metrics] CPU Usage: 26%
+2026-05-09 12:55:28 WARN [DB] Connection pool at 60% capacity
+2026-05-09 12:55:29 WARN [DB] Connection pool at 61% capacity
+2026-05-09 12:55:30 WARN [DB] Connection pool at 62% capacity
+2026-05-09 12:55:31 WARN [DB] Connection pool at 63% capacity
+2026-05-09 12:55:32 WARN [DB] Connection pool at 64% capacity
+2026-05-09 12:55:33 WARN [DB] Connection pool at 65% capacity
+2026-05-09 12:55:34 WARN [DB] Connection pool at 66% capacity
+2026-05-09 12:55:35 WARN [DB] Connection pool at 67% capacity
+2026-05-09 12:55:36 WARN [DB] Connection pool at 68% capacity
+2026-05-09 12:55:37 WARN [DB] Connection pool at 69% capacity
+2026-05-09 12:55:38 WARN [DB] Connection pool at 70% capacity
+2026-05-09 12:55:39 WARN [DB] Connection pool at 71% capacity
+2026-05-09 12:55:40 WARN [DB] Connection pool at 72% capacity
+2026-05-09 12:55:41 WARN [DB] Connection pool at 73% capacity
+2026-05-09 12:55:42 WARN [DB] Connection pool at 74% capacity
+2026-05-09 12:55:43 WARN [DB] Connection pool at 75% capacity
+2026-05-09 12:55:44 WARN [DB] Connection pool at 76% capacity
+2026-05-09 12:55:45 WARN [DB] Connection pool at 77% capacity
+2026-05-09 12:55:46 WARN [DB] Connection pool at 78% capacity
+2026-05-09 12:55:47 WARN [DB] Connection pool at 79% capacity
+2026-05-09 12:55:48 ERROR [DB] Timeout waiting for connection (30s)
+2026-05-09 12:55:49 ERROR [DB] Timeout waiting for connection (30s)
+2026-05-09 12:55:50 ERROR [DB] Timeout waiting for connection (30s)
+2026-05-09 12:55:51 ERROR [DB] Timeout waiting for connection (30s)
+2026-05-09 12:55:52 ERROR [DB] Timeout waiting for connection (30s)
+2026-05-09 12:55:53 ERROR [DB] Timeout waiting for connection (30s)
+2026-05-09 12:55:54 ERROR [DB] Timeout waiting for connection (30s)
+2026-05-09 12:55:55 ERROR [DB] Timeout waiting for connection (30s)
+2026-05-09 12:55:56 ERROR [DB] Timeout waiting for connection (30s)
+2026-05-09 12:55:57 ERROR [DB] Timeout waiting for connection (30s)
+2026-05-09 12:55:58 ERROR [DB] Timeout waiting for connection (30s)
+2026-05-09 12:55:59 ERROR [DB] Timeout waiting for connection (30s)
+2026-05-09 12:56:00 ERROR [DB] Timeout waiting for connection (30s)
+2026-05-09 12:56:01 ERROR [DB] Timeout waiting for connection (30s)
+2026-05-09 12:56:02 ERROR [DB] Timeout waiting for connection (30s)
+2026-05-09 12:56:03 ERROR [DB] Timeout waiting for connection (30s)
+2026-05-09 12:56:04 ERROR [DB] Timeout waiting for connection (30s)
+2026-05-09 12:56:05 ERROR [DB] Timeout waiting for connection (30s)
+2026-05-09 12:56:06 ERROR [DB] Timeout waiting for connection (30s)
+2026-05-09 12:56:07 ERROR [DB] Timeout waiting for connection (30s)
+2026-05-09 12:56:08 INFO [Auth] Retrying login - session_id=6939
+2026-05-09 12:56:09 INFO [Auth] Retrying login - session_id=8363
+2026-05-09 12:56:10 INFO [Auth] Retrying login - session_id=9422
+2026-05-09 12:56:11 INFO [Auth] Retrying login - session_id=2386
+2026-05-09 12:56:12 INFO [Auth] Retrying login - session_id=5712
+2026-05-09 12:56:13 FATAL [Kernel] java.lang.OutOfMemoryError: Java heap space
+2026-05-09 12:56:14 INFO [Auth] Retrying login - session_id=6351
+2026-05-09 12:56:15 INFO [Auth] Retrying login - session_id=6949
+2026-05-09 12:56:16 INFO [Auth] Retrying login - session_id=2387
+2026-05-09 12:56:17 INFO [Auth] Retrying login - session_id=7907

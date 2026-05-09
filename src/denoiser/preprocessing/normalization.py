@@ -31,9 +31,11 @@ _NORMALIZATION_RULES = {
     # regular words that happen to contain a-f.
     "HEX": r"(?i)\b0x[0-9a-f]+\b|\b[0-9a-f]{10,}\b",
     
-    # Numeric IDs, standalone numbers, or numbers attached to word boundaries
-    # (e.g. 1234, id=567)
+    # Standalone numbers or numbers attached to word boundaries
     "NUMBER": r"\b\d+\b",
+    
+    # Catch-all for any sequence containing numbers (very aggressive for 1M log tests)
+    "ID_NUMBER": r"\d+",
 }
 
 

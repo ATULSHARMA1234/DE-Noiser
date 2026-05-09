@@ -40,4 +40,6 @@ class Cluster:
     templates: list[str] = dataclasses.field(default_factory=list)
     label: str | None = None  # Human-provided label/name for the cluster
     is_acknowledged: bool = False  # Whether the team has marked this cluster as "known/safe"
+    org_id: str | None = None
+    team_id: str | None = None
 

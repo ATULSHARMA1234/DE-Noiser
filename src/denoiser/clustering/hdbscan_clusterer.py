@@ -29,6 +29,7 @@ class LogClusterer:
         unique_templates: list[str],
         vectors: np.ndarray,
         template_to_records: dict[str, list[LogRecord]],
+        template_to_counts: dict[str, int],
     ) -> list[Cluster]:
         """Cluster the provided vectors and extract rich metadata.
 
@@ -52,6 +53,7 @@ class LogClusterer:
         # If we have very few unique templates, HDBSCAN might fail or flag everything as noise.
         # Adjust min_cluster_size dynamically if needed, or fallback gracefully.
         n_samples = vectors.shape[0]
+        print(f"\n[NEURAL ENGINE] Analysis of {n_samples} unique semantic patterns starting...")
         actual_min_cluster_size = min(self.min_cluster_size, max(2, n_samples // 2))
         if n_samples < 2:
             actual_min_cluster_size = 2
@@ -64,18 +66,40 @@ class LogClusterer:
             },
         )
 
-        clusterer = hdbscan.HDBSCAN(
-            min_cluster_size=actual_min_cluster_size,
-            min_samples=self.min_samples,
-            metric=self.metric,
-            # allow_single_cluster=True is useful for log data where everything might be one big incident
-            allow_single_cluster=True,
-        )
-
-        try:
-            labels = clusterer.fit_predict(vectors)
-        except Exception as e:
-            raise ClusteringError(f"HDBSCAN clustering failed: {e}") from e
+        # --- NEURAL SAMPLING OPTIMIZATION ---
+        MAX_SAMPLES = 50000
+        if n_samples > MAX_SAMPLES:
+            logger.info(f"Large dataset detected ({n_samples} templates). Using Neural Sampling (50k) for speed.")
+            # Pick a random sample for training the clusterer
+            indices = np.random.choice(n_samples, MAX_SAMPLES, replace=False)
+            train_vectors = vectors[indices]
+            
+            clusterer = hdbscan.HDBSCAN(
+                min_cluster_size=actual_min_cluster_size,
+                min_samples=self.min_samples,
+                metric=self.metric,
+                prediction_data=True, # Critical for assigning labels to non-sampled data
+                allow_single_cluster=True,
+            )
+            
+            try:
+                clusterer.fit(train_vectors)
+                # Assign labels to ALL vectors based on the sampled model
+                labels, strengths = hdbscan.prediction.approximate_predict(clusterer, vectors)
+            except Exception as e:
+                raise ClusteringError(f"Neural Sampling fit failed: {e}") from e
+        else:
+            # Standard path for smaller datasets
+            clusterer = hdbscan.HDBSCAN(
+                min_cluster_size=actual_min_cluster_size,
+                min_samples=self.min_samples,
+                metric=self.metric,
+                allow_single_cluster=True,
+            )
+            try:
+                labels = clusterer.fit_predict(vectors)
+            except Exception as e:
+                raise ClusteringError(f"HDBSCAN clustering failed: {e}") from e
 
         # Extract metadata
         unique_labels = set(labels)
@@ -108,8 +132,8 @@ class LogClusterer:
             representative_source = records[0].source if records else "-"
             representative_line = records[0].line_number if records else 0
             
-            # Calculate total size (total raw log lines, not just unique templates)
-            total_size = sum(len(template_to_records.get(t, [])) for t in cluster_templates)
+            # Calculate total size (total raw log lines, using our new counter)
+            total_size = sum(template_to_counts.get(t, 0) for t in cluster_templates)
 
             clusters.append(
                 Cluster(

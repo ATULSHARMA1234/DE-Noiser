@@ -1,0 +1,9 @@
+{
+  "store_raw_logs": true,
+  "redact_pii": true,
+  "llm_model": "llama-3.3-70b",
+  "confidence_threshold": 70,
+  "retention_days": 30,
+  "sampling_threshold": 50000,
+  "auto_analyze": false
+}

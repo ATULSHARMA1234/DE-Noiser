@@ -33,6 +33,13 @@ from denoiser.preprocessing.deduplication import Deduplicator
 from denoiser.preprocessing.normalization import Normalizer
 from denoiser.preprocessing.redaction import Redactor
 from denoiser.reporting.formatters import Reporter
+from denoiser.storage.database import init_db, save_analysis
+import os
+import time
+from datetime import datetime
+
+# Initialize the persistent database
+init_db()
 
 app = typer.Typer(
     name="semantic-log",
@@ -81,12 +88,20 @@ def analyze(
         help="Redact secrets and PII before processing.",
     ),
     intelligence: bool = typer.Option(
-        False, "--intelligence",
+        True, "--intelligence",
         help="Enable LLM-based incident intelligence and root-cause hints.",
     ),
     slack_webhook: str | None = typer.Option(
         None, "--slack-webhook",
         help="Slack Webhook URL to post the report.",
+    ),
+    org_id: str | None = typer.Option(
+        None, "--org",
+        help="The organization ID for tenant isolation.",
+    ),
+    team_id: str | None = typer.Option(
+        None, "--team",
+        help="The team ID for tenant isolation.",
     ),
 ) -> None:
     # 1. Update config based on CLI options
@@ -145,13 +160,29 @@ def analyze(
     redactor = Redactor(enabled=redact)
     normalizer = Normalizer()
     deduper = Deduplicator()
+    
+    BATCH_SIZE = 10000
+    batch = []
 
-    with console.status("[bold green]Ingesting and normalizing logs...[/bold green]"):
+    with console.status("[bold green]Ingesting and normalizing logs (Batch Mode)...[/bold green]"):
         for record in records_iter:
-            redacted = redactor.redact(record.raw_text)
-            normalized = normalizer.normalize_single(redacted)
-            record.normalized_text = normalized
-            deduper.add(record)
+            batch.append(record)
+            if len(batch) >= BATCH_SIZE:
+                texts = [r.raw_text for r in batch]
+                redacted = [redactor.redact(t) for t in texts]
+                normalized = normalizer.normalize_batch(redacted)
+                for i, r in enumerate(batch):
+                    r.normalized_text = normalized[i]
+                    deduper.add(r)
+                batch = []
+        
+        if batch:
+            texts = [r.raw_text for r in batch]
+            redacted = [redactor.redact(t) for t in texts]
+            normalized = normalizer.normalize_batch(redacted)
+            for i, r in enumerate(batch):
+                r.normalized_text = normalized[i]
+                deduper.add(r)
 
     unique_templates = deduper.get_unique_templates()
     if not unique_templates:
@@ -167,7 +198,7 @@ def analyze(
     with console.status("[bold cyan]Clustering logs...[/bold cyan]"):
         clusterer = LogClusterer()
         clusters = clusterer.fit_predict(
-            unique_templates, vectors, deduper.get_all_groups()
+            unique_templates, vectors, deduper.get_all_groups(), deduper.get_all_counts()
         )
 
     # 6. Detection (Optional)
@@ -211,6 +242,8 @@ def analyze(
         notifier.notify(slack_report)
 
     # 10. Exit logic
+    save_analysis(source, deduper.total_count, llm_payload or {}, clusters, anomalies)
+    
     if fail_on_anomaly and max_severity:
         fail_level = AnomalyLabel(fail_on_anomaly.lower())
         # Ordered severity check hack
@@ -219,6 +252,39 @@ def analyze(
             raise AnomalyThresholdExceeded(
                 f"Anomaly threshold exceeded. Found: {max_severity.value}"
             )
+
+
+# ── agent (THE NERVOUS SYSTEM) ────────────────────────────────────────────────
+@app.command()
+def agent(
+    path: str = typer.Argument(..., help="Path to the log file to monitor."),
+    interval: int = typer.Option(10, "--interval", "-i", help="Batch interval in seconds."),
+):
+    """
+    [THE NERVOUS SYSTEM]
+    Monitor a log file in real-time and push semantic insights to the dashboard.
+    """
+    console.print(f"\n[bold cyan]⚡ Semantic Agent Activated[/bold cyan]")
+    console.print(f"[dim]Monitoring:[/dim] {path}")
+    console.print(f"[dim]Interval:[/dim] {interval}s batches\n")
+
+    last_size = 0
+    if os.path.exists(path):
+        last_size = os.path.getsize(path)
+
+    try:
+        while True:
+            current_size = os.path.getsize(path) if os.path.exists(path) else 0
+            if current_size > last_size:
+                console.print(f"[{datetime.now().strftime('%H:%M:%S')}] 📥 [bold]Signal Detected[/bold] - Triggering Batch Analysis...")
+                # Run a mini-analysis on the new data
+                # For the demo, we just trigger the full analyze logic on the file
+                analyze(source=path, intelligence=True, format="table")
+                last_size = current_size
+            
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        console.print("\n[bold yellow]Agent Deactivated.[/bold yellow]")
 
 
 # ── build-baseline ───────────────────────────────────────────────────────────

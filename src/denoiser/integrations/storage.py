@@ -34,10 +34,14 @@ class S3Storage:
 
         try:
             logger.info(f"Zipping baseline {local_path}...")
-            shutil.make_archive(tmp_path.replace(".zip", ""), "zip", local_path)
+            # make_archive returns the path to the created zip file
+            zip_file_path = shutil.make_archive(tmp_path.replace(".zip", ""), "zip", local_path)
             
             logger.info(f"Uploading to s3://{self.bucket}/{remote_key}.zip...")
-            self.client.upload_file(tmp_path, self.bucket, f"{remote_key}.zip")
+            self.client.upload_file(zip_file_path, self.bucket, f"{remote_key}.zip")
+            # Cleanup the specific zip file created by make_archive
+            if os.path.exists(zip_file_path):
+                os.remove(zip_file_path)
             return True
         except Exception as e:
             logger.error(f"S3 Upload failed: {e}")

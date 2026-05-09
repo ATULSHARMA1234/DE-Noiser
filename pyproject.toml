@@ -22,32 +22,31 @@ classifiers = [
 dependencies = [
     # --- Data Processing ---
     "polars>=1.0.0",
-
     # --- AI / ML ---
     "sentence-transformers>=3.0.0",
     "hdbscan>=0.8.38",
     "scikit-learn>=1.5.0",
     "numpy>=1.26.0",
-
     # --- Vector Storage ---
     "lancedb>=0.9.0",
-
     # --- CLI & TUI ---
     "typer>=0.12.0",
     "shellingham>=1.5.0",
     "rich>=13.7.0",
-
     # --- Utilities ---
     "pydantic>=2.7.0",
     "pydantic-settings>=2.3.0",
     "orjson>=3.10.0",
-
     # --- Intelligence (Phase 2) ---
     "openai>=1.0.0",
-
     # --- Integrations (Phase 3) ---
     "kubernetes>=29.0.0",
     "boto3>=1.34.0",
+    "fastapi>=0.136.1",
+    "uvicorn>=0.46.0",
+    "sqlalchemy>=2.0.49",
+    "websockets>=16.0",
+    "python-multipart>=0.0.27",
 ]
 
 [dependency-groups]

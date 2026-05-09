@@ -36,3 +36,5 @@ class LogRecord:
     timestamp: datetime | None = None
     metadata: dict[str, Any] = dataclasses.field(default_factory=dict)
     normalized_text: str = ""
+    org_id: str | None = None
+    team_id: str | None = None

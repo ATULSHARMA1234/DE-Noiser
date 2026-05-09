@@ -24,3 +24,10 @@ Thumbs.db
 *.index
 baselines/*.index
 .cache/
+
+# Database
+*.db
+# Data
+data/stress_test_1M.log
+# Env
+.env

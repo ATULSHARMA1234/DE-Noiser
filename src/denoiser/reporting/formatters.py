@@ -82,6 +82,11 @@ class Reporter:
                     cluster_label_str = worst_result.label.value
                     cluster_dist_str = f"{worst_result.distance:.2f}"
                     color = self._color_for_label(worst_result.label)
+            
+            # Standalone Anomaly detection (Cluster -1 is noise/outlier)
+            if c.cluster_id == -1 and cluster_label_str == "-":
+                cluster_label_str = "OUTLIER"
+                color = "red"
 
             cid_str = str(c.cluster_id) if c.cluster_id != -1 else "NOISE"
             

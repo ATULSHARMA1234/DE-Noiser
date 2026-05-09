@@ -1,4 +1,0 @@
-2023-10-25T14:30:05Z ERROR Database connection failed: timeout after 3000ms
-2023-10-25T14:30:10Z WARN High memory usage: 85%
-2023-10-25T14:30:15Z FATAL Segfault at memory address 0x1a2b3c4d
-2023-10-25T14:30:16Z CRITICAL Ransomware detected on volume /data

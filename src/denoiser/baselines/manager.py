@@ -35,18 +35,46 @@ class BaselineManager:
         pa.field("representative_raw", pa.string()),
     ])
 
-    def __init__(self, path: Path | str | None = None) -> None:
+    def __init__(self, path: Path | str | None = None, org_id: str | None = None) -> None:
         """
         Parameters
         ----------
         path : Path | str | None
-            The path to the baseline directory (LanceDB dataset).
-            If None, uses the default path from settings.
+            The path to the baseline directory. Can be a local path,
+            or a remote URI (e.g., sld://name or s3://bucket/key).
+        org_id : str | None
+            The organization ID for tenant isolation.
         """
-        self.path = Path(path) if path else settings.default_baseline_path
+        self.raw_path = str(path) if path else str(settings.default_baseline_path)
+        self.org_id = org_id
+        self.path = self._resolve_path(self.raw_path)
         self.metadata_path = self.path / "metadata.json"
         self._db: lancedb.DBConnection | None = None
         self._table: lancedb.table.Table | None = None
+
+    def _resolve_path(self, path_str: str) -> Path:
+        """Resolve a potentially remote path to a local directory."""
+        if path_str.startswith(("s3://", "sld://")):
+            # It's a managed baseline.
+            # Local cache: ~/.sld/baselines/<org_id>/<name>
+            name = path_str.replace("s3://", "").replace("sld://", "").split("/")[0]
+            
+            # Scoped path for multi-tenancy
+            scope = self.org_id if self.org_id else "default"
+            cache_dir = Path.home() / ".sld" / "baselines" / scope / name
+            
+            if not cache_dir.exists():
+                logger.info(f"Managed baseline '{name}' for tenant '{scope}' not found locally. Pulling...")
+                from denoiser.integrations.storage import S3Storage
+                storage = S3Storage()
+                # S3 Key also includes org scope for true isolation
+                remote_key = f"{scope}/{name}"
+                if not storage.pull(remote_key, cache_dir):
+                    raise BaselineError(f"Could not pull managed baseline '{name}' for tenant '{scope}' from S3.")
+            
+            return cache_dir
+        
+        return Path(path_str)
 
     def _get_db(self) -> lancedb.DBConnection:
         if self._db is None:

@@ -230,7 +230,8 @@ class DenoiserConfig(BaseSettings):
         description="Enable LLM-based incident summaries and root-cause hints.",
     )
     llm_model: str = Field(
-        default="gpt-4o",
+        default="llama-3.3-70b-versatile",
+        env="SLD_LLM_MODEL",
         description="The LLM model to use for intelligence.",
     )
     llm_api_key: str | None = Field(

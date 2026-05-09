@@ -98,41 +98,37 @@ class LocalEmbeddingProvider:
 
     def _load_model(self) -> None:
         if self._model is None:
-            logger.info("Loading embedding model", extra={"model": self.model_name})
+            import torch
+            device = "cpu"
+            if torch.cuda.is_available():
+                device = "cuda"
+            elif torch.backends.mps.is_available():
+                device = "mps"
+            
+            logger.info("Loading embedding model", extra={"model": self.model_name, "device": device})
             try:
-                # Disabling progress bars in internal huggingface/sentence_transformers calls
-                # to prevent console spam
-                self._model = SentenceTransformer(self.model_name)
+                self._model = SentenceTransformer(self.model_name, device=device)
             except Exception as e:
                 raise EmbeddingError(f"Failed to load model {self.model_name}: {e}") from e
 
     def embed(self, texts: list[str]) -> np.ndarray:
-        """Embed a list of text templates into vectors.
-
-        Automatically uses the local SQLite cache to skip recomputing known templates.
-
-        Parameters
-        ----------
-        texts : list[str]
-            List of normalized log templates.
-
-        Returns
-        -------
-        np.ndarray
-            A 2D numpy array of shape (len(texts), dimension).
-        """
+        """Embed a list of text templates into vectors with chunked caching."""
         if not texts:
             return np.empty((0, self.dimension), dtype=np.float32)
 
-        logger.debug("Embedding batch", extra={"count": len(texts)})
+        logger.debug("Embedding request", extra={"count": len(texts)})
 
-        # 1. Check cache
-        cached = self.cache.get_many(texts)
+        # 1. Check cache in chunks (to avoid SQLite IN limit)
+        cached = {}
+        chunk_size = 500
+        for i in range(0, len(texts), chunk_size):
+            chunk = texts[i:i + chunk_size]
+            cached.update(self.cache.get_many(chunk))
         
         # 2. Identify missing texts
         missing_texts = [t for t in texts if t not in cached]
         
-        # 3. Compute missing
+        # 3. Compute missing with hardware acceleration
         if missing_texts:
             self._load_model()
             assert self._model is not None
