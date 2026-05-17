@@ -16,25 +16,41 @@ Designed for **SREs, Platform Engineers, and DevOps teams** to triage incidents 
 
 ---
 
-## 🚀 Minimal Installation (1-Minute Setup)
+## 🚀 Quick Start (Enterprise Dashboard)
 
-The fastest way to get started is using the provided `Makefile`:
+The project now includes a fully-featured Next.js Enterprise Dashboard.
 
-```bash
-git clone https://github.com/yourusername/semantic-log-denoiser.git
-cd semantic-log-denoiser
+### Prerequisites
+1. **Python 3.10+**
+2. **Node.js (v18+)** and `npm`
+3. **uv** (Python package manager). Install via: `curl -LsSf https://astral.sh/uv/install.sh | sh`
 
-# This creates a venv, installs dependencies, and sets up your .env file
-make install
-
-# Activate the environment
-source .venv/bin/activate
+### 1. Set up the Environment
+Create a `.env` file in the root directory:
+```env
+# Add your AI key for intelligence features (OpenAI / Groq)
+LLM_API_KEY="your-api-key-here"
+DATABASE_URL="sqlite:///./data/semantic_os.db"
 ```
 
-### Configuration
-1. Open the generated `.env` file.
-2. Add your `SLD_LLM_API_KEY` (Groq/OpenAI).
-3. You're ready to go!
+### 2. Start the Backend (FastAPI / AI Engine)
+```bash
+# Install dependencies using uv
+uv sync
+
+# Start the server (runs on port 8000)
+env PYTHONPATH=src uv run python -m uvicorn src.denoiser.api.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+### 3. Start the Frontend (Next.js)
+Open a new terminal window:
+```bash
+cd web
+npm install
+npm run dev
+```
+
+The dashboard will be available at **`http://localhost:3000/app`**.
 
 ---
 
