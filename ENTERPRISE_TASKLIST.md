@@ -1,145 +1,174 @@
-# SemanticOS — Enterprise Production Readiness Tasklist
+# SemanticOS — Unified Enterprise & Competitive Readiness Tasklist
 
-> **Objective:** Transform the current Enterprise MVP into a fully production-ready, deployable, and auditable observability platform that meets SOC2/enterprise compliance standards.
+> **Objective:** Transform SemanticOS from an Enterprise MVP into a production-grade, Zebrium-competitive observability platform — privacy-first, zero-cost, and architecturally equivalent to the industry giants.
 
-> [!IMPORTANT]
-> Each task is **atomic** — it can be completed independently in a single session. Tasks are **sequentially ordered** with no overlapping dependencies. Complete them top-to-bottom.
+> **Rule:** Each task is **atomic** and **sequentially ordered** with no overlapping dependencies. Complete top-to-bottom.
 
 ---
 
-## Phase 1: Core Backend Hardening
+## Phase 1: Core Backend Hardening (Tasks 1–8)
 *Goal: Make the Python backend bulletproof, testable, and production-safe.*
 
 | # | Task | Description | Files Affected |
 |---|------|-------------|----------------|
-| 1 | **Add structured logging with correlation IDs** | Replace all `print()` and ad-hoc `logger` calls in `api/main.py` with the existing `denoiser.logging` module. Every API request should generate a unique `request_id` (UUID) that is attached to all log lines for that request, enabling end-to-end tracing. | `api/main.py`, `logging.py` |
-| 2 | **Add input validation with Pydantic models** | Replace all raw `dict` request bodies in the API (e.g., `/analyze`, `/settings`, `/ingest`) with strongly-typed Pydantic `BaseModel` classes. This prevents malformed payloads from crashing the server. | `api/main.py` (new file: `api/schemas.py`) |
-| 3 | **Add global exception handler middleware** | Create a FastAPI exception handler that catches all unhandled errors, logs them with the correlation ID from Task 1, and returns a clean JSON error response `{"error": "...", "request_id": "..."}` instead of a raw 500 traceback. | `api/main.py` |
-| 4 | **Add rate limiting to the `/ingest` endpoint** | Install `slowapi` and apply a rate limit (e.g., 100 requests/minute per IP) to the `/ingest` webhook to prevent abuse from misconfigured FluentBit agents flooding the server. | `api/main.py`, `pyproject.toml` |
-| 5 | **Migrate database from SQLite to PostgreSQL** | Update the SQLAlchemy `DATABASE_URL` to read from the `.env` file. Replace the `check_same_thread` SQLite-specific arg with a conditional check. Add `psycopg2-binary` to `pyproject.toml`. Test with both SQLite (local dev) and PostgreSQL (production). | `storage/db.py`, `pyproject.toml`, `.env` |
-| 6 | **Add Alembic database migrations** | Initialize Alembic in the project root. Create an initial migration from the current `Incident` and `AnalysisRun` models. This replaces the manual `ALTER TABLE` scripts and ensures schema changes are versioned and reproducible across environments. | New: `alembic/`, `alembic.ini` |
-| 7 | **Write unit tests for the analysis pipeline** | Create a `tests/` directory. Write pytest tests for: (a) `LogReader` ingestion, (b) `Normalizer` preprocessing, (c) `HDBSCANClusterer.fit_predict()` with a small sample dataset, (d) `PII Redactor` with known sensitive strings. Target: 80%+ coverage on core modules. | New: `tests/test_ingestion.py`, `tests/test_clustering.py`, `tests/test_redaction.py` |
-| 8 | **Write integration tests for all API endpoints** | Using `httpx.AsyncClient` and FastAPI's `TestClient`, write tests that hit every endpoint (`/health`, `/sources`, `/analyze`, `/incidents`, `/settings`, `/ingest`) and assert correct status codes and response shapes. | New: `tests/test_api.py` |
+| 1 | **Structured logging with correlation IDs** | Replace ad-hoc logger calls with `denoiser.logging`. Attach a unique `request_id` (UUID) to every API request for end-to-end tracing. | `api/main.py`, `logging.py` |
+| 2 | **Pydantic input validation** | Replace raw `dict` request bodies with strongly-typed Pydantic `BaseModel` classes for `/analyze`, `/settings`, `/ingest`. | `api/main.py`, new: `api/schemas.py` |
+| 3 | **Global exception handler middleware** | Catch all unhandled errors, log with correlation ID, return clean `{"error": "...", "request_id": "..."}` instead of raw 500 tracebacks. | `api/main.py` |
+| 4 | **Rate limiting on `/ingest`** | Install `slowapi`, apply 100 req/min per IP to prevent misconfigured FluentBit agents from flooding the server. | `api/main.py`, `pyproject.toml` |
+| 5 | **PostgreSQL migration** | Update SQLAlchemy `DATABASE_URL` to support both SQLite (dev) and PostgreSQL (prod). Add `psycopg2-binary`. | `storage/db.py`, `pyproject.toml`, `.env` |
+| 6 | **Alembic database migrations** | Initialize Alembic, create initial migration from current models. Version all schema changes. | New: `alembic/`, `alembic.ini` |
+| 7 | **Unit tests for analysis pipeline** | Pytest tests for `LogReader`, `Normalizer`, `HDBSCANClusterer.fit_predict()`, `PII Redactor`. Target 80%+ coverage. | New: `tests/test_ingestion.py`, `tests/test_clustering.py`, `tests/test_redaction.py` |
+| 8 | **Integration tests for API endpoints** | Using `httpx.AsyncClient`, test every endpoint and assert correct status codes and response shapes. | New: `tests/test_api.py` |
 
 ---
 
-## Phase 2: Authentication & Authorization
+## Phase 2: Cross-Service Causal Correlation (Tasks 9–13)
+*Goal: Automatically detect causal chains across multiple services — the #1 feature gap vs Zebrium.*
+
+| # | Task | Description | Files Affected |
+|---|------|-------------|----------------|
+| 9 | **Universal timestamp extractor** | Create a `TimestampExtractor` that parses ISO 8601, Unix epoch, syslog, AWS CloudWatch, and Docker compose timestamp formats into UTC epoch milliseconds. | New: `preprocessing/timestamp.py` |
+| 10 | **Multi-source batch analysis** | Extend `/analyze` to accept `sources: List[str]`. Ingest all sources into a single Polars DataFrame with a `source_label` column, then cluster together. | `api/main.py`, `api/schemas.py` |
+| 11 | **Temporal proximity causal scorer** | After clustering, compare cluster pairs across different sources. If they spike within a 500ms window, assign a causal correlation score. | New: `detection/causal_scorer.py` |
+| 12 | **Service topology graph UI** | Build `/app/topology` page with an interactive force-directed graph (`react-flow`) showing services as nodes and causal links as weighted edges. Clicking an edge shows correlated clusters side-by-side. | New: `web/src/app/app/topology/page.tsx` |
+| 13 | **LLM causal chain narration** | Feed correlated cluster pairs to the LLM: *"Service A errored at T1, Service B errored at T1+200ms. Explain the causal chain."* Output: plain-English forensic narrative. | `intelligence/llm.py` |
+
+---
+
+## Phase 3: System Telemetry & Auto-Metrics (Tasks 14–17)
+*Goal: Capture host-level metrics automatically — closing the APM gap vs Datadog.*
+
+| # | Task | Description | Files Affected |
+|---|------|-------------|----------------|
+| 14 | **psutil system metrics collector** | Background agent collecting CPU, memory, disk I/O, network drops every 5s. Writes structured JSON to `data/metrics_stream.jsonl`. | New: `telemetry/metrics_collector.py`, `pyproject.toml` |
+| 15 | **Metrics correlation engine** | During analysis, load the metrics stream alongside log clusters. For each incident cluster, find the ±30s metrics window and attach context (e.g., "CPU at 98%"). | New: `detection/metrics_correlator.py` |
+| 16 | **Dashboard system vitals panel** | Add real-time sparkline charts for CPU, Memory, Disk I/O, and Network to the Command Center dashboard. | `web/src/app/app/page.tsx` |
+| 17 | **eBPF kernel tracing (Linux-only, optional)** | Use `bcc`/`bpftrace` to capture TCP retransmits, DNS latency, OOM kills. Write as structured events into the ingestion pipeline. Requires root. | New: `telemetry/ebpf_collector.py` |
+
+---
+
+## Phase 4: Authentication & Authorization (Tasks 18–25)
 *Goal: Lock down the platform so only authorized users can access it.*
 
 | # | Task | Description | Files Affected |
 |---|------|-------------|----------------|
-| 9 | **Add a User model and password hashing** | Create a `User` SQLAlchemy model with fields: `id`, `email`, `hashed_password`, `role` (enum: `ADMIN`, `ANALYST`, `VIEWER`), `created_at`. Use `passlib[bcrypt]` for password hashing. Add a CLI command or seed script to create the first admin user. | `storage/db.py`, new: `api/auth.py` |
-| 10 | **Implement JWT authentication on the backend** | Install `python-jose[cryptography]`. Create `/auth/login` (returns JWT token) and `/auth/me` (returns current user) endpoints. Create a `get_current_user` FastAPI dependency that extracts and validates the JWT from the `Authorization: Bearer` header. | `api/auth.py`, `api/main.py`, `pyproject.toml` |
-| 11 | **Protect all API routes with auth middleware** | Apply the `get_current_user` dependency to every endpoint except `/health` and `/auth/login`. The `/ingest` endpoint should accept either a JWT or a static API key (for machine-to-machine like FluentBit). | `api/main.py` |
-| 12 | **Add role-based access control (RBAC)** | Create a `require_role()` dependency. Apply it so: `VIEWER` can only GET data; `ANALYST` can resolve/reopen incidents; `ADMIN` can delete sources, change settings, and manage users. Return `403 Forbidden` for unauthorized actions. | `api/auth.py`, `api/main.py` |
-| 13 | **Build the Login page on the frontend** | Create a new `/login` route in Next.js with email/password fields. On submit, call `POST /auth/login`, store the returned JWT in `localStorage`, and redirect to `/app`. Style it to match the existing dark glassmorphic theme. | New: `web/src/app/login/page.tsx` |
-| 14 | **Add auth token to all frontend API calls** | Update `src/lib/api.ts` to automatically attach the `Authorization: Bearer <token>` header to every request. Add a global `401` interceptor that redirects to `/login` if the token expires. | `web/src/lib/api.ts` |
-| 15 | **Add a route guard to protect the dashboard** | Create a React context provider (`AuthProvider`) that checks for a valid JWT on mount. If no token exists, redirect to `/login`. Wrap the `/app` layout with this provider. | New: `web/src/context/AuthContext.tsx`, `web/src/app/app/layout.tsx` |
-| 16 | **Build the User Management page (Admin only)** | Create a new `/app/users` page visible only to `ADMIN` role. It should list all users, allow creating new users (with role assignment), and allow deactivating existing users. Add a "Users" link to the sidebar. | New: `web/src/app/app/users/page.tsx`, `web/src/app/app/layout.tsx` |
+| 18 | **User model and password hashing** | SQLAlchemy `User` model with `id`, `email`, `hashed_password`, `role` (ADMIN/ANALYST/VIEWER). Use `passlib[bcrypt]`. Seed script for first admin. | `storage/db.py`, new: `api/auth.py` |
+| 19 | **JWT authentication** | Install `python-jose[cryptography]`. Create `/auth/login` and `/auth/me` endpoints. Build a `get_current_user` FastAPI dependency. | `api/auth.py`, `api/main.py`, `pyproject.toml` |
+| 20 | **Protect all API routes** | Apply `get_current_user` to every endpoint except `/health` and `/auth/login`. `/ingest` accepts JWT or static API key. | `api/main.py` |
+| 21 | **Role-based access control (RBAC)** | `require_role()` dependency. VIEWER=read-only, ANALYST=resolve incidents, ADMIN=delete/settings/users. 403 for unauthorized. | `api/auth.py`, `api/main.py` |
+| 22 | **Login page** | New `/login` route with email/password fields. Store JWT in `localStorage`, redirect to `/app`. Match dark glassmorphic theme. | New: `web/src/app/login/page.tsx` |
+| 23 | **Auth token in all API calls** | Update `api.ts` to attach `Authorization: Bearer` header. Add global 401 interceptor → redirect to `/login`. | `web/src/lib/api.ts` |
+| 24 | **Route guard** | `AuthProvider` context that checks for valid JWT on mount. Wrap `/app` layout. | New: `web/src/context/AuthContext.tsx`, `web/src/app/app/layout.tsx` |
+| 25 | **User management page (Admin)** | New `/app/users` page: list users, create new users with role, deactivate. Sidebar link. | New: `web/src/app/app/users/page.tsx` |
 
 ---
 
-## Phase 3: Alerting & Notification Integrations
-*Goal: Push critical incidents to engineers automatically, don't wait for them to check the dashboard.*
+## Phase 5: Alerting & Notifications (Tasks 26–30)
+*Goal: Push critical incidents automatically — don't wait for dashboard checks.*
 
 | # | Task | Description | Files Affected |
 |---|------|-------------|----------------|
-| 17 | **Connect Slack webhook to the API** | The `SlackNotifier` class already exists in `integrations/slack.py`. Wire it into the `/analyze` endpoint so that when an analysis completes with `impact_score > 0.7`, it automatically sends a formatted Slack Block Kit message to the configured webhook URL. Read the webhook URL from settings. | `api/main.py`, `integrations/slack.py` |
-| 18 | **Add a Slack webhook configuration UI** | Add a "Slack Webhook URL" input field to the Settings page. When saved, it persists to `settings.json` via the existing `/settings` API. Add a "Test Notification" button that sends a sample message. | `web/src/app/app/settings/page.tsx` |
-| 19 | **Add email alerting via SMTP** | Create an `EmailNotifier` class that sends HTML-formatted incident alerts via SMTP (configurable host/port/credentials in settings). Trigger it alongside Slack when `impact_score > threshold`. | New: `integrations/email.py`, `api/main.py` |
-| 20 | **Add PagerDuty integration** | Create a `PagerDutyNotifier` class that triggers a PagerDuty incident via their Events API v2 when a `CRITICAL` severity incident is detected. Read the routing key from settings. | New: `integrations/pagerduty.py`, `api/main.py` |
-| 21 | **Build an Alerts History page** | Create a new `/app/alerts` page that shows a chronological log of every notification sent (Slack, Email, PagerDuty) with status (delivered/failed), timestamp, and the linked incident ID. Store alert records in a new `AlertLog` database table. | New: `web/src/app/app/alerts/page.tsx`, `storage/db.py` |
+| 26 | **Wire Slack webhook to analysis** | Connect existing `SlackNotifier` to `/analyze`. Auto-send formatted Block Kit message when `impact_score > 0.7`. | `api/main.py`, `integrations/slack.py` |
+| 27 | **Slack webhook config UI** | Add Slack Webhook URL input to Settings page with "Test Notification" button. | `web/src/app/app/settings/page.tsx` |
+| 28 | **Email alerting via SMTP** | `EmailNotifier` class sending HTML incident alerts. Trigger alongside Slack. | New: `integrations/email.py`, `api/main.py` |
+| 29 | **PagerDuty integration** | `PagerDutyNotifier` using Events API v2 for CRITICAL severity incidents. | New: `integrations/pagerduty.py`, `api/main.py` |
+| 30 | **Alerts history page** | New `/app/alerts` showing chronological log of every sent notification with status/timestamp. New `AlertLog` DB table. | New: `web/src/app/app/alerts/page.tsx`, `storage/db.py` |
 
 ---
 
-## Phase 4: Audit Trail & Compliance
+## Phase 6: Audit Trail & Compliance (Tasks 31–34)
 *Goal: Meet SOC2 and enterprise compliance requirements.*
 
 | # | Task | Description | Files Affected |
 |---|------|-------------|----------------|
-| 22 | **Create an AuditLog database model** | Add an `AuditLog` table with fields: `id`, `user_id`, `action` (e.g., `INCIDENT_RESOLVED`, `SOURCE_DELETED`, `SETTINGS_CHANGED`), `resource_type`, `resource_id`, `details` (JSON), `ip_address`, `timestamp`. | `storage/db.py` |
-| 23 | **Add audit logging middleware** | Create a FastAPI middleware or utility function that automatically writes an `AuditLog` entry for every mutating action (POST, PUT, DELETE). It should capture the authenticated user (from Task 10), the action performed, and the affected resource. | `api/main.py`, new: `api/audit.py` |
-| 24 | **Build the Audit Log viewer page (Admin only)** | Create a new `/app/audit` page that displays the full audit trail in a searchable, filterable table. Filters: by user, by action type, by date range. Only visible to `ADMIN` role. | New: `web/src/app/app/audit/page.tsx` |
-| 25 | **Add data retention policy enforcement** | Create a background task (using FastAPI's `BackgroundTasks` or APScheduler) that runs daily and deletes `AnalysisRun` and `AuditLog` records older than the configured `retention_days` setting. Log the purge action to the audit trail. | `api/main.py`, new: `api/scheduler.py` |
+| 31 | **AuditLog database model** | Table: `id`, `user_id`, `action`, `resource_type`, `resource_id`, `details` (JSON), `ip_address`, `timestamp`. | `storage/db.py` |
+| 32 | **Audit logging middleware** | Auto-write `AuditLog` entry for every mutating action (POST/PUT/DELETE) with authenticated user info. | `api/main.py`, new: `api/audit.py` |
+| 33 | **Audit log viewer (Admin)** | New `/app/audit` page: searchable, filterable table. Filters by user, action type, date range. | New: `web/src/app/app/audit/page.tsx` |
+| 34 | **Data retention policy** | Background task (APScheduler) deleting old `AnalysisRun` and `AuditLog` records past `retention_days`. | `api/main.py`, new: `api/scheduler.py` |
 
 ---
 
-## Phase 5: Storage & Data Lifecycle
-*Goal: Handle terabyte-scale log volumes without filling up the server disk.*
+## Phase 7: Storage, Data Lifecycle & Distributed Scale (Tasks 35–40)
+*Goal: Handle petabyte-scale log volumes — closing the infrastructure gap vs Splunk.*
 
 | # | Task | Description | Files Affected |
 |---|------|-------------|----------------|
-| 26 | **Add S3 cold storage archival** | Create an `S3Archiver` class that compresses (`gzip`) log files older than 7 days and uploads them to an S3 bucket. After successful upload, delete the local file. Read the S3 bucket name and credentials from `.env`. | New: `integrations/s3_archiver.py` |
-| 27 | **Wire S3 archival into the retention scheduler** | Extend the scheduler from Task 25 to run the S3 archival before deleting local files. Add a "Storage" section to the Settings page showing local disk usage and archived file count. | `api/scheduler.py`, `web/src/app/app/settings/page.tsx` |
-| 28 | **Add log file size limits and rotation** | For the `/ingest` endpoint's `live_stream.log` file: implement automatic rotation when the file exceeds 100MB. Rotate by renaming to `live_stream_<timestamp>.log` and creating a fresh file. Old rotated files are picked up by the S3 archiver. | `api/main.py` |
+| 35 | **S3/MinIO object storage** | Replace local `data/` with S3-compatible object store. `boto3` for AWS, `minio` client for self-hosted. Infinite scale at $0.023/GB/month. | New: `storage/object_store.py`, `api/main.py` |
+| 36 | **Wire S3 into retention scheduler** | Compress logs older than 7 days → upload to S3 → delete local. Add Storage section to Settings page. | `api/scheduler.py`, `web/src/app/app/settings/page.tsx` |
+| 37 | **Log file rotation** | Auto-rotate `live_stream.log` at 100MB. Rename to `live_stream_<timestamp>.log`, create fresh file. Old files archived by S3. | `api/main.py` |
+| 38 | **Persistent vector database (LanceDB)** | Store all embeddings persistently instead of discarding after analysis. Enables semantic search across all historical logs. | New: `storage/vector_store.py`, modify clustering pipeline |
+| 39 | **Redis/Celery async job queue** | Replace synchronous `/analyze` with async jobs. API submits to Redis, workers process independently. Horizontal scaling. | New: `workers/analysis_worker.py`, `api/main.py`, `pyproject.toml` |
+| 40 | **ClickHouse integration (advanced)** | Columnar analytics DB for billion-row SQL queries in seconds. All ingested logs dual-written to ClickHouse. Replaces Splunk's search. | New: `storage/clickhouse_store.py`, `pyproject.toml` |
 
 ---
 
-## Phase 6: Containerization & Deployment
-*Goal: Make the platform deployable anywhere with a single command.*
+## Phase 8: Containerization & Deployment (Tasks 41–45)
+*Goal: Deployable anywhere with a single command.*
 
 | # | Task | Description | Files Affected |
 |---|------|-------------|----------------|
-| 29 | **Create a Dockerfile for the Python backend** | Write a multi-stage Dockerfile: Stage 1 builds dependencies with `uv`, Stage 2 copies the built environment into a slim Python image. Expose port 8000. Use `gunicorn` with `uvicorn` workers for production. | New: `Dockerfile` |
-| 30 | **Create a Dockerfile for the Next.js frontend** | Write a multi-stage Dockerfile: Stage 1 runs `npm run build`, Stage 2 serves the production bundle with `next start`. Expose port 3000. | New: `web/Dockerfile` |
-| 31 | **Create a `docker-compose.yml`** | Define a compose file with 4 services: `api` (Python backend), `web` (Next.js frontend), `db` (PostgreSQL), and `redis` (for WebSocket pub/sub in Task 33). Include health checks, volume mounts for persistent data, and a shared network. | New: `docker-compose.yml` |
-| 32 | **Add HTTPS with Nginx reverse proxy** | Add an `nginx` service to the docker-compose stack that terminates TLS and proxies requests to the `api` and `web` services. Include a self-signed certificate generator for local dev and instructions for mounting real certs in production. | New: `nginx/nginx.conf`, `docker-compose.yml` |
-| 33 | **Add Redis pub/sub for multi-replica WebSockets** | Replace the in-process WebSocket stream with a Redis-backed pub/sub channel. When the `/ingest` endpoint receives logs, it publishes them to a Redis channel. All WebSocket connections subscribe to that channel. This allows the API to scale horizontally. | `api/main.py`, `pyproject.toml` |
+| 41 | **Backend Dockerfile** | Multi-stage: build deps with `uv`, copy to slim image. `gunicorn` + `uvicorn` workers. Port 8000. | New: `Dockerfile` |
+| 42 | **Frontend Dockerfile** | Multi-stage: `npm run build` → `next start`. Port 3000. | New: `web/Dockerfile` |
+| 43 | **docker-compose.yml** | 4 services: `api`, `web`, `db` (PostgreSQL), `redis`. Health checks, volumes, shared network. | New: `docker-compose.yml` |
+| 44 | **HTTPS with Nginx reverse proxy** | Add `nginx` service to compose. TLS termination. Self-signed certs for dev, real certs for prod. | New: `nginx/nginx.conf`, `docker-compose.yml` |
+| 45 | **Redis pub/sub for WebSocket scaling** | Replace in-process WebSocket with Redis pub/sub channel. `/ingest` publishes, all WS connections subscribe. Enables horizontal API scaling. | `api/main.py`, `pyproject.toml` |
 
 ---
 
-## Phase 7: CI/CD & Quality Gates
+## Phase 9: CI/CD & Quality Gates (Tasks 46–49)
 *Goal: Automated testing and deployment on every git push.*
 
 | # | Task | Description | Files Affected |
 |---|------|-------------|----------------|
-| 34 | **Create a GitHub Actions CI pipeline** | Create a workflow that triggers on every push/PR to `main`. Steps: (1) Checkout code, (2) Install Python deps with `uv`, (3) Run `pytest` with coverage report, (4) Run `ruff` linter, (5) Fail the build if coverage < 80% or linter errors exist. | New: `.github/workflows/ci.yml` |
-| 35 | **Add frontend linting and type-checking to CI** | Extend the CI pipeline to: (1) Install Node deps, (2) Run `npx tsc --noEmit` for TypeScript type checking, (3) Run `npx eslint .` for code quality. Fail the build on any errors. | `.github/workflows/ci.yml` |
-| 36 | **Add Docker image build & push to CI** | Extend the CI pipeline with a deployment stage that: (1) Builds both Docker images, (2) Tags them with the git SHA, (3) Pushes them to GitHub Container Registry (`ghcr.io`). Only runs on merges to `main`, not on PRs. | `.github/workflows/ci.yml` |
-| 37 | **Create a Kubernetes Helm chart** | Create a Helm chart (`deploy/helm/semanticos/`) with templates for: Deployment (API + Web), Service, Ingress (with TLS), ConfigMap (for settings), Secret (for API keys), and PersistentVolumeClaim (for data). | New: `deploy/helm/semanticos/` |
+| 46 | **GitHub Actions CI pipeline** | On push/PR: install deps → `pytest` with coverage → `ruff` linter → fail if coverage <80%. | New: `.github/workflows/ci.yml` |
+| 47 | **Frontend linting & type-checking** | Extend CI: `npx tsc --noEmit` + `npx eslint .`. Fail on errors. | `.github/workflows/ci.yml` |
+| 48 | **Docker image build & push** | On merge to `main`: build both images, tag with git SHA, push to `ghcr.io`. | `.github/workflows/ci.yml` |
+| 49 | **Kubernetes Helm chart** | Templates: Deployment, Service, Ingress (TLS), ConfigMap, Secret, PVC. | New: `deploy/helm/semanticos/` |
 
 ---
 
-## Phase 8: Dashboard Polish & Advanced UX
-*Goal: Final UI/UX refinements to make the dashboard feel truly premium.*
+## Phase 10: Dashboard Polish & Advanced UX (Tasks 50–55)
+*Goal: Premium UI/UX to rival commercial observability platforms.*
 
 | # | Task | Description | Files Affected |
 |---|------|-------------|----------------|
-| 38 | **Add dark/light theme toggle** | Create a `ThemeProvider` context that stores the user's preference in `localStorage`. Add a sun/moon toggle button to the top header bar. Update all CSS variables to support both modes. | New: `web/src/context/ThemeContext.tsx`, `web/src/app/globals.css`, `web/src/app/app/layout.tsx` |
-| 39 | **Add keyboard shortcuts** | Implement global keyboard shortcuts: `Cmd+K` opens a command palette (search), `Cmd+R` triggers a new analysis run, `Cmd+L` navigates to Live Pulse, `Escape` closes any open modal. | `web/src/app/app/layout.tsx` |
-| 40 | **Add toast notifications** | Replace all `alert()` calls across the frontend with a toast notification system (e.g., `react-hot-toast`). Show success toasts for actions like "Incident Resolved" and error toasts for failed API calls. | All frontend pages, `pyproject.toml` (web) |
-| 41 | **Add a global loading skeleton** | When any page is fetching data, show animated skeleton placeholders (shimmer effect) instead of blank space or spinner icons. This creates a perceived performance boost. | All frontend pages |
-| 42 | **Add responsive mobile layout** | Add responsive breakpoints so the dashboard is usable on tablets and phones. The sidebar should collapse into a hamburger menu on screens < 768px. Tables should become scrollable card lists. | `web/src/app/app/layout.tsx`, all pages |
-| 43 | **Build an onboarding wizard for first-time users** | When the database has zero analysis runs, show a step-by-step wizard: (1) "Upload your first log file", (2) "Run your first analysis", (3) "Review your incidents". Store completion state in `localStorage`. | New: `web/src/components/OnboardingWizard.tsx` |
+| 50 | **Dark/light theme toggle** | `ThemeProvider` context + sun/moon toggle in header. CSS variables for both modes. | New: `web/src/context/ThemeContext.tsx`, `globals.css` |
+| 51 | **Keyboard shortcuts** | `Cmd+K` command palette, `Cmd+R` new analysis, `Cmd+L` Live Pulse, `Escape` close modals. | `web/src/app/app/layout.tsx` |
+| 52 | **Toast notifications** | Replace all `alert()` with `react-hot-toast`. Success/error toasts for all actions. | All frontend pages |
+| 53 | **Loading skeletons** | Animated shimmer placeholders while data loads instead of blank space. | All frontend pages |
+| 54 | **Responsive mobile layout** | Sidebar collapses to hamburger menu on <768px. Tables become scrollable card lists. | `web/src/app/app/layout.tsx`, all pages |
+| 55 | **Onboarding wizard** | Step-by-step guide for first-time users: upload → analyze → review. Stored in `localStorage`. | New: `web/src/components/OnboardingWizard.tsx` |
 
 ---
 
-## Phase 9: Documentation & Launch
-*Goal: Make the project presentable for open-source release or enterprise demo.*
+## Phase 11: Documentation & Launch (Tasks 56–60)
+*Goal: Open-source release ready.*
 
 | # | Task | Description | Files Affected |
 |---|------|-------------|----------------|
-| 44 | **Write a comprehensive README.md** | Rewrite the README with: project banner image, feature screenshots, architecture diagram (Mermaid), quick start guide (Docker + manual), API reference table, environment variable reference, and contributing guidelines. | `README.md` |
-| 45 | **Add API documentation with Swagger** | FastAPI auto-generates Swagger docs at `/docs`. Ensure all endpoints have proper docstrings, request/response model examples, and tags (e.g., "Analysis", "Incidents", "Auth"). Verify the docs page is clean and complete. | `api/main.py`, `api/schemas.py` |
-| 46 | **Create a demo video / GIF** | Record a 60-second screen recording showing: uploading a log file → running analysis → viewing the Command Center results → drilling into an incident → resolving it. Export as GIF for the README. | New: `docs/demo.gif` |
-| 47 | **Add a CONTRIBUTING.md and CODE_OF_CONDUCT.md** | Write contributor guidelines covering: how to set up the dev environment, branch naming conventions, PR template, and code style rules. Add a standard code of conduct. | New: `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` |
-| 48 | **Add a LICENSE file** | Add an MIT license file (or Apache 2.0 if you prefer) to the repository root. | New: `LICENSE` |
+| 56 | **Comprehensive README.md** | Banner image, feature screenshots, Mermaid architecture diagram, quick start (Docker + manual), API reference, env var reference. | `README.md` |
+| 57 | **Swagger API documentation** | Ensure all endpoints have docstrings, request/response examples, and tags. Verify `/docs` page is clean. | `api/main.py`, `api/schemas.py` |
+| 58 | **Demo video / GIF** | 60-second recording: upload → analyze → Command Center → drill-down → resolve. Export as GIF for README. | New: `docs/demo.gif` |
+| 59 | **CONTRIBUTING.md & CODE_OF_CONDUCT.md** | Dev setup guide, branch naming, PR template, code style rules. Standard code of conduct. | New: `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` |
+| 60 | **LICENSE file** | MIT or Apache 2.0 license. | New: `LICENSE` |
 
 ---
 
-## Summary
+## Master Summary
 
-| Phase | Tasks | Focus Area |
-|-------|-------|------------|
-| **Phase 1** | Tasks 1–8 | Backend hardening, testing, PostgreSQL |
-| **Phase 2** | Tasks 9–16 | Authentication, RBAC, login UI |
-| **Phase 3** | Tasks 17–21 | Slack, Email, PagerDuty alerting |
-| **Phase 4** | Tasks 22–25 | Audit trail, compliance, retention |
-| **Phase 5** | Tasks 26–28 | S3 archival, log rotation |
-| **Phase 6** | Tasks 29–37 | Docker, Kubernetes, CI/CD |
-| **Phase 7** | Tasks 34–37 | GitHub Actions, Helm charts |
-| **Phase 8** | Tasks 38–43 | UI polish, mobile, onboarding |
-| **Phase 9** | Tasks 44–48 | Documentation, demo, launch |
+| Phase | Tasks | Focus | Est. Effort |
+|-------|-------|-------|-------------|
+| **1. Backend Hardening** | 1–8 | Testing, validation, PostgreSQL | 4 days |
+| **2. Causal Correlation** | 9–13 | Multi-source forensics, topology graph | 6.5 days |
+| **3. System Telemetry** | 14–17 | Metrics collection, eBPF, dashboard vitals | 4-9 days |
+| **4. Auth & RBAC** | 18–25 | JWT login, roles, user management | 5 days |
+| **5. Alerting** | 26–30 | Slack, Email, PagerDuty, alert history | 3 days |
+| **6. Audit & Compliance** | 31–34 | Audit trail, SOC2 readiness, retention | 3 days |
+| **7. Scale & Storage** | 35–40 | S3, LanceDB vectors, Redis/Celery, ClickHouse | 6-11 days |
+| **8. Containerization** | 41–45 | Docker, Nginx, Redis pub/sub | 4 days |
+| **9. CI/CD** | 46–49 | GitHub Actions, Helm charts | 3 days |
+| **10. Dashboard Polish** | 50–55 | Theme, shortcuts, toasts, mobile, onboarding | 4 days |
+| **11. Docs & Launch** | 56–60 | README, Swagger, demo, license | 3 days |
+| **Total** | **60 tasks** | | **~45-55 days** |
 
-> [!TIP]
-> **Recommended order for maximum impact:** Start with Phase 1 (hardening) → Phase 6 (Docker) → Phase 2 (Auth) → Phase 9 (docs). This gives you a deployable, secure product with documentation fastest. Phases 3–5 and 7–8 are "depth" features you layer on after the core is solid.
+> **Recommended fast-track:** Phase 1 → Phase 2 → Phase 8 → Phase 4 → Phase 11 gives you a **deployable, differentiated, secure product with documentation** in ~23 days.
