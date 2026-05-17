@@ -16,16 +16,24 @@ from sqlalchemy.orm import Session
 from denoiser.cli.main import Normalizer, Redactor, Deduplicator, LogReader, LocalEmbeddingProvider, LogClusterer, BaselineManager, AnomalyScorer, IncidentIntelligence
 from denoiser.config import settings, AnalysisMode
 from denoiser.storage.db import init_db, get_db, Incident, AnalysisRun
+from denoiser.api.schemas import AnalysisRequest, AnalysisResponse, ResolveRequest, SettingsUpdate
+from denoiser.api.middleware import CorrelationIDMiddleware, RateLimitMiddleware, register_exception_handlers
 
 app = FastAPI(title="SemanticOS — Enterprise Log Intelligence API", version="2.0.0")
 
-# Enable CORS for React development
+# ── Enterprise Middleware Stack (Tasks 1, 3, 4) ──────────────────────────────
+# Order matters: CORS first, then rate limiter, then correlation ID (outermost runs last)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(RateLimitMiddleware, max_requests=100, window_seconds=60)
+app.add_middleware(CorrelationIDMiddleware)
+
+# Register global exception handlers (Task 3)
+register_exception_handlers(app)
 
 # --- Data directory ---
 DATA_DIR = Path("data")
@@ -60,22 +68,7 @@ def on_startup():
         _save_settings(DEFAULT_SETTINGS)
 
 
-# ─── MODELS ───────────────────────────────────────────────────────────────────
-
-class AnalysisRequest(BaseModel):
-    source: str
-    baseline: Optional[str] = None
-    intelligence: bool = True
-    top_n: int = 10
-
-class AnalysisResponse(BaseModel):
-    total_logs: int
-    clusters: List[Any]
-    intelligence: Optional[Any]
-    timestamp: str
-
-class ResolveRequest(BaseModel):
-    resolved: bool = True
+# ─── MODELS — Now imported from denoiser.api.schemas ─────────────────────────
 
 
 # ─── HEALTH ───────────────────────────────────────────────────────────────────

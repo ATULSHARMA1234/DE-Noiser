@@ -1,19 +1,36 @@
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, JSON, Boolean
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+"""
+Database models and session management for SemanticOS.
+
+Task 5: Supports both SQLite (local dev) and PostgreSQL (production).
+The DATABASE_URL is read from environment variables / .env file.
+"""
+
+from __future__ import annotations
+
 import datetime
 import os
 
-# Default to Postgres if specified, otherwise use local SQLite for the "local-first" architecture
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./semantic_os.db")
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, JSON, Boolean
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
 
-engine = create_engine(
-    DATABASE_URL, 
-    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {}
-)
+# ── Task 5: Dual-database support ───────────────────────────────────────────
+# Default to SQLite for zero-config local development.
+# Set DATABASE_URL=postgresql://user:pass@host:5432/semanticos for production.
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./data/semantic_os.db")
+
+# SQLite requires check_same_thread=False; PostgreSQL does not.
+_connect_args = {}
+if DATABASE_URL.startswith("sqlite"):
+    _connect_args["check_same_thread"] = False
+
+engine = create_engine(DATABASE_URL, connect_args=_connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
+
+
+# ── Models ───────────────────────────────────────────────────────────────────
 
 class Incident(Base):
     __tablename__ = "incidents"
@@ -25,21 +42,22 @@ class Incident(Base):
     impact_score = Column(Float)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     resolved_at = Column(DateTime, nullable=True)
-    
+
     # Intelligence
-    summary = Column(JSON) # List of bullet points or string
-    remediation_hints = Column(JSON) # List of hints
-    
+    summary = Column(JSON)  # List of bullet points or string
+    remediation_hints = Column(JSON)  # List of hints
+
     # Linked analysis context
     run_id = Column(String, nullable=True)
     source = Column(String, nullable=True)
     total_logs = Column(Integer, nullable=True)
     cluster_count = Column(Integer, nullable=True)
-    
+
+
 class AnalysisRun(Base):
     __tablename__ = "analysis_runs"
-    
-    id = Column(String, primary_key=True, index=True) # e.g. run_a1b2c3d4
+
+    id = Column(String, primary_key=True, index=True)  # e.g. run_a1b2c3d4
     source = Column(String)
     status = Column(String)
     raw_lines = Column(Integer)
@@ -48,10 +66,16 @@ class AnalysisRun(Base):
     duration_sec = Column(Float)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
+
+# ── Session helpers ──────────────────────────────────────────────────────────
+
 def init_db():
+    """Create all tables if they don't exist."""
     Base.metadata.create_all(bind=engine)
 
+
 def get_db():
+    """FastAPI dependency that yields a database session."""
     db = SessionLocal()
     try:
         yield db
