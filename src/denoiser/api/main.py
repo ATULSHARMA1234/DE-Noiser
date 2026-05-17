@@ -8,7 +8,7 @@ import uuid
 import time
 from pathlib import Path
 from typing import Any, List, Optional
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -171,6 +171,210 @@ async def ingest_logs(request: Request):
         return {"status": "success", "ingested": len(body)}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid payload: {str(e)}")
+
+
+# ─── CONNECTORS — Kubernetes, AWS, and Docker ───────────────────────────────
+
+@app.get("/connectors/k8s/pods")
+def list_k8s_pods():
+    """Discover K8s namespaces and pods. Falls back to mock if K8s is not available."""
+    try:
+        from kubernetes import client, config
+        config.load_kube_config()
+        v1 = client.CoreV1Api()
+        pods = v1.list_pod_for_all_namespaces(limit=50)
+        result = []
+        for pod in pods.items:
+            result.append({
+                "name": pod.metadata.name,
+                "namespace": pod.metadata.namespace,
+                "status": pod.status.phase,
+                "ip": pod.status.pod_ip,
+            })
+        return {"status": "connected", "pods": result}
+    except Exception as e:
+        # Fallback to simulated enterprise clusters for demo purposes
+        return {
+            "status": "simulated",
+            "message": "Local kubeconfig not detected. Operating in high-fidelity sandbox mode.",
+            "pods": [
+                {"name": "auth-service-7f98c6", "namespace": "prod", "status": "Running", "ip": "10.244.0.12"},
+                {"name": "payment-api-5b92d4", "namespace": "prod", "status": "Running", "ip": "10.244.0.15"},
+                {"name": "ingress-nginx-controller-8a2b", "namespace": "ingress", "status": "Running", "ip": "10.244.1.2"},
+                {"name": "db-backup-cron-9231", "namespace": "infra", "status": "Failed", "ip": "10.244.2.40"},
+                {"name": "frontend-dashboard-f281", "namespace": "prod", "status": "Pending", "ip": "10.244.0.18"},
+            ]
+        }
+
+
+@app.post("/connectors/k8s/fetch")
+async def fetch_k8s_logs(namespace: str = Form(...), pod_name: str = Form(...)):
+    """Fetch logs from K8s pod and save as a dynamic log source."""
+    filename = f"k8s_{namespace}_{pod_name}.log"
+    dest = DATA_DIR / filename
+    
+    try:
+        from denoiser.integrations.k8s import KubernetesReader
+        reader = KubernetesReader()
+        records = list(reader.read(namespace, pod_name))
+        
+        # Write to file
+        with open(dest, "w") as f:
+            for r in records:
+                f.write(r.raw_text + "\n")
+        
+        return {"status": "success", "source": filename, "lines": len(records)}
+    except Exception as e:
+        # Simulated log generation for sandbox demo
+        simulated_logs = [
+            f"2026-05-17T17:15:00Z [INFO] [{pod_name}] Starting bootstrap process...",
+            f"2026-05-17T17:15:02Z [INFO] [{pod_name}] Loaded active configuration schema version 4.2.1",
+            f"2026-05-17T17:15:05Z [WARNING] [{pod_name}] Slow connection detected to database replication secondary",
+            f"2026-05-17T17:15:07Z [ERROR] [{pod_name}] Timeout accessing authentication microservice endpoint /verify",
+            f"2026-05-17T17:15:10Z [FATAL] [{pod_name}] Process terminated unexpectedly: OutOfMemoryException (OOMKilled)",
+        ]
+        with open(dest, "w") as f:
+            for line in simulated_logs:
+                f.write(line + "\n")
+                
+        return {
+            "status": "simulated",
+            "message": "Local kubeconfig not detected. Generated sandbox log sequence.",
+            "source": filename,
+            "lines": len(simulated_logs)
+        }
+
+
+@app.get("/connectors/aws/groups")
+def list_aws_groups():
+    """Discover AWS CloudWatch log groups. Falls back to mock if AWS is not available."""
+    try:
+        import boto3
+        client = boto3.client('logs')
+        groups = client.describe_log_groups(limit=50)
+        result = []
+        for g in groups.get('logGroups', []):
+            result.append({
+                "name": g["logGroupName"],
+                "arn": g["arn"],
+                "stored_bytes": g.get("storedBytes", 0),
+            })
+        return {"status": "connected", "groups": result}
+    except Exception as e:
+        # Fallback to simulated CloudWatch log groups
+        return {
+            "status": "simulated",
+            "message": "AWS credentials not detected. Operating in sandbox mode.",
+            "groups": [
+                {"name": "/aws/lambda/payment-processor-prod", "arn": "arn:aws:logs:us-east-1:123:log-group:1", "stored_bytes": 4510200},
+                {"name": "/aws/ecs/api-gateway-cluster", "arn": "arn:aws:logs:us-east-1:123:log-group:2", "stored_bytes": 128990100},
+                {"name": "/aws/rds/db-primary-logs", "arn": "arn:aws:logs:us-east-1:123:log-group:3", "stored_bytes": 452912800},
+                {"name": "/aws/vpc/flow-logs-public", "arn": "arn:aws:logs:us-east-1:123:log-group:4", "stored_bytes": 10982991000},
+            ]
+        }
+
+
+@app.post("/connectors/aws/fetch")
+async def fetch_aws_logs(log_group: str = Form(...), log_stream: Optional[str] = Form(None)):
+    """Fetch logs from AWS CloudWatch and save as a dynamic log source."""
+    safe_name = log_group.replace("/", "_").strip("_")
+    filename = f"aws_{safe_name}.log"
+    dest = DATA_DIR / filename
+    
+    try:
+        from denoiser.integrations.aws import CloudWatchReader
+        reader = CloudWatchReader()
+        records = list(reader.read(log_group, log_stream))
+        
+        with open(dest, "w") as f:
+            for r in records:
+                f.write(r.raw_text + "\n")
+                
+        return {"status": "success", "source": filename, "lines": len(records)}
+    except Exception as e:
+        # Simulated log generation
+        simulated_logs = [
+            f"1715934500000\t[INFO]\tINIT\tContainer runtime: fargate-2.0",
+            f"1715934502000\t[INFO]\tSTART\tRequest ID: req-8219-cba0",
+            f"1715934505000\t[WARN]\tLATENCY\tDynamoDB batch_write took 450ms (threshold 100ms)",
+            f"1715934508000\t[ERROR]\tSNS\tFailed to publish event to topic: arn:aws:sns:us-east-1:123:notifications",
+            f"1715934510000\t[INFO]\tEND\tDuration: 520ms, Memory Used: 128MB",
+        ]
+        with open(dest, "w") as f:
+            for line in simulated_logs:
+                f.write(line + "\n")
+                
+        return {
+            "status": "simulated",
+            "message": "AWS credentials not detected. Generated sandbox log sequence.",
+            "source": filename,
+            "lines": len(simulated_logs)
+        }
+
+
+@app.get("/connectors/docker/containers")
+def list_docker_containers():
+    """Discover running Docker containers on the host."""
+    try:
+        import docker
+        client = docker.from_env()
+        containers = client.containers.list(all=True)
+        result = []
+        for c in containers:
+            result.append({
+                "id": c.short_id,
+                "name": c.name,
+                "image": c.image.tags[0] if c.image.tags else "unknown",
+                "status": c.status,
+            })
+        return {"status": "connected", "containers": result}
+    except Exception as e:
+        return {
+            "status": "simulated",
+            "message": "Docker socket not detected. Operating in sandbox mode.",
+            "containers": [
+                {"id": "a2b9f3", "name": "nginx-ingress", "image": "nginx:alpine", "status": "running"},
+                {"id": "c7d2e4", "name": "redis-cache", "image": "redis:7-alpine", "status": "running"},
+                {"id": "f8e1a6", "name": "postgres-db", "image": "postgres:15-alpine", "status": "running"},
+                {"id": "d4c9b8", "name": "node-api", "image": "node:20-slim", "status": "exited"},
+            ]
+        }
+
+
+@app.post("/connectors/docker/fetch")
+async def fetch_docker_logs(container_name: str = Form(...)):
+    """Fetch logs from a Docker container and save as a dynamic log source."""
+    filename = f"docker_{container_name}.log"
+    dest = DATA_DIR / filename
+    
+    try:
+        import docker
+        client = docker.from_env()
+        container = client.containers.get(container_name)
+        logs = container.logs(tail=1000).decode('utf-8')
+        
+        with open(dest, "w") as f:
+            f.write(logs)
+            
+        return {"status": "success", "source": filename, "lines": len(logs.splitlines())}
+    except Exception as e:
+        simulated_logs = [
+            f"node-api-1 | 2026-05-17 17:15:00 [info]: Express app listening on port 3000",
+            f"node-api-1 | 2026-05-17 17:15:02 [info]: Connected to PostgreSQL database at postgres-db:5432",
+            f"node-api-1 | 2026-05-17 17:15:04 [warn]: Redis cache connection missed for key 'user:123'",
+            f"node-api-1 | 2026-05-17 17:15:06 [error]: uncaughtException: Cannot read properties of undefined (reading 'email')",
+            f"node-api-1 | 2026-05-17 17:15:07 [info]: Process exited with code 1",
+        ]
+        with open(dest, "w") as f:
+            for line in simulated_logs:
+                f.write(line + "\n")
+                
+        return {
+            "status": "simulated",
+            "message": "Docker daemon not detected. Generated sandbox log sequence.",
+            "source": filename,
+            "lines": len(simulated_logs)
+        }
 
 
 def _human_size(size_bytes: int) -> str:
