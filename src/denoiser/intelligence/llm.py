@@ -119,3 +119,64 @@ class IncidentIntelligence:
             ],
             "cluster_summaries": ["Pattern detected (Local Heuristic)" for _ in clusters]
         }
+
+    def narrate_causal_links(
+        self,
+        links: list[Any],
+    ) -> dict[str, str]:
+        """Generate a plain-English forensic explanation for each causal link."""
+        if not self.enabled or not self.client or not links:
+            return {f"{l.source_service}->{l.target_service}": self._local_causal_fallback(l) for l in links}
+
+        narratives = {}
+        context = []
+        for l in links[:5]:  # Limit to top 5 strongest links to stay within token budgets
+            context.append({
+                "source_service": l.source_service,
+                "target_service": l.target_service,
+                "source_template": l.source_template,
+                "target_template": l.target_template,
+                "avg_delay_ms": l.avg_delay_ms,
+                "confidence": l.confidence
+            })
+
+        prompt = f"""
+        You are an expert SRE and systems architect. 
+        Analyze these cross-service temporal co-occurrences (causal links):
+        {json.dumps(context, indent=2)}
+
+        For each link in the list, provide a clear, concise, plain-English forensic narrative explaining how the source error/event could causally trigger the target warning/error given the delay in milliseconds. Keep each narrative strictly under 30 words.
+
+        Return your response as a JSON object where the keys are EXACTLY "{{source_service}}->{{target_service}}" (with actual service names) and the values are the generated plain-English narratives.
+        Example response format:
+        {{
+           "gateway_service->payment_service": "Database thread exhaustion led to a cascade of gateway connection pool timeouts after 45ms."
+        }}
+        """
+
+        try:
+            logger.info("Requesting LLM causal narration...", extra={"model": self.model})
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "You are a professional SRE diagnosing cascading failures across microservices."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.2,
+                response_format={"type": "json_object"},
+            )
+            data = json.loads(response.choices[0].message.content)
+            for l in links:
+                key = f"{l.source_service}->{l.target_service}"
+                narratives[key] = data.get(key, self._local_causal_fallback(l))
+            return narratives
+        except Exception as e:
+            logger.error(f"Failed to generate LLM causal narration: {e}")
+            return {f"{l.source_service}->{l.target_service}": self._local_causal_fallback(l) for l in links}
+
+    def _local_causal_fallback(self, link: Any) -> str:
+        """Heuristic fallback description for causal links when LLM is offline."""
+        return (
+            f"Anomalous pattern in {link.source_service} co-occurred with a warning in {link.target_service} "
+            f"after an average delay of {link.avg_delay_ms:.1f}ms (Confidence: {link.confidence * 100:.0f}%)."
+        )

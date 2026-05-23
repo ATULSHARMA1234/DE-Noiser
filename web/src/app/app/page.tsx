@@ -317,7 +317,7 @@ export default function CommandCenter() {
                   <th className="pb-4 font-medium">Pattern Label</th>
                   <th className="pb-4 font-medium">Count</th>
                   <th className="pb-4 font-medium">Score</th>
-                  <th className="pb-4 font-medium">Type</th>
+                  <th className="pb-4 font-medium">Priority</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-transparent">
@@ -339,17 +339,33 @@ export default function CommandCenter() {
                         {c.cluster_id === -1 ? '⚠' : `C${c.cluster_id}`}
                       </span>
                     </td>
-                    <td className="py-3 px-2 font-medium text-white truncate max-w-[300px]" title={c.representative_template}>
+                    <td className="py-3 px-2 font-medium text-white truncate max-w-[280px]" title={c.representative_template}>
+                      {c.keyword_flag && <span className="mr-1 text-[9px] font-bold text-red-400">🔴</span>}
                       {c.summary !== "Analyzing..." ? c.summary : c.representative_template}
                     </td>
                     <td className="py-3 text-zinc-400 font-mono">{c.size.toLocaleString()}</td>
-                    <td className="py-3 font-bold text-red-500">{c.anomaly_score > 0 ? c.anomaly_score.toFixed(2) : '—'}</td>
-                    <td className="py-3">
-                      <span className={`px-2 py-1 rounded-sm font-bold text-[9px] uppercase tracking-wider ${
-                        c.cluster_id === -1 ? 'bg-red-500/20 text-red-400' : 'bg-zinc-800 text-zinc-400'
-                      }`}>
-                        {c.cluster_id === -1 ? 'Noise' : 'Cluster'}
+                    <td className="py-3 font-bold">
+                      <span className={c.anomaly_score > 0.7 ? 'text-red-400' : c.anomaly_score > 0.4 ? 'text-yellow-400' : 'text-zinc-500'}>
+                        {c.anomaly_score > 0 ? c.anomaly_score.toFixed(2) : '—'}
                       </span>
+                    </td>
+                    <td className="py-3">
+                      {(() => {
+                        const p = c.priority;
+                        const styles: Record<string, string> = {
+                          P0: 'bg-red-500/20 text-red-300 border border-red-500/30',
+                          P1: 'bg-orange-500/20 text-orange-300 border border-orange-500/30',
+                          P2: 'bg-yellow-500/20 text-yellow-300 border border-yellow-500/30',
+                          P3: 'bg-zinc-800 text-zinc-400 border border-zinc-700',
+                        };
+                        return (
+                          <span className={`px-2 py-1 rounded-sm font-bold text-[9px] uppercase tracking-wider ${
+                            styles[p] || styles['P3']
+                          }`}>
+                            {p || (c.cluster_id === -1 ? 'Noise' : 'P3')}
+                          </span>
+                        );
+                      })()}
                     </td>
                   </tr>
                 )) : (

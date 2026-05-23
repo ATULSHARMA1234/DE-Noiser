@@ -1,0 +1,30 @@
+{"message": "test log line", "level": "INFO"}
+{"message": "log line 0"}
+{"message": "log line 1"}
+{"message": "log line 2"}
+{"message": "log line 3"}
+{"message": "log line 4"}
+{"message": "test log line", "level": "INFO"}
+{"message": "log line 0"}
+{"message": "log line 1"}
+{"message": "log line 2"}
+{"message": "log line 3"}
+{"message": "log line 4"}
+{"message": "test log line", "level": "INFO"}
+{"message": "log line 0"}
+{"message": "log line 1"}
+{"message": "log line 2"}
+{"message": "log line 3"}
+{"message": "log line 4"}
+{"message": "test log line", "level": "INFO"}
+{"message": "log line 0"}
+{"message": "log line 1"}
+{"message": "log line 2"}
+{"message": "log line 3"}
+{"message": "log line 4"}
+{"message": "test log line", "level": "INFO"}
+{"message": "log line 0"}
+{"message": "log line 1"}
+{"message": "log line 2"}
+{"message": "log line 3"}
+{"message": "log line 4"}

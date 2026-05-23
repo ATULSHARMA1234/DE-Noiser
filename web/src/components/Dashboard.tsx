@@ -162,7 +162,7 @@ export default function Dashboard({ userRole }: { userRole: 'admin' | 'sre' | 'v
                                                 <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Failure Domain</p>
                                                 <p className="text-2xl font-black text-white tracking-tighter">{data?.intelligence?.failure_domain || "N/A"}</p>
                                             </div>
-                                            <Divider vertical className="h-10 bg-white/10" />
+                                            <div className="w-[1px] h-10 bg-white/10" />
                                             <div>
                                                 <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Confidence</p>
                                                 <p className="text-2xl font-black text-emerald-400 tracking-tighter">98.4%</p>

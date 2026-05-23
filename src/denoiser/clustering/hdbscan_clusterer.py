@@ -54,52 +54,62 @@ class LogClusterer:
         # Adjust min_cluster_size dynamically if needed, or fallback gracefully.
         n_samples = vectors.shape[0]
         print(f"\n[NEURAL ENGINE] Analysis of {n_samples} unique semantic patterns starting...")
-        actual_min_cluster_size = min(self.min_cluster_size, max(2, n_samples // 2))
+
         if n_samples < 2:
-            actual_min_cluster_size = 2
-
-        logger.info(
-            "Running HDBSCAN",
-            extra={
-                "samples": n_samples,
-                "min_cluster_size": actual_min_cluster_size,
-            },
-        )
-
-        # --- NEURAL SAMPLING OPTIMIZATION ---
-        MAX_SAMPLES = 50000
-        if n_samples > MAX_SAMPLES:
-            logger.info(f"Large dataset detected ({n_samples} templates). Using Neural Sampling (50k) for speed.")
-            # Pick a random sample for training the clusterer
-            indices = np.random.choice(n_samples, MAX_SAMPLES, replace=False)
-            train_vectors = vectors[indices]
-            
-            clusterer = hdbscan.HDBSCAN(
-                min_cluster_size=actual_min_cluster_size,
-                min_samples=self.min_samples,
-                metric=self.metric,
-                prediction_data=True, # Critical for assigning labels to non-sampled data
-                allow_single_cluster=True,
-            )
-            
-            try:
-                clusterer.fit(train_vectors)
-                # Assign labels to ALL vectors based on the sampled model
-                labels, strengths = hdbscan.prediction.approximate_predict(clusterer, vectors)
-            except Exception as e:
-                raise ClusteringError(f"Neural Sampling fit failed: {e}") from e
+            logger.info("Single template detected. Bypassing HDBSCAN and returning single cluster.")
+            labels = np.array([0])
         else:
-            # Standard path for smaller datasets
-            clusterer = hdbscan.HDBSCAN(
-                min_cluster_size=actual_min_cluster_size,
-                min_samples=self.min_samples,
-                metric=self.metric,
-                allow_single_cluster=True,
+            actual_min_cluster_size = min(self.min_cluster_size, max(2, n_samples // 2))
+            if n_samples < 2:
+                actual_min_cluster_size = 2
+
+            actual_min_samples = min(self.min_samples, max(1, n_samples - 1))
+            if n_samples <= 1:
+                actual_min_samples = 1
+
+            logger.info(
+                "Running HDBSCAN",
+                extra={
+                    "samples": n_samples,
+                    "min_cluster_size": actual_min_cluster_size,
+                    "min_samples": actual_min_samples,
+                },
             )
-            try:
-                labels = clusterer.fit_predict(vectors)
-            except Exception as e:
-                raise ClusteringError(f"HDBSCAN clustering failed: {e}") from e
+
+            # --- NEURAL SAMPLING OPTIMIZATION ---
+            MAX_SAMPLES = 50000
+            if n_samples > MAX_SAMPLES:
+                logger.info(f"Large dataset detected ({n_samples} templates). Using Neural Sampling (50k) for speed.")
+                # Pick a random sample for training the clusterer
+                indices = np.random.choice(n_samples, MAX_SAMPLES, replace=False)
+                train_vectors = vectors[indices]
+                
+                clusterer = hdbscan.HDBSCAN(
+                    min_cluster_size=actual_min_cluster_size,
+                    min_samples=actual_min_samples,
+                    metric=self.metric,
+                    prediction_data=True, # Critical for assigning labels to non-sampled data
+                    allow_single_cluster=True,
+                )
+                
+                try:
+                    clusterer.fit(train_vectors)
+                    # Assign labels to ALL vectors based on the sampled model
+                    labels, strengths = hdbscan.prediction.approximate_predict(clusterer, vectors)
+                except Exception as e:
+                    raise ClusteringError(f"Neural Sampling fit failed: {e}") from e
+            else:
+                # Standard path for smaller datasets
+                clusterer = hdbscan.HDBSCAN(
+                    min_cluster_size=actual_min_cluster_size,
+                    min_samples=actual_min_samples,
+                    metric=self.metric,
+                    allow_single_cluster=True,
+                )
+                try:
+                    labels = clusterer.fit_predict(vectors)
+                except Exception as e:
+                    raise ClusteringError(f"HDBSCAN clustering failed: {e}") from e
 
         # Extract metadata
         unique_labels = set(labels)

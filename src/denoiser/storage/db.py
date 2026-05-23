@@ -65,6 +65,7 @@ class AnalysisRun(Base):
     reduction_ratio = Column(Float)
     duration_sec = Column(Float)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    clusters_snapshot = Column(JSON, nullable=True)
 
 
 # ── Session helpers ──────────────────────────────────────────────────────────

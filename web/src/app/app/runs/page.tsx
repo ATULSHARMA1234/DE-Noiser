@@ -1,15 +1,21 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Play, CheckCircle2, Clock, XCircle, Trash2, RefreshCw } from 'lucide-react';
+import { Play, CheckCircle2, Clock, XCircle, Trash2, RefreshCw, GitCompare } from 'lucide-react';
 import { apiFetch, apiDelete } from '@/lib/api';
+import { useRouter } from 'next/navigation';
 
 export default function AnalysisRunsPage() {
+  const router = useRouter();
   const [runs, setRuns] = useState<any[]>([]);
+  const [selectedRuns, setSelectedRuns] = useState<string[]>([]);
 
   const fetchRuns = () => {
     apiFetch('/runs')
-      .then(data => setRuns(data))
+      .then(data => {
+        setRuns(data);
+        setSelectedRuns([]);
+      })
       .catch(console.error);
   };
 
@@ -25,9 +31,34 @@ export default function AnalysisRunsPage() {
     }
   };
 
+  const toggleSelection = (runId: string) => {
+    setSelectedRuns(prev => {
+      if (prev.includes(runId)) return prev.filter(id => id !== runId);
+      if (prev.length >= 2) return [prev[1], runId]; // keep max 2 selected
+      return [...prev, runId];
+    });
+  };
+
+  const handleCompare = () => {
+    if (selectedRuns.length !== 2) return;
+    // ensure chronological order (older = run_a, newer = run_b)
+    const r1 = runs.find(r => r.id === selectedRuns[0]);
+    const r2 = runs.find(r => r.id === selectedRuns[1]);
+    const d1 = new Date(r1.created_at).getTime();
+    const d2 = new Date(r2.created_at).getTime();
+    
+    let runA = selectedRuns[0];
+    let runB = selectedRuns[1];
+    if (d1 > d2) {
+      runA = selectedRuns[1];
+      runB = selectedRuns[0];
+    }
+    
+    router.push(`/app/runs/compare?run_a=${runA}&run_b=${runB}`);
+  };
+
   return (
     <div className="max-w-[1600px] mx-auto pb-10">
-      {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-xl font-bold text-white mb-1">Analysis Runs</h1>
@@ -40,10 +71,16 @@ export default function AnalysisRunsPage() {
           >
             <RefreshCw size={14} /> Refresh
           </button>
+          <button 
+            onClick={handleCompare}
+            disabled={selectedRuns.length !== 2}
+            className="bg-fuchsia-600 disabled:bg-zinc-800 disabled:text-zinc-500 hover:bg-fuchsia-500 text-white font-medium rounded-md px-4 py-2 text-xs flex items-center gap-2 cursor-pointer transition-colors"
+          >
+            <GitCompare size={14} /> Compare Selected ({selectedRuns.length}/2)
+          </button>
         </div>
       </div>
 
-      {/* Stats Summary */}
       {runs.length > 0 && (
         <div className="grid grid-cols-4 gap-4 mb-6">
           <div className="bg-[#121214] rounded-xl p-4">
@@ -69,28 +106,36 @@ export default function AnalysisRunsPage() {
         </div>
       )}
 
-      {/* Table */}
       <div className="bg-[#121214] border-none rounded-xl overflow-hidden shadow-sm">
         <table className="w-full text-left text-xs">
           <thead className="text-[10px] font-bold text-zinc-600 uppercase tracking-wider border-b border-transparent bg-transparent">
             <tr>
+              <th className="p-5 font-medium w-10">Select</th>
               <th className="p-5 font-medium">Status</th>
               <th className="p-5 font-medium">Run ID</th>
               <th className="p-5 font-medium">Source</th>
               <th className="p-5 font-medium">Stats</th>
               <th className="p-5 font-medium">Time</th>
-              <th className="p-5 font-medium">Actions</th>
+              <th className="p-5 font-medium text-right">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-transparent">
             {runs.length === 0 ? (
               <tr>
-                <td colSpan={6} className="p-8 text-center text-zinc-500">
+                <td colSpan={7} className="p-8 text-center text-zinc-500">
                   No analysis runs yet. Use the "Run Analysis" button to start one.
                 </td>
               </tr>
             ) : runs.map((run: any) => (
-              <tr key={run.id} className="hover:bg-white/5 transition-colors rounded-lg">
+              <tr key={run.id} className={`hover:bg-white/5 transition-colors rounded-lg ${selectedRuns.includes(run.id) ? 'bg-fuchsia-500/5' : ''}`}>
+                <td className="p-5 text-center">
+                  <input 
+                    type="checkbox" 
+                    checked={selectedRuns.includes(run.id)} 
+                    onChange={() => toggleSelection(run.id)}
+                    className="w-4 h-4 rounded bg-zinc-800 border-zinc-700 accent-fuchsia-500 cursor-pointer"
+                  />
+                </td>
                 <td className="p-5">
                   {run.status === "Completed" ? (
                     <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full border border-emerald-500/20 bg-emerald-500/10 text-[9px] font-bold text-emerald-500 uppercase tracking-wider">
@@ -123,7 +168,7 @@ export default function AnalysisRunsPage() {
                   </div>
                   <div className="text-zinc-500 text-[10px]">Duration: {run.duration_sec?.toFixed(2)}s</div>
                 </td>
-                <td className="p-5">
+                <td className="p-5 text-right flex justify-end">
                   <button 
                     onClick={() => handleDelete(run.id)}
                     className="text-zinc-600 hover:text-red-400 transition-colors cursor-pointer"

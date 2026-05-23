@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { LayoutGrid, Terminal, ShieldAlert, History, Database, Settings, Search, Play, Cpu, X, Upload, FileText, Loader2 } from 'lucide-react';
+import { LayoutGrid, Terminal, ShieldAlert, History, Database, Settings, Search, Play, Cpu, X, Upload, FileText, Loader2, Network } from 'lucide-react';
 import { apiFetch, apiPost } from '@/lib/api';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -18,6 +18,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const navItems = [
     { name: 'Command Center', path: '/app', icon: LayoutGrid },
     { name: 'Live Pulse', path: '/app/live', icon: Terminal },
+    { name: 'Service Topology', path: '/app/topology', icon: Network },
     { name: 'Incident Memory', path: '/app/incidents', icon: ShieldAlert },
     { name: 'Analysis Runs', path: '/app/runs', icon: History },
     { name: 'Sources', path: '/app/sources', icon: Database },

@@ -36,6 +36,7 @@ class AnalysisResponse(BaseModel):
     total_logs: int
     clusters: List[Any]
     intelligence: Optional[Any] = None
+    causal_links: Optional[List[Any]] = None
     timestamp: str
 
 

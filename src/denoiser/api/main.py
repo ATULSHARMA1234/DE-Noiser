@@ -11,6 +11,8 @@ from typing import Any, List, Optional
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+import polars as pl
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from denoiser.cli.main import Normalizer, Redactor, Deduplicator, LogReader, LocalEmbeddingProvider, LogClusterer, BaselineManager, AnomalyScorer, IncidentIntelligence
@@ -18,6 +20,14 @@ from denoiser.config import settings, AnalysisMode
 from denoiser.storage.db import init_db, get_db, Incident, AnalysisRun
 from denoiser.api.schemas import AnalysisRequest, AnalysisResponse, ResolveRequest, SettingsUpdate
 from denoiser.api.middleware import CorrelationIDMiddleware, RateLimitMiddleware, register_exception_handlers
+from denoiser.ingestion.models import LogRecord
+from denoiser.preprocessing.timestamp import TimestampExtractor
+from denoiser.detection.causal_scorer import CausalScorer
+from denoiser.detection.severity import SeverityScorer
+from denoiser.integrations.alert_router import (
+    AlertRouter, AlertPayload, WebhookConfig, ChannelType, alert_router
+)
+from denoiser.analysis.drift import DriftDetector, ClusterSnapshot
 
 app = FastAPI(title="SemanticOS — Enterprise Log Intelligence API", version="2.0.0")
 
@@ -503,41 +513,69 @@ async def run_analysis(request: AnalysisRequest, db: Session = Depends(get_db)):
     cfg = _load_settings()
     
     try:
-        # 1. Ingestion
+        # 1. Ingestion of all sources
+        sources = request.sources if request.sources else [request.source]
+        timestamp_extractor = TimestampExtractor()
+        records_data = []
         reader = LogReader()
-        records_iter = reader.read(request.source)
-
-        # 2. Preprocessing — streamed batch processing for memory efficiency
-        redactor = Redactor(enabled=cfg.get("redact_pii", True))
-        normalizer = Normalizer()
-        deduper = Deduplicator()
-
-        BATCH_SIZE = 10000
-        batch = []
         has_records = False
 
-        for record in records_iter:
-            has_records = True
-            batch.append(record)
-            if len(batch) >= BATCH_SIZE:
-                texts = [r.raw_text for r in batch]
-                redacted = [redactor.redact(t) for t in texts]
-                normalized = normalizer.normalize_batch(redacted)
-                for i, r in enumerate(batch):
-                    r.normalized_text = normalized[i]
-                    deduper.add(r)
-                batch = []
+        for src in sources:
+            source_label = Path(src).stem
+            try:
+                records_iter = reader.read(src)
+                for record in records_iter:
+                    has_records = True
+                    # Extract timestamp
+                    epoch_ms = timestamp_extractor.extract(record.raw_text)
+                    dt = datetime.fromtimestamp(epoch_ms / 1000.0, timezone.utc) if epoch_ms is not None else None
+                    
+                    records_data.append({
+                        "raw_text": record.raw_text,
+                        "source_path": record.source,
+                        "source_label": source_label,
+                        "line_number": record.line_number,
+                        "timestamp": dt,
+                        "metadata": json.dumps(record.metadata)
+                    })
+            except Exception as e:
+                # Log reading failure and raise if no logs gathered at all
+                import logging as py_logging
+                py_logging.warning(f"Failed to read source {src}: {e}")
 
-        if batch:
-            texts = [r.raw_text for r in batch]
-            redacted = [redactor.redact(t) for t in texts]
-            normalized = normalizer.normalize_batch(redacted)
-            for i, r in enumerate(batch):
-                r.normalized_text = normalized[i]
-                deduper.add(r)
+        if not has_records or not records_data:
+            raise HTTPException(status_code=404, detail="No logs found at source(s)")
 
-        if not has_records:
-            raise HTTPException(status_code=404, detail="No logs found at source")
+        # 2. Ingest into a single Polars DataFrame with a source_label column
+        df = pl.DataFrame(records_data)
+
+        # 3. Apply high-performance PII Redaction and Normalization
+        redactor = Redactor(enabled=cfg.get("redact_pii", True))
+        normalizer = Normalizer()
+
+        raw_texts = df["raw_text"].to_list()
+        redacted_texts = [redactor.redact(t) for t in raw_texts]
+        normalized_texts = normalizer.normalize_batch(redacted_texts)
+
+        df = df.with_columns(
+            pl.Series("normalized_text", normalized_texts)
+        )
+
+        # 4. Populate Deduplicator
+        deduper = Deduplicator()
+        for row in df.iter_rows(named=True):
+            meta = json.loads(row["metadata"]) if row["metadata"] else {}
+            meta["source_label"] = row["source_label"]
+
+            rec = LogRecord(
+                raw_text=row["raw_text"],
+                source=row["source_path"],
+                line_number=row["line_number"],
+                timestamp=row["timestamp"],
+                metadata=meta,
+                normalized_text=row["normalized_text"]
+            )
+            deduper.add(rec)
 
         unique_templates = deduper.get_unique_templates()
 
@@ -600,7 +638,77 @@ async def run_analysis(request: AnalysisRequest, db: Session = Depends(get_db)):
 
             formatted_clusters.append(cluster_data)
 
-        # 8. Save to Database
+        # 8. Causal Observability Correlation (Phase 2, Task 11 + 13)
+        scorer = CausalScorer()
+        causal_links = scorer.analyze(clusters, deduper.get_all_groups())
+        
+        # LLM Causal Chain Narration (Phase 2, Task 13)
+        narratives = {}
+        if request.intelligence and causal_links:
+            try:
+                intel = IncidentIntelligence()
+                narratives = intel.narrate_causal_links(causal_links)
+            except Exception as e:
+                logger.error(f"Failed to generate causal narration: {e}")
+
+        formatted_links = []
+        for link in causal_links:
+            key = f"{link.source_service}->{link.target_service}"
+            narrative_val = narratives.get(key)
+            if not narrative_val:
+                # Local heuristic fallback description
+                narrative_val = (
+                    f"Anomalous pattern in {link.source_service} co-occurred with a warning in {link.target_service} "
+                    f"after an average delay of {link.avg_delay_ms:.1f}ms (Confidence: {link.confidence * 100:.0f}%)."
+                )
+
+            formatted_links.append({
+                "source_cluster_id": link.source_cluster_id,
+                "target_cluster_id": link.target_cluster_id,
+                "source_service": link.source_service,
+                "target_service": link.target_service,
+                "source_template": link.source_template,
+                "target_template": link.target_template,
+                "confidence": link.confidence,
+                "avg_delay_ms": link.avg_delay_ms,
+                "occurrences": link.occurrences,
+                "direction": link.direction,
+                "narrative": narrative_val
+            })
+
+        # 9. Severity Triage (Phase 2, Task 14)
+        sev_scorer = SeverityScorer()
+        severity_map = sev_scorer.score_all(clusters, anomalies, causal_links)
+
+        # Back-annotate severity onto formatted_clusters
+        for fc in formatted_clusters:
+            sev = severity_map.get(fc["cluster_id"])
+            if sev:
+                fc["priority"] = sev.priority
+                fc["composite_severity_score"] = sev.composite_score
+                fc["severity_breakdown"] = sev.breakdown
+                fc["keyword_flag"] = sev.keyword_flag
+            else:
+                fc["priority"] = "P3"
+                fc["composite_severity_score"] = 0.0
+                fc["severity_breakdown"] = {}
+                fc["keyword_flag"] = False
+
+        # 9.5 Create Snapshots for run comparison (Task 16)
+        snapshots = []
+        for fc in formatted_clusters:
+            snapshots.append({
+                "cluster_id": fc["cluster_id"],
+                "template": fc["representative_template"],
+                "size": fc["size"],
+                "anomaly_score": fc.get("anomaly_score", 0.0),
+                "priority": fc.get("priority", "P3"),
+                "composite_severity_score": fc.get("composite_severity_score", 0.0),
+                "keyword_flag": fc.get("keyword_flag", False),
+                "summary": fc.get("summary", ""),
+            })
+
+        # 10. Save to Database
         duration = time.time() - start_time
         run_id = f"run_{uuid.uuid4().hex[:8]}"
         db_run = AnalysisRun(
@@ -610,7 +718,8 @@ async def run_analysis(request: AnalysisRequest, db: Session = Depends(get_db)):
             raw_lines=deduper.total_count,
             cluster_count=len(clusters),
             reduction_ratio=1.0 - (len(clusters) / deduper.total_count) if deduper.total_count > 0 else 0,
-            duration_sec=duration
+            duration_sec=duration,
+            clusters_snapshot=snapshots
         )
         db.add(db_run)
 
@@ -631,10 +740,34 @@ async def run_analysis(request: AnalysisRequest, db: Session = Depends(get_db)):
 
         db.commit()
 
+        # 11. Alert Routing — auto-dispatch P0/P1 clusters (Task 15)
+        try:
+            critical_clusters = [fc for fc in formatted_clusters if fc.get("priority") in ("P0", "P1")]
+            if critical_clusters and alert_router.list_destinations():
+                # Dispatch the single highest-severity cluster per run
+                top = sorted(critical_clusters, key=lambda c: c.get("composite_severity_score", 0), reverse=True)[0]
+                alert_payload = AlertPayload(
+                    source=request.source,
+                    run_id=run_id,
+                    priority=top["priority"],
+                    cluster_id=top["cluster_id"],
+                    cluster_summary=top.get("summary", top.get("representative_template", "")),
+                    representative_log=top.get("representative_log", ""),
+                    anomaly_score=top.get("anomaly_score", 0.0),
+                    causal_links=formatted_links,
+                    intelligence=llm_payload,
+                    keyword_flag=top.get("keyword_flag", False),
+                )
+                asyncio.create_task(alert_router.dispatch(alert_payload))
+                logger.info(f"Alert dispatch queued for {top['priority']} cluster {top['cluster_id']}")
+        except Exception as ae:
+            logger.error(f"Alert routing error (non-fatal): {ae}")
+
         return {
             "total_logs": deduper.total_count,
             "clusters": formatted_clusters,
             "intelligence": llm_payload,
+            "causal_links": formatted_links,
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
 
@@ -712,6 +845,27 @@ def get_runs(db: Session = Depends(get_db)):
     return [_run_to_dict(r) for r in runs]
 
 
+@app.get("/runs/compare")
+def compare_runs(run_a: str, run_b: str, db: Session = Depends(get_db)):
+    """Compare two analysis runs and return a DriftReport."""
+    db_run_a = db.query(AnalysisRun).filter(AnalysisRun.id == run_a).first()
+    db_run_b = db.query(AnalysisRun).filter(AnalysisRun.id == run_b).first()
+    
+    if not db_run_a or not db_run_b:
+        raise HTTPException(status_code=404, detail="One or both runs not found")
+        
+    snap_a_data = db_run_a.clusters_snapshot or []
+    snap_b_data = db_run_b.clusters_snapshot or []
+    
+    clusters_a = [ClusterSnapshot(**d) for d in snap_a_data]
+    clusters_b = [ClusterSnapshot(**d) for d in snap_b_data]
+    
+    detector = DriftDetector()
+    report = detector.compare(run_a, clusters_a, run_b, clusters_b)
+    
+    return report.to_dict()
+
+
 @app.get("/runs/{run_id}")
 def get_run_detail(run_id: str, db: Session = Depends(get_db)):
     run = db.query(AnalysisRun).filter(AnalysisRun.id == run_id).first()
@@ -746,3 +900,113 @@ def _run_to_dict(run: AnalysisRun) -> dict:
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+# ─── WEBHOOKS — Alert Routing CRUD (Task 15) ─────────────────────────────────
+
+class WebhookCreateRequest(BaseModel):
+    name: str
+    channel_type: str
+    url: str
+    min_priority: str = "P1"
+    enabled: bool = True
+    extra: dict = {}
+
+
+class WebhookUpdateRequest(BaseModel):
+    name: str | None = None
+    min_priority: str | None = None
+    enabled: bool | None = None
+    extra: dict | None = None
+
+
+@app.get("/webhooks")
+def list_webhooks():
+    """List all registered alert destinations."""
+    return alert_router.list_destinations()
+
+
+@app.post("/webhooks", status_code=201)
+def create_webhook(body: WebhookCreateRequest):
+    """Register a new alert destination."""
+    try:
+        channel = ChannelType(body.channel_type)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid channel_type '{body.channel_type}'. Valid: slack, pagerduty, teams, generic")
+
+    webhook_id = WebhookConfig.make_id(body.name, body.url)
+    cfg = WebhookConfig(
+        id=webhook_id,
+        name=body.name,
+        channel_type=channel,
+        url=body.url,
+        min_priority=body.min_priority,
+        enabled=body.enabled,
+        extra=body.extra,
+    )
+    alert_router.register(cfg)
+    return {"status": "registered", **alert_router._config_to_dict(cfg)}
+
+
+@app.put("/webhooks/{webhook_id}")
+def update_webhook(webhook_id: str, body: WebhookUpdateRequest):
+    """Update an existing webhook configuration."""
+    cfg = alert_router.get_destination(webhook_id)
+    if not cfg:
+        raise HTTPException(status_code=404, detail="Webhook not found")
+    if body.name is not None:
+        cfg.name = body.name
+    if body.min_priority is not None:
+        cfg.min_priority = body.min_priority
+    if body.enabled is not None:
+        cfg.enabled = body.enabled
+    if body.extra is not None:
+        cfg.extra = {**cfg.extra, **body.extra}
+    return {"status": "updated", **alert_router._config_to_dict(cfg)}
+
+
+@app.delete("/webhooks/{webhook_id}")
+def delete_webhook(webhook_id: str):
+    """Remove an alert destination."""
+    removed = alert_router.unregister(webhook_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail="Webhook not found")
+    return {"status": "deleted", "id": webhook_id}
+
+
+@app.post("/webhooks/{webhook_id}/test")
+async def test_webhook(webhook_id: str):
+    """Fire a synthetic P1 test alert to a specific destination."""
+    cfg = alert_router.get_destination(webhook_id)
+    if not cfg:
+        raise HTTPException(status_code=404, detail="Webhook not found")
+
+    test_alert = AlertPayload(
+        source="semanticos/test",
+        run_id="test_run",
+        priority="P1",
+        cluster_id=0,
+        cluster_summary="[TEST] SemanticOS webhook connectivity verification",
+        representative_log="INFO [test] Alert routing system connectivity test - all channels operational",
+        anomaly_score=0.72,
+        causal_links=[],
+        intelligence={
+            "failure_domain": "Test Channel",
+            "incident_summary": "This is a test alert from SemanticOS to verify webhook connectivity.",
+            "root_cause_hints": ["No action required — this is a connectivity test."]
+        },
+        keyword_flag=False,
+    )
+    records = await alert_router._deliver_with_retry(cfg, test_alert)
+    return {
+        "status": records.status.value,
+        "http_status": records.http_status,
+        "latency_ms": records.latency_ms,
+        "error": records.error,
+    }
+
+
+@app.get("/webhooks/log")
+def get_delivery_log(limit: int = 50):
+    """Return recent alert delivery audit records."""
+    return alert_router.get_delivery_log(limit=limit)
