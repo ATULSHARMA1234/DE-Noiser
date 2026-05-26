@@ -47,7 +47,34 @@
 
 ---
 
-## Phase 4: Authentication & Authorization (Tasks 18–25)
+## Phase 4: Storage, Data Lifecycle & Distributed Scale (Tasks 35–40)
+*Goal: Handle petabyte-scale log volumes — closing the infrastructure gap vs Splunk.*
+
+| # | Task | Description | Files Affected |
+|---|------|-------------|----------------|
+| 35 | **S3/MinIO object storage** | Replace local `data/` with S3-compatible object store. `boto3` for AWS, `minio` client for self-hosted. Infinite scale at $0.023/GB/month. | New: `storage/object_store.py`, `api/main.py` |
+| 36 | **Wire S3 into retention scheduler** | Compress logs older than 7 days → upload to S3 → delete local. Add Storage section to Settings page. | `api/scheduler.py`, `web/src/app/app/settings/page.tsx` |
+| 37 | **Log file rotation** | Auto-rotate `live_stream.log` at 100MB. Rename to `live_stream_<timestamp>.log`, create fresh file. Old files archived by S3. | `api/main.py` |
+| 38 | **Persistent vector database (LanceDB)** | Store all embeddings persistently instead of discarding after analysis. Enables semantic search across all historical logs. | New: `storage/vector_store.py`, modify clustering pipeline |
+| 39 | **Redis/Celery async job queue** | Replace synchronous `/analyze` with async jobs. API submits to Redis, workers process independently. Horizontal scaling. | New: `workers/analysis_worker.py`, `api/main.py`, `pyproject.toml` |
+| 40 | **ClickHouse integration (advanced)** | Columnar analytics DB for billion-row SQL queries in seconds. All ingested logs dual-written to ClickHouse. Replaces Splunk's search. | New: `storage/clickhouse_store.py`, `pyproject.toml` |
+
+---
+
+## Phase 5: Containerization & Deployment (Tasks 41–45)
+*Goal: Deployable anywhere with a single command.*
+
+| # | Task | Description | Files Affected |
+|---|------|-------------|----------------|
+| 41 | **Backend Dockerfile** | Multi-stage: build deps with `uv`, copy to slim image. `gunicorn` + `uvicorn` workers. Port 8000. | New: `Dockerfile` |
+| 42 | **Frontend Dockerfile** | Multi-stage: `npm run build` → `next start`. Port 3000. | New: `web/Dockerfile` |
+| 43 | **docker-compose.yml** | 4 services: `api`, `web`, `db` (PostgreSQL), `redis`. Health checks, volumes, shared network. | New: `docker-compose.yml` |
+| 44 | **HTTPS with Nginx reverse proxy** | Add `nginx` service to compose. TLS termination. Self-signed certs for dev, real certs for prod. | New: `nginx/nginx.conf`, `docker-compose.yml` |
+| 45 | **Redis pub/sub for WebSocket scaling** | Replace in-process WebSocket with Redis pub/sub channel. `/ingest` publishes, all WS connections subscribe. Enables horizontal API scaling. | `api/main.py`, `pyproject.toml` |
+
+---
+
+## Phase 6: Authentication & Authorization (Tasks 18–25)
 *Goal: Lock down the platform so only authorized users can access it.*
 
 | # | Task | Description | Files Affected |
@@ -63,20 +90,7 @@
 
 ---
 
-## Phase 5: Alerting & Notifications (Tasks 26–30)
-*Goal: Push critical incidents automatically — don't wait for dashboard checks.*
-
-| # | Task | Description | Files Affected |
-|---|------|-------------|----------------|
-| 26 | **Wire Slack webhook to analysis** | Connect existing `SlackNotifier` to `/analyze`. Auto-send formatted Block Kit message when `impact_score > 0.7`. | `api/main.py`, `integrations/slack.py` |
-| 27 | **Slack webhook config UI** | Add Slack Webhook URL input to Settings page with "Test Notification" button. | `web/src/app/app/settings/page.tsx` |
-| 28 | **Email alerting via SMTP** | `EmailNotifier` class sending HTML incident alerts. Trigger alongside Slack. | New: `integrations/email.py`, `api/main.py` |
-| 29 | **PagerDuty integration** | `PagerDutyNotifier` using Events API v2 for CRITICAL severity incidents. | New: `integrations/pagerduty.py`, `api/main.py` |
-| 30 | **Alerts history page** | New `/app/alerts` showing chronological log of every sent notification with status/timestamp. New `AlertLog` DB table. | New: `web/src/app/app/alerts/page.tsx`, `storage/db.py` |
-
----
-
-## Phase 6: Audit Trail & Compliance (Tasks 31–34)
+## Phase 7: Audit Trail & Compliance (Tasks 31–34)
 *Goal: Meet SOC2 and enterprise compliance requirements.*
 
 | # | Task | Description | Files Affected |
@@ -88,34 +102,7 @@
 
 ---
 
-## Phase 7: Storage, Data Lifecycle & Distributed Scale (Tasks 35–40)
-*Goal: Handle petabyte-scale log volumes — closing the infrastructure gap vs Splunk.*
-
-| # | Task | Description | Files Affected |
-|---|------|-------------|----------------|
-| 35 | **S3/MinIO object storage** | Replace local `data/` with S3-compatible object store. `boto3` for AWS, `minio` client for self-hosted. Infinite scale at $0.023/GB/month. | New: `storage/object_store.py`, `api/main.py` |
-| 36 | **Wire S3 into retention scheduler** | Compress logs older than 7 days → upload to S3 → delete local. Add Storage section to Settings page. | `api/scheduler.py`, `web/src/app/app/settings/page.tsx` |
-| 37 | **Log file rotation** | Auto-rotate `live_stream.log` at 100MB. Rename to `live_stream_<timestamp>.log`, create fresh file. Old files archived by S3. | `api/main.py` |
-| 38 | **Persistent vector database (LanceDB)** | Store all embeddings persistently instead of discarding after analysis. Enables semantic search across all historical logs. | New: `storage/vector_store.py`, modify clustering pipeline |
-| 39 | **Redis/Celery async job queue** | Replace synchronous `/analyze` with async jobs. API submits to Redis, workers process independently. Horizontal scaling. | New: `workers/analysis_worker.py`, `api/main.py`, `pyproject.toml` |
-| 40 | **ClickHouse integration (advanced)** | Columnar analytics DB for billion-row SQL queries in seconds. All ingested logs dual-written to ClickHouse. Replaces Splunk's search. | New: `storage/clickhouse_store.py`, `pyproject.toml` |
-
----
-
-## Phase 8: Containerization & Deployment (Tasks 41–45)
-*Goal: Deployable anywhere with a single command.*
-
-| # | Task | Description | Files Affected |
-|---|------|-------------|----------------|
-| 41 | **Backend Dockerfile** | Multi-stage: build deps with `uv`, copy to slim image. `gunicorn` + `uvicorn` workers. Port 8000. | New: `Dockerfile` |
-| 42 | **Frontend Dockerfile** | Multi-stage: `npm run build` → `next start`. Port 3000. | New: `web/Dockerfile` |
-| 43 | **docker-compose.yml** | 4 services: `api`, `web`, `db` (PostgreSQL), `redis`. Health checks, volumes, shared network. | New: `docker-compose.yml` |
-| 44 | **HTTPS with Nginx reverse proxy** | Add `nginx` service to compose. TLS termination. Self-signed certs for dev, real certs for prod. | New: `nginx/nginx.conf`, `docker-compose.yml` |
-| 45 | **Redis pub/sub for WebSocket scaling** | Replace in-process WebSocket with Redis pub/sub channel. `/ingest` publishes, all WS connections subscribe. Enables horizontal API scaling. | `api/main.py`, `pyproject.toml` |
-
----
-
-## Phase 9: CI/CD & Quality Gates (Tasks 46–49)
+## Phase 8: CI/CD & Quality Gates (Tasks 46–49)
 *Goal: Automated testing and deployment on every git push.*
 
 | # | Task | Description | Files Affected |
@@ -124,6 +111,19 @@
 | 47 | **Frontend linting & type-checking** | Extend CI: `npx tsc --noEmit` + `npx eslint .`. Fail on errors. | `.github/workflows/ci.yml` |
 | 48 | **Docker image build & push** | On merge to `main`: build both images, tag with git SHA, push to `ghcr.io`. | `.github/workflows/ci.yml` |
 | 49 | **Kubernetes Helm chart** | Templates: Deployment, Service, Ingress (TLS), ConfigMap, Secret, PVC. | New: `deploy/helm/semanticos/` |
+
+---
+
+## Phase 9: Alerting & Notifications (Tasks 26–30)
+*Goal: Push critical incidents automatically — don't wait for dashboard checks.*
+
+| # | Task | Description | Files Affected |
+|---|------|-------------|----------------|
+| 26 | **Wire Slack webhook to analysis** | Connect existing `SlackNotifier` to `/analyze`. Auto-send formatted Block Kit message when `impact_score > 0.7`. | `api/main.py`, `integrations/slack.py` |
+| 27 | **Slack webhook config UI** | Add Slack Webhook URL input to Settings page with "Test Notification" button. | `web/src/app/app/settings/page.tsx` |
+| 28 | **Email alerting via SMTP** | `EmailNotifier` class sending HTML incident alerts. Trigger alongside Slack. | New: `integrations/email.py`, `api/main.py` |
+| 29 | **PagerDuty integration** | `PagerDutyNotifier` using Events API v2 for CRITICAL severity incidents. | New: `integrations/pagerduty.py`, `api/main.py` |
+| 30 | **Alerts history page** | New `/app/alerts` showing chronological log of every sent notification with status/timestamp. New `AlertLog` DB table. | New: `web/src/app/app/alerts/page.tsx`, `storage/db.py` |
 
 ---
 
@@ -161,14 +161,14 @@
 | **1. Backend Hardening** | 1–8 | Testing, validation, PostgreSQL | 4 days |
 | **2. Causal Correlation** | 9–13 | Multi-source forensics, topology graph | 6.5 days |
 | **3. System Telemetry** | 14–17 | Metrics collection, eBPF, dashboard vitals | 4-9 days |
-| **4. Auth & RBAC** | 18–25 | JWT login, roles, user management | 5 days |
-| **5. Alerting** | 26–30 | Slack, Email, PagerDuty, alert history | 3 days |
-| **6. Audit & Compliance** | 31–34 | Audit trail, SOC2 readiness, retention | 3 days |
-| **7. Scale & Storage** | 35–40 | S3, LanceDB vectors, Redis/Celery, ClickHouse | 6-11 days |
-| **8. Containerization** | 41–45 | Docker, Nginx, Redis pub/sub | 4 days |
-| **9. CI/CD** | 46–49 | GitHub Actions, Helm charts | 3 days |
+| **4. Scale & Storage** | 35–40 | S3, LanceDB vectors, Redis/Celery, ClickHouse | 6-11 days |
+| **5. Containerization** | 41–45 | Docker, Nginx, Redis pub/sub | 4 days |
+| **6. Auth & RBAC** | 18–25 | JWT login, roles, user management | 5 days |
+| **7. Audit & Compliance** | 31–34 | Audit trail, SOC2 readiness, retention | 3 days |
+| **8. CI/CD** | 46–49 | GitHub Actions, Helm charts | 3 days |
+| **9. Alerting** | 26–30 | Slack, Email, PagerDuty, alert history | 3 days |
 | **10. Dashboard Polish** | 50–55 | Theme, shortcuts, toasts, mobile, onboarding | 4 days |
 | **11. Docs & Launch** | 56–60 | README, Swagger, demo, license | 3 days |
 | **Total** | **60 tasks** | | **~45-55 days** |
 
-> **Recommended fast-track:** Phase 1 → Phase 2 → Phase 8 → Phase 4 → Phase 11 gives you a **deployable, differentiated, secure product with documentation** in ~23 days.
+> **Recommended fast-track:** Phase 1 → Phase 2 → Phase 3 → Phase 5 → Phase 6 → Phase 11 gives you a **deployable, differentiated, secure product with documentation** in ~27 days.
