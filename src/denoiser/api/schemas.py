@@ -7,7 +7,7 @@ Task 2: Strongly-typed input validation replaces raw dict payloads.
 from __future__ import annotations
 
 from typing import Any, List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 # ── Analysis ─────────────────────────────────────────────────────────────────
@@ -35,8 +35,9 @@ class ClusterResponse(BaseModel):
 class AnalysisResponse(BaseModel):
     total_logs: int
     clusters: List[Any]
-    intelligence: Optional[Any] = None
-    causal_links: Optional[List[Any]] = None
+    intelligence: Optional[Dict[str, Any]] = None
+    causal_links: List[Dict[str, Any]] = Field(default_factory=list)
+    metrics_context: Optional[Dict[str, Any]] = None
     timestamp: str
 
 
@@ -79,7 +80,26 @@ class SettingsUpdate(BaseModel):
 
 class IngestPayload(BaseModel):
     """Structured ingestion payload. Accepts a list of log entries."""
-    logs: Optional[List[Any]] = Field(None, description="Array of log entries (string or JSON objects)")
+    logs: List[Any] = Field(default_factory=list, description="Array of log entries (string or JSON objects)")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_input(cls, data: Any) -> Any:
+        """
+        Accept both payload shapes:
+        - POST /ingest with a JSON list: `[{...}, {...}]`
+        - POST /ingest with a wrapper dict: `{"logs": [{...}]}` (optional)
+        - POST /ingest with a single log dict: `{"message": "..."}`
+        """
+        if data is None:
+            return {"logs": []}
+        if isinstance(data, list):
+            return {"logs": data}
+        if isinstance(data, dict):
+            if "logs" in data:
+                return data
+            return {"logs": [data]}
+        return {"logs": [data]}
 
 
 # ── Connectors ───────────────────────────────────────────────────────────────

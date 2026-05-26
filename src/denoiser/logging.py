@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import re
 from typing import TYPE_CHECKING
+from denoiser.api.middleware import request_id_ctx
 
 from rich.console import Console
 from rich.logging import RichHandler
@@ -46,6 +47,28 @@ class PrivacyFilter(logging.Filter):
         return True
 
 
+class RequestIdPrefixFilter(logging.Filter):
+    """Prefix log messages with the active request_id (if present)."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            rid = request_id_ctx.get("no-request")
+        except Exception:
+            return True
+
+        if not rid or rid == "no-request":
+            return True
+
+        # At this point PrivacyFilter already sanitized record.msg into a string.
+        # Ensure we don't double-prefix.
+        msg = record.msg if isinstance(record.msg, str) else record.getMessage()
+        prefix = f"[{rid}] "
+        if isinstance(msg, str) and not msg.startswith(prefix):
+            record.msg = prefix + msg
+            record.args = None
+        return True
+
+
 _CONFIGURED = False
 
 
@@ -66,6 +89,7 @@ def setup_logging(level: LogLevel | str = "INFO") -> None:
         markup=True,
     )
     handler.addFilter(PrivacyFilter())
+    handler.addFilter(RequestIdPrefixFilter())
 
     root_logger = logging.getLogger("denoiser")
     root_logger.setLevel(level_str)

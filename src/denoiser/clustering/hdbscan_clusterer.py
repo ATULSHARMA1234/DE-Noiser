@@ -141,6 +141,10 @@ class LogClusterer:
             representative_raw = records[0].raw_text if records else representative_template
             representative_source = records[0].source if records else "-"
             representative_line = records[0].line_number if records else 0
+            representative_timestamp_ms = 0
+            if records and records[0].timestamp:
+                # Store epoch milliseconds for fast metrics correlation.
+                representative_timestamp_ms = int(records[0].timestamp.timestamp() * 1000)
             
             # Calculate total size (total raw log lines, using our new counter)
             total_size = sum(template_to_counts.get(t, 0) for t in cluster_templates)
@@ -154,6 +158,7 @@ class LogClusterer:
                     representative_raw=representative_raw,
                     representative_source=representative_source,
                     representative_line=representative_line,
+                    representative_timestamp_ms=representative_timestamp_ms,
                     templates=cluster_templates,
                 )
             )

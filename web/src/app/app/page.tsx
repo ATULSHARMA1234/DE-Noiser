@@ -3,8 +3,22 @@
 import React, { useState, useEffect } from 'react';
 import ReactEcharts from 'echarts-for-react';
 import * as echarts from 'echarts';
-import { Database, TrendingUp, TrendingDown, Zap, Loader2, AlertTriangle, RefreshCw, FileText } from 'lucide-react';
+import { Database, TrendingUp, TrendingDown, Zap, Loader2, AlertTriangle, RefreshCw, FileText, Cpu, MemoryStick, HardDrive, Wifi } from 'lucide-react';
+import { LineChart, Line, ResponsiveContainer, YAxis } from 'recharts';
 import { apiFetch, apiPost } from '@/lib/api';
+
+function Sparkline({ data, dataKey, color }: { data: any[], dataKey: string, color: string }) {
+  return (
+    <div className="h-[40px] w-[120px] ml-auto">
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={data}>
+          <Line type="monotone" dataKey={dataKey} stroke={color} strokeWidth={2} dot={false} isAnimationActive={false} />
+          <YAxis domain={['dataMin - 10', 'dataMax + 10']} hide />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
 
 export default function CommandCenter() {
   const [data, setData] = useState<any>(null);
@@ -21,6 +35,37 @@ export default function CommandCenter() {
     mem: i > 26 ? (Math.random() * 0.1 + 0.8) : (Math.random() * 0.1 + 0.4),
     anomaly: (i === 26 || i === 28) ? 0.9 : null
   })));
+
+  // Real-time sparkline data (Task 16)
+  const [vitals, setVitals] = useState<any[]>(
+    Array.from({ length: 20 }, () => ({ cpu: 0, mem: 0, disk: 0, net: 0 }))
+  );
+
+  useEffect(() => {
+    const padToWindow = (arr: any[]) =>
+      Array.from({ length: 20 }, (_, i) => {
+        const v = arr[arr.length - 20 + i];
+        return {
+          cpu: v?.cpu ?? 0,
+          mem: v?.mem ?? 0,
+          disk: v?.disk ?? 0,
+          net: v?.net ?? 0,
+        };
+      });
+
+    const fetchVitals = async () => {
+      try {
+        const res = await apiFetch('/vitals');
+        if (res?.vitals) setVitals(padToWindow(res.vitals));
+      } catch {
+        // Keep previous vitals if the backend is temporarily unavailable.
+      }
+    };
+
+    fetchVitals();
+    const intervalId = setInterval(fetchVitals, 5000);
+    return () => clearInterval(intervalId);
+  }, []);
 
   // Fetch available sources on mount
   useEffect(() => {
@@ -170,6 +215,50 @@ export default function CommandCenter() {
             <><RefreshCw size={14} /> Analyze</>
           )}
         </button>
+      </div>
+
+      {/* System Vitals Panel */}
+      <div className="grid grid-cols-4 gap-4">
+        <div className="bg-[#121214] border-none rounded-xl p-4 shadow-sm flex items-center justify-between">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <Cpu size={14} className="text-blue-400" />
+              <p className="text-xs text-zinc-400 font-medium uppercase tracking-wider">CPU Usage</p>
+            </div>
+            <span className="text-2xl font-bold text-white">{vitals[vitals.length-1].cpu.toFixed(1)}%</span>
+          </div>
+          <Sparkline data={vitals} dataKey="cpu" color="#3b82f6" />
+        </div>
+        <div className="bg-[#121214] border-none rounded-xl p-4 shadow-sm flex items-center justify-between">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <MemoryStick size={14} className="text-emerald-400" />
+              <p className="text-xs text-zinc-400 font-medium uppercase tracking-wider">Memory</p>
+            </div>
+            <span className="text-2xl font-bold text-white">{vitals[vitals.length-1].mem.toFixed(1)}%</span>
+          </div>
+          <Sparkline data={vitals} dataKey="mem" color="#10b981" />
+        </div>
+        <div className="bg-[#121214] border-none rounded-xl p-4 shadow-sm flex items-center justify-between">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <HardDrive size={14} className="text-fuchsia-400" />
+              <p className="text-xs text-zinc-400 font-medium uppercase tracking-wider">Disk I/O</p>
+            </div>
+            <span className="text-2xl font-bold text-white">{vitals[vitals.length-1].disk.toFixed(0)} IOPS</span>
+          </div>
+          <Sparkline data={vitals} dataKey="disk" color="#d946ef" />
+        </div>
+        <div className="bg-[#121214] border-none rounded-xl p-4 shadow-sm flex items-center justify-between">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <Wifi size={14} className="text-orange-400" />
+              <p className="text-xs text-zinc-400 font-medium uppercase tracking-wider">Net Drops</p>
+            </div>
+            <span className="text-2xl font-bold text-white">{vitals[vitals.length-1].net.toFixed(0)} pkt/s</span>
+          </div>
+          <Sparkline data={vitals} dataKey="net" color="#f97316" />
+        </div>
       </div>
 
       {/* KPIs */}

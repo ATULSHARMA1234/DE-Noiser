@@ -6,8 +6,14 @@ import json
 import asyncio
 import uuid
 import time
+import logging
+from collections import deque
 from pathlib import Path
 from typing import Any, List, Optional
+
+from denoiser.logging import get_logger
+
+logger = get_logger(__name__)
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -18,7 +24,7 @@ from sqlalchemy.orm import Session
 from denoiser.cli.main import Normalizer, Redactor, Deduplicator, LogReader, LocalEmbeddingProvider, LogClusterer, BaselineManager, AnomalyScorer, IncidentIntelligence
 from denoiser.config import settings, AnalysisMode
 from denoiser.storage.db import init_db, get_db, Incident, AnalysisRun
-from denoiser.api.schemas import AnalysisRequest, AnalysisResponse, ResolveRequest, SettingsUpdate
+from denoiser.api.schemas import AnalysisRequest, AnalysisResponse, ResolveRequest, SettingsUpdate, IngestPayload
 from denoiser.api.middleware import CorrelationIDMiddleware, RateLimitMiddleware, register_exception_handlers
 from denoiser.ingestion.models import LogRecord
 from denoiser.preprocessing.timestamp import TimestampExtractor
@@ -28,6 +34,13 @@ from denoiser.integrations.alert_router import (
     AlertRouter, AlertPayload, WebhookConfig, ChannelType, alert_router
 )
 from denoiser.analysis.drift import DriftDetector, ClusterSnapshot
+from denoiser.telemetry.metrics_collector import MetricsCollector
+from denoiser.telemetry.ebpf_collector import EBPFCollector
+from denoiser.detection.metrics_correlator import MetricsCorrelator
+
+# Background agents
+metrics_agent = MetricsCollector()
+ebpf_agent = EBPFCollector()
 
 app = FastAPI(title="SemanticOS — Enterprise Log Intelligence API", version="2.0.0")
 
@@ -76,6 +89,13 @@ def on_startup():
     DATA_DIR.mkdir(exist_ok=True)
     if not SETTINGS_FILE.exists():
         _save_settings(DEFAULT_SETTINGS)
+    metrics_agent.start()
+    ebpf_agent.start()
+
+@app.on_event("shutdown")
+def on_shutdown():
+    metrics_agent.stop()
+    ebpf_agent.stop()
 
 
 # ─── MODELS — Now imported from denoiser.api.schemas ─────────────────────────
@@ -86,6 +106,46 @@ def on_startup():
 @app.get("/health")
 def health_check():
     return {"status": "healthy", "version": "2.0.0"}
+
+
+# ─── TELEMETRY — Live-ish host vitals (Task 16) ──────────────────────────────
+@app.get("/vitals")
+def get_vitals(limit: int = 20):
+    """
+    Returns the latest host telemetry points for dashboard sparkline charts.
+    Backed by `data/metrics_stream.jsonl` written by `MetricsCollector` (Task 14).
+    """
+    try:
+        if not metrics_agent.stream_path.exists():
+            return {"status": "no_telemetry_available", "vitals": []}
+
+        limit = max(1, min(int(limit), 120))
+        buf: deque[dict[str, Any]] = deque(maxlen=limit)
+
+        with open(metrics_agent.stream_path, "r") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                payload = json.loads(line)
+                buf.append(payload)
+
+        vitals = []
+        for m in list(buf):
+            vitals.append(
+                {
+                    "timestamp": m.get("timestamp"),
+                    "cpu": m.get("cpu_percent", 0),
+                    "mem": m.get("memory_percent", 0),
+                    "disk": m.get("disk_iops", 0),
+                    # Dashboard expects "pkt/s"; our stream stores drops per second when available.
+                    "net": m.get("network_drops_per_s", m.get("network_drops", 0)),
+                }
+            )
+
+        return {"status": "ok", "vitals": vitals}
+    except Exception as e:
+        logger.error(f"Failed to load /vitals: {e}")
+        return {"status": "error", "message": str(e), "vitals": []}
 
 
 # ─── SOURCES — Dynamic file discovery + upload ───────────────────────────────
@@ -148,18 +208,14 @@ def delete_source(filename: str):
 
 
 @app.post("/ingest")
-async def ingest_logs(request: Request):
+async def ingest_logs(payload: IngestPayload):
     """
     Standard HTTP ingestion endpoint.
     Accepts arrays of JSON logs (standard format from FluentBit / Vector).
     Writes them directly to data/live_stream.log
     """
     try:
-        body = await request.json()
-        
-        # FluentBit often sends an array of logs
-        if not isinstance(body, list):
-            body = [body]
+        body = payload.logs
             
         stream_file = DATA_DIR / "live_stream.log"
         
@@ -412,9 +468,10 @@ def get_settings():
 
 
 @app.put("/settings")
-def update_settings(new_settings: dict):
+def update_settings(new_settings: SettingsUpdate):
     current = _load_settings()
-    current.update(new_settings)
+    updates = new_settings.model_dump(exclude_unset=True)
+    current.update(updates)
     _save_settings(current)
     return current
 
@@ -622,6 +679,7 @@ async def run_analysis(request: AnalysisRequest, db: Session = Depends(get_db)):
                 "source": f"{c.representative_source}:{c.representative_line}",
                 "representative_log": c.representative_raw,
                 "representative_template": c.representative_template,
+                "representative_timestamp_ms": getattr(c, "representative_timestamp_ms", 0),
                 "anomaly_label": "known",
                 "anomaly_score": 0.0
             }
@@ -763,11 +821,51 @@ async def run_analysis(request: AnalysisRequest, db: Session = Depends(get_db)):
         except Exception as ae:
             logger.error(f"Alert routing error (non-fatal): {ae}")
 
+        # 10.5 Metrics Correlation (Phase 3, Task 15)
+        # Attach host telemetry context to each incident cluster based on its representative log timestamp.
+        metrics_context = {"status": "disabled", "clusters_correlated": 0, "clusters_total": 0}
+        try:
+            correlator = MetricsCorrelator()
+            clusters_total = 0
+            clusters_correlated = 0
+
+            for fc in formatted_clusters:
+                # Noise cluster / non-incident clusters don't require metrics context per spec.
+                if fc.get("cluster_id") == -1:
+                    fc["metrics_context"] = {"status": "skipped_noise"}
+                    continue
+
+                clusters_total += 1
+                priority = fc.get("priority", "P3")
+                if priority not in ("P0", "P1", "P2"):
+                    fc["metrics_context"] = {"status": "skipped_non_incident"}
+                    continue
+
+                ts_ms = int(fc.get("representative_timestamp_ms") or 0)
+                if ts_ms <= 0:
+                    fc["metrics_context"] = {"status": "no_timestamp"}
+                    continue
+
+                ctx = correlator.get_context_for_anomaly(ts_ms, window_ms=30000)
+                fc["metrics_context"] = ctx
+                if ctx.get("status") == "correlated":
+                    clusters_correlated += 1
+
+            metrics_context = {
+                "status": "correlated" if clusters_correlated > 0 else "no_data",
+                "clusters_correlated": clusters_correlated,
+                "clusters_total": clusters_total,
+            }
+        except Exception as e:
+            logger.error(f"Metrics correlator failed: {e}")
+            metrics_context = {"status": "error", "message": str(e)}
+
         return {
             "total_logs": deduper.total_count,
             "clusters": formatted_clusters,
             "intelligence": llm_payload,
             "causal_links": formatted_links,
+            "metrics_context": metrics_context,
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
 

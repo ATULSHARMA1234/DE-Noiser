@@ -28,6 +28,8 @@ class Cluster:
         A raw log line corresponding to the representative template.
     templates : list[str]
         All unique normalized templates in this cluster.
+    representative_timestamp_ms : int
+        Timestamp (epoch milliseconds) for the representative log record.
     """
 
     cluster_id: int
@@ -37,6 +39,7 @@ class Cluster:
     representative_raw: str
     representative_source: str = "-"
     representative_line: int = 0
+    representative_timestamp_ms: int = 0
     templates: list[str] = dataclasses.field(default_factory=list)
     label: str | None = None  # Human-provided label/name for the cluster
     is_acknowledged: bool = False  # Whether the team has marked this cluster as "known/safe"
