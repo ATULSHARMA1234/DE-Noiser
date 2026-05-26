@@ -3,7 +3,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { Button, Card, Grid, Badge } from '@tremor/react';
-import { Zap, ShieldCheck, Database, ArrowRight, BrainCircuit } from 'lucide-react';
+import { Zap, Database, ArrowRight, BrainCircuit } from 'lucide-react';
 
 export default function MarketingHome() {
   return (

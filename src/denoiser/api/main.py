@@ -37,10 +37,13 @@ from denoiser.analysis.drift import DriftDetector, ClusterSnapshot
 from denoiser.telemetry.metrics_collector import MetricsCollector
 from denoiser.telemetry.ebpf_collector import EBPFCollector
 from denoiser.detection.metrics_correlator import MetricsCorrelator
+from denoiser.api.scheduler import start_scheduler, stop_scheduler
+from denoiser.storage.clickhouse_store import ClickHouseStore
 
 # Background agents
 metrics_agent = MetricsCollector()
 ebpf_agent = EBPFCollector()
+clickhouse_store = ClickHouseStore()
 
 app = FastAPI(title="SemanticOS — Enterprise Log Intelligence API", version="2.0.0")
 
@@ -70,6 +73,11 @@ DEFAULT_SETTINGS = {
     "retention_days": 30,
     "sampling_threshold": 50000,
     "auto_analyze": False,
+    "s3_enabled": False,
+    "s3_endpoint": "http://localhost:9000",
+    "s3_bucket": "semanticos-logs",
+    "s3_access_key": "admin",
+    "s3_secret_key": "password123",
 }
 
 
@@ -91,11 +99,13 @@ def on_startup():
         _save_settings(DEFAULT_SETTINGS)
     metrics_agent.start()
     ebpf_agent.start()
+    start_scheduler()
 
 @app.on_event("shutdown")
 def on_shutdown():
     metrics_agent.stop()
     ebpf_agent.stop()
+    stop_scheduler()
 
 
 # ─── MODELS — Now imported from denoiser.api.schemas ─────────────────────────
@@ -212,12 +222,20 @@ async def ingest_logs(payload: IngestPayload):
     """
     Standard HTTP ingestion endpoint.
     Accepts arrays of JSON logs (standard format from FluentBit / Vector).
-    Writes them directly to data/live_stream.log
+    Writes them directly to data/live_stream.log with auto-rotation.
     """
     try:
         body = payload.logs
+        if not body:
+            raise HTTPException(status_code=400, detail="logs must not be empty")
             
         stream_file = DATA_DIR / "live_stream.log"
+        
+        # Auto-rotate if > 100MB
+        if stream_file.exists() and stream_file.stat().st_size > 100 * 1024 * 1024:
+            rotated_name = f"live_stream_{int(time.time())}.log"
+            stream_file.rename(DATA_DIR / rotated_name)
+            logger.info(f"Rotated live_stream.log to {rotated_name}")
         
         with open(stream_file, "a") as f:
             for log_entry in body:
@@ -226,6 +244,11 @@ async def ingest_logs(payload: IngestPayload):
                     f.write(json.dumps(log_entry) + "\n")
                 else:
                     f.write(str(log_entry) + "\n")
+        
+        # Dual-write to ClickHouse for analytics (Task 40)
+        # Assuming body is a list of dicts, if strings, we skip ClickHouse for now
+        if isinstance(body[0], dict):
+            clickhouse_store.insert_logs(body)
                     
         return {"status": "success", "ingested": len(body)}
     except Exception as e:
@@ -564,316 +587,49 @@ async def _demo_stream(ws: WebSocket):
 
 # ─── ANALYZE — Core analysis engine ──────────────────────────────────────────
 
-@app.post("/analyze", response_model=AnalysisResponse)
-async def run_analysis(request: AnalysisRequest, db: Session = Depends(get_db)):
-    start_time = time.time()
-    cfg = _load_settings()
-    
+@app.post("/analyze")
+async def run_analysis(request: AnalysisRequest):
+    """
+    Submit analysis to the Phase 4 Celery queue.
+
+    Local development remains usable without Redis: if the broker cannot be
+    reached, the same task body runs synchronously and returns the completed
+    analysis response.
+    """
+    from kombu.exceptions import OperationalError
+
+    from denoiser.workers.analysis_worker import run_analysis_task
+
+    payload = request.model_dump()
     try:
-        # 1. Ingestion of all sources
-        sources = request.sources if request.sources else [request.source]
-        timestamp_extractor = TimestampExtractor()
-        records_data = []
-        reader = LogReader()
-        has_records = False
+        async_result = run_analysis_task.delay(payload)
+        return {"status": "queued", "task_id": async_result.id}
+    except OperationalError as e:
+        logger.warning(f"Celery broker unavailable; running analysis inline: {e}")
+        result = run_analysis_task.apply(args=[payload])
+        if result.failed():
+            raise HTTPException(status_code=500, detail=str(result.result))
+        return result.result
 
-        for src in sources:
-            source_label = Path(src).stem
-            try:
-                records_iter = reader.read(src)
-                for record in records_iter:
-                    has_records = True
-                    # Extract timestamp
-                    epoch_ms = timestamp_extractor.extract(record.raw_text)
-                    dt = datetime.fromtimestamp(epoch_ms / 1000.0, timezone.utc) if epoch_ms is not None else None
-                    
-                    records_data.append({
-                        "raw_text": record.raw_text,
-                        "source_path": record.source,
-                        "source_label": source_label,
-                        "line_number": record.line_number,
-                        "timestamp": dt,
-                        "metadata": json.dumps(record.metadata)
-                    })
-            except Exception as e:
-                # Log reading failure and raise if no logs gathered at all
-                import logging as py_logging
-                py_logging.warning(f"Failed to read source {src}: {e}")
 
-        if not has_records or not records_data:
-            raise HTTPException(status_code=404, detail="No logs found at source(s)")
+@app.get("/tasks/{task_id}")
+def get_task_status(task_id: str):
+    """Return Celery task state and the final analysis payload when complete."""
+    from celery.result import AsyncResult
 
-        # 2. Ingest into a single Polars DataFrame with a source_label column
-        df = pl.DataFrame(records_data)
+    from denoiser.workers.analysis_worker import celery_app
 
-        # 3. Apply high-performance PII Redaction and Normalization
-        redactor = Redactor(enabled=cfg.get("redact_pii", True))
-        normalizer = Normalizer()
+    result = AsyncResult(task_id, app=celery_app)
+    response = {"task_id": task_id, "status": result.status}
 
-        raw_texts = df["raw_text"].to_list()
-        redacted_texts = [redactor.redact(t) for t in raw_texts]
-        normalized_texts = normalizer.normalize_batch(redacted_texts)
+    if result.status == "PROGRESS":
+        response["meta"] = result.info or {}
+    elif result.status == "SUCCESS":
+        response["result"] = result.result
+    elif result.status == "FAILURE":
+        response["error"] = str(result.result)
 
-        df = df.with_columns(
-            pl.Series("normalized_text", normalized_texts)
-        )
-
-        # 4. Populate Deduplicator
-        deduper = Deduplicator()
-        for row in df.iter_rows(named=True):
-            meta = json.loads(row["metadata"]) if row["metadata"] else {}
-            meta["source_label"] = row["source_label"]
-
-            rec = LogRecord(
-                raw_text=row["raw_text"],
-                source=row["source_path"],
-                line_number=row["line_number"],
-                timestamp=row["timestamp"],
-                metadata=meta,
-                normalized_text=row["normalized_text"]
-            )
-            deduper.add(rec)
-
-        unique_templates = deduper.get_unique_templates()
-
-        # 3. Embeddings & Clustering
-        embedder = LocalEmbeddingProvider()
-        vectors = embedder.embed(unique_templates)
-
-        clusterer = LogClusterer()
-        clusters = clusterer.fit_predict(
-            unique_templates, vectors, deduper.get_all_groups(), deduper.get_all_counts()
-        )
-
-        # 4. Anomaly Detection
-        anomalies = None
-        if request.baseline:
-            bm = BaselineManager(request.baseline)
-            scorer = AnomalyScorer(bm)
-            results = scorer.score_batch(unique_templates, vectors)
-            anomalies = {res.template: res for res in results}
-
-        # 5. Intelligence
-        llm_payload = None
-        if request.intelligence:
-            settings.llm_enabled = True
-            intel = IncidentIntelligence()
-            llm_payload = intel.generate_summary(clusters, anomalies, top_n=request.top_n)
-
-        # 6. Safety check for intelligence payload
-        if llm_payload:
-            hints = llm_payload.get("root_cause_hints", [])
-            if isinstance(hints, str):
-                llm_payload["root_cause_hints"] = [h.strip("- ").strip() for h in hints.split("\n") if h.strip()]
-
-        # 7. Format Response
-        formatted_clusters = []
-        summaries = llm_payload.get("cluster_summaries", []) if llm_payload else []
-
-        for i, c in enumerate(clusters):
-            cluster_data = {
-                "id": c.cluster_id,
-                "cluster_id": c.cluster_id,
-                "size": c.size,
-                "summary": summaries[i] if i < len(summaries) else "Analyzing...",
-                "source": f"{c.representative_source}:{c.representative_line}",
-                "representative_log": c.representative_raw,
-                "representative_template": c.representative_template,
-                "representative_timestamp_ms": getattr(c, "representative_timestamp_ms", 0),
-                "anomaly_label": "known",
-                "anomaly_score": 0.0
-            }
-
-            if anomalies and c.representative_template in anomalies:
-                res = anomalies[c.representative_template]
-                cluster_data["anomaly_label"] = res.label.value
-                cluster_data["anomaly_score"] = res.distance
-
-            if llm_payload and "cluster_summaries" in llm_payload:
-                idx = clusters.index(c)
-                if idx < len(llm_payload["cluster_summaries"]):
-                    cluster_data["summary"] = llm_payload["cluster_summaries"][idx]
-
-            formatted_clusters.append(cluster_data)
-
-        # 8. Causal Observability Correlation (Phase 2, Task 11 + 13)
-        scorer = CausalScorer()
-        causal_links = scorer.analyze(clusters, deduper.get_all_groups())
-        
-        # LLM Causal Chain Narration (Phase 2, Task 13)
-        narratives = {}
-        if request.intelligence and causal_links:
-            try:
-                intel = IncidentIntelligence()
-                narratives = intel.narrate_causal_links(causal_links)
-            except Exception as e:
-                logger.error(f"Failed to generate causal narration: {e}")
-
-        formatted_links = []
-        for link in causal_links:
-            key = f"{link.source_service}->{link.target_service}"
-            narrative_val = narratives.get(key)
-            if not narrative_val:
-                # Local heuristic fallback description
-                narrative_val = (
-                    f"Anomalous pattern in {link.source_service} co-occurred with a warning in {link.target_service} "
-                    f"after an average delay of {link.avg_delay_ms:.1f}ms (Confidence: {link.confidence * 100:.0f}%)."
-                )
-
-            formatted_links.append({
-                "source_cluster_id": link.source_cluster_id,
-                "target_cluster_id": link.target_cluster_id,
-                "source_service": link.source_service,
-                "target_service": link.target_service,
-                "source_template": link.source_template,
-                "target_template": link.target_template,
-                "confidence": link.confidence,
-                "avg_delay_ms": link.avg_delay_ms,
-                "occurrences": link.occurrences,
-                "direction": link.direction,
-                "narrative": narrative_val
-            })
-
-        # 9. Severity Triage (Phase 2, Task 14)
-        sev_scorer = SeverityScorer()
-        severity_map = sev_scorer.score_all(clusters, anomalies, causal_links)
-
-        # Back-annotate severity onto formatted_clusters
-        for fc in formatted_clusters:
-            sev = severity_map.get(fc["cluster_id"])
-            if sev:
-                fc["priority"] = sev.priority
-                fc["composite_severity_score"] = sev.composite_score
-                fc["severity_breakdown"] = sev.breakdown
-                fc["keyword_flag"] = sev.keyword_flag
-            else:
-                fc["priority"] = "P3"
-                fc["composite_severity_score"] = 0.0
-                fc["severity_breakdown"] = {}
-                fc["keyword_flag"] = False
-
-        # 9.5 Create Snapshots for run comparison (Task 16)
-        snapshots = []
-        for fc in formatted_clusters:
-            snapshots.append({
-                "cluster_id": fc["cluster_id"],
-                "template": fc["representative_template"],
-                "size": fc["size"],
-                "anomaly_score": fc.get("anomaly_score", 0.0),
-                "priority": fc.get("priority", "P3"),
-                "composite_severity_score": fc.get("composite_severity_score", 0.0),
-                "keyword_flag": fc.get("keyword_flag", False),
-                "summary": fc.get("summary", ""),
-            })
-
-        # 10. Save to Database
-        duration = time.time() - start_time
-        run_id = f"run_{uuid.uuid4().hex[:8]}"
-        db_run = AnalysisRun(
-            id=run_id,
-            source=request.source,
-            status="Completed",
-            raw_lines=deduper.total_count,
-            cluster_count=len(clusters),
-            reduction_ratio=1.0 - (len(clusters) / deduper.total_count) if deduper.total_count > 0 else 0,
-            duration_sec=duration,
-            clusters_snapshot=snapshots
-        )
-        db.add(db_run)
-
-        # Save incident if intelligence payload found an issue
-        if llm_payload:
-            new_incident = Incident(
-                title=llm_payload.get("failure_domain", "Unknown Failure"),
-                domain=llm_payload.get("failure_domain", "System"),
-                impact_score=min(1.0, len(clusters) / 10.0) if len(clusters) > 1 else 0.3,
-                summary=llm_payload.get("incident_summary", ""),
-                remediation_hints=llm_payload.get("root_cause_hints", []),
-                run_id=run_id,
-                source=request.source,
-                total_logs=deduper.total_count,
-                cluster_count=len(clusters),
-            )
-            db.add(new_incident)
-
-        db.commit()
-
-        # 11. Alert Routing — auto-dispatch P0/P1 clusters (Task 15)
-        try:
-            critical_clusters = [fc for fc in formatted_clusters if fc.get("priority") in ("P0", "P1")]
-            if critical_clusters and alert_router.list_destinations():
-                # Dispatch the single highest-severity cluster per run
-                top = sorted(critical_clusters, key=lambda c: c.get("composite_severity_score", 0), reverse=True)[0]
-                alert_payload = AlertPayload(
-                    source=request.source,
-                    run_id=run_id,
-                    priority=top["priority"],
-                    cluster_id=top["cluster_id"],
-                    cluster_summary=top.get("summary", top.get("representative_template", "")),
-                    representative_log=top.get("representative_log", ""),
-                    anomaly_score=top.get("anomaly_score", 0.0),
-                    causal_links=formatted_links,
-                    intelligence=llm_payload,
-                    keyword_flag=top.get("keyword_flag", False),
-                )
-                asyncio.create_task(alert_router.dispatch(alert_payload))
-                logger.info(f"Alert dispatch queued for {top['priority']} cluster {top['cluster_id']}")
-        except Exception as ae:
-            logger.error(f"Alert routing error (non-fatal): {ae}")
-
-        # 10.5 Metrics Correlation (Phase 3, Task 15)
-        # Attach host telemetry context to each incident cluster based on its representative log timestamp.
-        metrics_context = {"status": "disabled", "clusters_correlated": 0, "clusters_total": 0}
-        try:
-            correlator = MetricsCorrelator()
-            clusters_total = 0
-            clusters_correlated = 0
-
-            for fc in formatted_clusters:
-                # Noise cluster / non-incident clusters don't require metrics context per spec.
-                if fc.get("cluster_id") == -1:
-                    fc["metrics_context"] = {"status": "skipped_noise"}
-                    continue
-
-                clusters_total += 1
-                priority = fc.get("priority", "P3")
-                if priority not in ("P0", "P1", "P2"):
-                    fc["metrics_context"] = {"status": "skipped_non_incident"}
-                    continue
-
-                ts_ms = int(fc.get("representative_timestamp_ms") or 0)
-                if ts_ms <= 0:
-                    fc["metrics_context"] = {"status": "no_timestamp"}
-                    continue
-
-                ctx = correlator.get_context_for_anomaly(ts_ms, window_ms=30000)
-                fc["metrics_context"] = ctx
-                if ctx.get("status") == "correlated":
-                    clusters_correlated += 1
-
-            metrics_context = {
-                "status": "correlated" if clusters_correlated > 0 else "no_data",
-                "clusters_correlated": clusters_correlated,
-                "clusters_total": clusters_total,
-            }
-        except Exception as e:
-            logger.error(f"Metrics correlator failed: {e}")
-            metrics_context = {"status": "error", "message": str(e)}
-
-        return {
-            "total_logs": deduper.total_count,
-            "clusters": formatted_clusters,
-            "intelligence": llm_payload,
-            "causal_links": formatted_links,
-            "metrics_context": metrics_context,
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+    return response
 
 
 # ─── INCIDENTS — CRUD + drill-down ───────────────────────────────────────────

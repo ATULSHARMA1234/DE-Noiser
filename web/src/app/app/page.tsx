@@ -3,9 +3,21 @@
 import React, { useState, useEffect } from 'react';
 import ReactEcharts from 'echarts-for-react';
 import * as echarts from 'echarts';
-import { Database, TrendingUp, TrendingDown, Zap, Loader2, AlertTriangle, RefreshCw, FileText, Cpu, MemoryStick, HardDrive, Wifi } from 'lucide-react';
+import { Database, TrendingUp, Zap, Loader2, AlertTriangle, RefreshCw, FileText, Cpu, MemoryStick, HardDrive, Wifi } from 'lucide-react';
 import { LineChart, Line, ResponsiveContainer, YAxis } from 'recharts';
-import { apiFetch, apiPost } from '@/lib/api';
+import { apiFetch, runAnalysis as runAnalysisJob } from '@/lib/api';
+
+const seededValue = (index: number, seed: number) => {
+  const x = Math.sin(index * 12.9898 + seed * 78.233) * 43758.5453;
+  return x - Math.floor(x);
+};
+
+const INITIAL_METRICS = Array.from({ length: 60 }, (_, i) => ({
+  time: `05:${i.toString().padStart(2, '0')}`,
+  cpu: i > 25 && i < 35 ? seededValue(i, 1) * 0.1 + 0.85 : seededValue(i, 2) * 0.2 + 0.3,
+  mem: i > 26 ? seededValue(i, 3) * 0.1 + 0.8 : seededValue(i, 4) * 0.1 + 0.4,
+  anomaly: (i === 26 || i === 28) ? 0.9 : null,
+}));
 
 function Sparkline({ data, dataKey, color }: { data: any[], dataKey: string, color: string }) {
   return (
@@ -29,12 +41,7 @@ export default function CommandCenter() {
   const [elapsedTime, setElapsedTime] = useState(0);
 
   // Mock time series data for the metrics chart
-  const [metrics] = useState<any[]>(Array.from({ length: 60 }, (_, i) => ({ 
-    time: `05:${i.toString().padStart(2, '0')}`, 
-    cpu: i > 25 && i < 35 ? (Math.random() * 0.1 + 0.85) : (Math.random() * 0.2 + 0.3),
-    mem: i > 26 ? (Math.random() * 0.1 + 0.8) : (Math.random() * 0.1 + 0.4),
-    anomaly: (i === 26 || i === 28) ? 0.9 : null
-  })));
+  const [metrics] = useState<any[]>(INITIAL_METRICS);
 
   // Real-time sparkline data (Task 16)
   const [vitals, setVitals] = useState<any[]>(
@@ -95,7 +102,7 @@ export default function CommandCenter() {
     setError(null);
     setData(null);
     try {
-      const result = await apiPost('/analyze', { source: target, intelligence: true });
+      const result = await runAnalysisJob({ source: target, intelligence: true });
       setData(result);
     } catch (err: any) {
       setError(err.message || 'Connection failed. Is the Python backend running on port 8000?');
@@ -141,10 +148,11 @@ export default function CommandCenter() {
       data.clusters.forEach((c: any, idx: number) => {
         const count = Math.min(c.size, 50);
         for (let i = 0; i < count; i++) {
+          const pointIndex = idx * 50 + i;
           scatterData.push([
-            Math.random() * 8 + idx * 2, 
-            Math.random() * 8, 
-            Math.random() * 3 + 2,
+            seededValue(pointIndex, 5) * 8 + idx * 2,
+            seededValue(pointIndex, 6) * 8,
+            seededValue(pointIndex, 7) * 3 + 2,
             c.cluster_id === -1 ? 'Noise' : `C${c.cluster_id}`
           ]);
         }
@@ -167,9 +175,11 @@ export default function CommandCenter() {
       };
     }
     // Fallback placeholder
-    const scatterData = Array.from({ length: 150 }, () => [
-      Math.random() * 10, Math.random() * 10, Math.random() * 5 + 2, 
-      Math.random() > 0.9 ? 'C1' : Math.random() > 0.8 ? 'C2' : 'Noise'
+    const scatterData = Array.from({ length: 150 }, (_, i) => [
+      seededValue(i, 8) * 10,
+      seededValue(i, 9) * 10,
+      seededValue(i, 10) * 5 + 2,
+      seededValue(i, 11) > 0.9 ? 'C1' : seededValue(i, 12) > 0.8 ? 'C2' : 'Noise'
     ]);
     return {
       backgroundColor: 'transparent',

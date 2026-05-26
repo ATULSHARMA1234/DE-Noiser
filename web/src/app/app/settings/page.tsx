@@ -1,19 +1,22 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { Shield, Cpu, HardDrive, Save, Check, RefreshCw, Webhook, Plus, Trash2, TestTube2, Bell, CheckCircle2, XCircle, AlertTriangle, ChevronDown } from 'lucide-react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Shield, Cpu, HardDrive, Save, Check, RefreshCw, Webhook, Plus, Trash2, TestTube2, Bell, CheckCircle2, XCircle, AlertTriangle, ChevronDown, Cloud } from 'lucide-react';
 import { apiFetch, apiPut, apiPost, apiDelete } from '@/lib/api';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+type ChannelType = 'slack' | 'pagerduty' | 'teams' | 'generic';
+type JsonObject = Record<string, unknown>;
+
 interface WebhookDest {
   id: string;
   name: string;
-  channel_type: 'slack' | 'pagerduty' | 'teams' | 'generic';
+  channel_type: ChannelType;
   url: string;
   min_priority: string;
   enabled: boolean;
-  extra: Record<string, any>;
+  extra: JsonObject;
 }
 
 interface DeliveryRecord {
@@ -25,6 +28,44 @@ interface DeliveryRecord {
   latency_ms: number;
   error: string | null;
   timestamp: string;
+}
+
+interface SettingsState {
+  store_raw_logs: boolean;
+  redact_pii: boolean;
+  llm_model: string;
+  confidence_threshold: number;
+  retention_days: number;
+  sampling_threshold: number;
+  auto_analyze: boolean;
+  s3_enabled: boolean;
+  s3_endpoint: string;
+  s3_bucket: string;
+  s3_access_key: string;
+  s3_secret_key: string;
+}
+
+type SettingKey = keyof SettingsState;
+type BooleanSettingKey = 'store_raw_logs' | 'redact_pii' | 'auto_analyze';
+
+interface NewWebhook {
+  name: string;
+  channel_type: ChannelType;
+  url: string;
+  min_priority: string;
+  enabled: boolean;
+  extra: JsonObject;
+}
+
+interface TestWebhookResult {
+  status: 'delivered' | 'failed' | 'skipped';
+  http_status?: number | null;
+  latency_ms?: number;
+  error?: string | null;
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : 'Unknown error';
 }
 
 // ── Toggle ────────────────────────────────────────────────────────────────────
@@ -52,7 +93,7 @@ const CHANNEL_ICONS: Record<string, string> = {
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
-  const [settings, setSettings] = useState({
+  const [settings, setSettings] = useState<SettingsState>({
     store_raw_logs: true,
     redact_pii: true,
     llm_model: 'llama-3.3-70b',
@@ -60,6 +101,11 @@ export default function SettingsPage() {
     retention_days: 30,
     sampling_threshold: 50000,
     auto_analyze: false,
+    s3_enabled: false,
+    s3_endpoint: 'http://localhost:9000',
+    s3_bucket: 'semanticos-logs',
+    s3_access_key: 'admin',
+    s3_secret_key: 'password123',
   });
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -69,37 +115,49 @@ export default function SettingsPage() {
   const [showAddForm, setShowAddForm] = useState(false);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [showLog, setShowLog] = useState(false);
-  const [newWebhook, setNewWebhook] = useState({
-    name: '', channel_type: 'slack', url: '', min_priority: 'P1', enabled: true, extra: {} as Record<string, any>,
+  const [newWebhook, setNewWebhook] = useState<NewWebhook>({
+    name: '', channel_type: 'slack', url: '', min_priority: 'P1', enabled: true, extra: {},
   });
   const [addError, setAddError] = useState<string | null>(null);
   const [addLoading, setAddLoading] = useState(false);
 
-  useEffect(() => {
-    apiFetch('/settings')
-      .then(data => { setSettings(prev => ({ ...prev, ...data })); setLoading(false); })
-      .catch(() => setLoading(false));
-    fetchWebhooks();
-    fetchDeliveryLog();
+  const fetchWebhooks = useCallback(async () => {
+    try { setWebhooks(await apiFetch('/webhooks') as WebhookDest[]); } catch {}
   }, []);
 
-  const fetchWebhooks = async () => {
-    try { setWebhooks(await apiFetch('/webhooks')); } catch {}
-  };
+  const fetchDeliveryLog = useCallback(async () => {
+    try { setDeliveryLog(await apiFetch('/webhooks/log?limit=20') as DeliveryRecord[]); } catch {}
+  }, []);
 
-  const fetchDeliveryLog = async () => {
-    try { setDeliveryLog(await apiFetch('/webhooks/log?limit=20')); } catch {}
-  };
+  useEffect(() => {
+    let active = true;
+
+    void Promise.all([
+      apiFetch('/settings').catch(() => null),
+      apiFetch('/webhooks').catch(() => []),
+      apiFetch('/webhooks/log?limit=20').catch(() => []),
+    ]).then(([settingsData, webhookData, deliveryData]) => {
+      if (!active) return;
+      if (settingsData) {
+        setSettings(prev => ({ ...prev, ...(settingsData as Partial<SettingsState>) }));
+      }
+      setWebhooks(webhookData as WebhookDest[]);
+      setDeliveryLog(deliveryData as DeliveryRecord[]);
+      setLoading(false);
+    });
+
+    return () => { active = false; };
+  }, []);
 
   const handleSave = async () => {
     try {
       await apiPut('/settings', settings);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
-    } catch (e: any) { alert(`Failed to save: ${e.message}`); }
+    } catch (e: unknown) { alert(`Failed to save: ${errorMessage(e)}`); }
   };
 
-  const updateSetting = (key: string, value: any) => {
+  const updateSetting = <K extends SettingKey>(key: K, value: SettingsState[K]) => {
     setSettings(prev => ({ ...prev, [key]: value }));
     setSaved(false);
   };
@@ -112,8 +170,8 @@ export default function SettingsPage() {
       await fetchWebhooks();
       setShowAddForm(false);
       setNewWebhook({ name: '', channel_type: 'slack', url: '', min_priority: 'P1', enabled: true, extra: {} });
-    } catch (e: any) {
-      setAddError(e.message || 'Failed to register webhook');
+    } catch (e: unknown) {
+      setAddError(errorMessage(e) || 'Failed to register webhook');
     } finally { setAddLoading(false); }
   };
 
@@ -122,7 +180,7 @@ export default function SettingsPage() {
     try {
       await apiDelete(`/webhooks/${id}`);
       setWebhooks(prev => prev.filter(w => w.id !== id));
-    } catch (e: any) { alert(`Delete failed: ${e.message}`); }
+    } catch (e: unknown) { alert(`Delete failed: ${errorMessage(e)}`); }
   };
 
   const handleToggleWebhook = async (wh: WebhookDest) => {
@@ -135,14 +193,14 @@ export default function SettingsPage() {
   const handleTestFire = async (id: string) => {
     setTestingId(id);
     try {
-      const result = await apiPost(`/webhooks/${id}/test`, {});
+      const result = await apiPost(`/webhooks/${id}/test`, {}) as TestWebhookResult;
       await fetchDeliveryLog();
       if (result.status === 'delivered') {
         alert(`Test alert delivered! HTTP ${result.http_status} in ${result.latency_ms?.toFixed(0)}ms`);
       } else {
         alert(`Test delivery failed: ${result.error || 'Unknown error'}`);
       }
-    } catch (e: any) { alert(`Test failed: ${e.message}`); }
+    } catch (e: unknown) { alert(`Test failed: ${errorMessage(e)}`); }
     finally { setTestingId(null); }
   };
 
@@ -181,17 +239,17 @@ export default function SettingsPage() {
             <Shield size={24} className="text-emerald-500" />
           </div>
           <div className="space-y-6">
-            {[
+            {([
               { key: 'store_raw_logs', label: 'Store Raw Logs', desc: 'Keep a local copy of ingested raw logs for deeper forensics.' },
               { key: 'redact_pii', label: 'Auto-Redact PII (IPs, Emails, Tokens)', desc: 'Mask sensitive data before passing to local LLM or clustering.' },
               { key: 'auto_analyze', label: 'Auto-Analyze on Upload', desc: 'Automatically trigger analysis when a new log file is uploaded.' },
-            ].map(({ key, label, desc }) => (
+            ] satisfies { key: BooleanSettingKey; label: string; desc: string }[]).map(({ key, label, desc }) => (
               <div key={key} className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-bold text-white mb-1">{label}</p>
                   <p className="text-[10px] text-zinc-500">{desc}</p>
                 </div>
-                <Toggle checked={(settings as any)[key]} onChange={() => updateSetting(key, !(settings as any)[key])} />
+                <Toggle checked={settings[key]} onChange={() => updateSetting(key, !settings[key])} />
               </div>
             ))}
           </div>
@@ -255,6 +313,52 @@ export default function SettingsPage() {
           </div>
         </div>
 
+        {/* Object Storage */}
+        <div className="bg-[#121214] border-none rounded-xl p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-6 pb-6 border-b border-white/5">
+            <div>
+              <h2 className="text-sm font-bold text-white mb-1">Object Storage Archive</h2>
+              <p className="text-xs text-zinc-500">Compress and archive logs past the retention window to S3-compatible storage.</p>
+            </div>
+            <Cloud size={24} className="text-cyan-400" />
+          </div>
+          <div className="space-y-5">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-bold text-white mb-1">Enable S3/MinIO Archival</p>
+                <p className="text-[10px] text-zinc-500">The retention scheduler uploads compressed old logs before deleting local copies.</p>
+              </div>
+              <Toggle checked={settings.s3_enabled} onChange={() => updateSetting('s3_enabled', !settings.s3_enabled)} />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <p className="text-xs font-bold text-zinc-300 mb-2">Endpoint</p>
+                <input value={settings.s3_endpoint}
+                  onChange={e => updateSetting('s3_endpoint', e.target.value)}
+                  className="w-full bg-[#1a1a1c] border border-white/10 text-white text-sm rounded-md px-4 py-2.5 outline-none font-mono" />
+              </div>
+              <div>
+                <p className="text-xs font-bold text-zinc-300 mb-2">Bucket</p>
+                <input value={settings.s3_bucket}
+                  onChange={e => updateSetting('s3_bucket', e.target.value)}
+                  className="w-full bg-[#1a1a1c] border border-white/10 text-white text-sm rounded-md px-4 py-2.5 outline-none font-mono" />
+              </div>
+              <div>
+                <p className="text-xs font-bold text-zinc-300 mb-2">Access Key</p>
+                <input value={settings.s3_access_key}
+                  onChange={e => updateSetting('s3_access_key', e.target.value)}
+                  className="w-full bg-[#1a1a1c] border border-white/10 text-white text-sm rounded-md px-4 py-2.5 outline-none font-mono" />
+              </div>
+              <div>
+                <p className="text-xs font-bold text-zinc-300 mb-2">Secret Key</p>
+                <input type="password" value={settings.s3_secret_key}
+                  onChange={e => updateSetting('s3_secret_key', e.target.value)}
+                  className="w-full bg-[#1a1a1c] border border-white/10 text-white text-sm rounded-md px-4 py-2.5 outline-none font-mono" />
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* Alert Routing */}
         <div className="bg-[#121214] border border-white/5 rounded-xl shadow-sm overflow-hidden">
           <div className="flex items-center justify-between p-6 border-b border-white/5">
@@ -284,7 +388,7 @@ export default function SettingsPage() {
                 </div>
                 <div>
                   <label className="text-[10px] font-bold text-zinc-500 uppercase block mb-1">Channel Type</label>
-                  <select value={newWebhook.channel_type} onChange={e => setNewWebhook(p => ({ ...p, channel_type: e.target.value as any }))}
+                  <select value={newWebhook.channel_type} onChange={e => setNewWebhook(p => ({ ...p, channel_type: e.target.value as ChannelType }))}
                     className="w-full bg-[#121214] border border-white/10 text-white text-xs rounded-lg px-3 py-2 outline-none appearance-none cursor-pointer focus:border-fuchsia-500/50">
                     <option value="slack">Slack</option>
                     <option value="pagerduty">PagerDuty</option>

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Play, CheckCircle2, Clock, XCircle, Trash2, RefreshCw, GitCompare } from 'lucide-react';
+import { CheckCircle2, Clock, XCircle, Trash2, RefreshCw, GitCompare } from 'lucide-react';
 import { apiFetch, apiDelete } from '@/lib/api';
 import { useRouter } from 'next/navigation';
 
@@ -123,7 +123,7 @@ export default function AnalysisRunsPage() {
             {runs.length === 0 ? (
               <tr>
                 <td colSpan={7} className="p-8 text-center text-zinc-500">
-                  No analysis runs yet. Use the "Run Analysis" button to start one.
+                  No analysis runs yet. Use the Run Analysis button to start one.
                 </td>
               </tr>
             ) : runs.map((run: any) => (

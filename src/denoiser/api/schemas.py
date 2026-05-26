@@ -6,18 +6,24 @@ Task 2: Strongly-typed input validation replaces raw dict payloads.
 
 from __future__ import annotations
 
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field, model_validator
 
 
 # ── Analysis ─────────────────────────────────────────────────────────────────
 
 class AnalysisRequest(BaseModel):
-    source: str = Field(..., description="Path to log file or directory to analyze")
+    source: Optional[str] = Field(None, description="Path to log file or directory to analyze")
     sources: Optional[List[str]] = Field(None, description="Multiple sources for cross-service correlation")
     baseline: Optional[str] = Field(None, description="Path to a baseline index for anomaly comparison")
     intelligence: bool = Field(True, description="Enable LLM-based incident intelligence")
     top_n: int = Field(10, ge=1, le=100, description="Number of top clusters to return")
+
+    @model_validator(mode="after")
+    def _require_source(self) -> "AnalysisRequest":
+        if not self.source and not self.sources:
+            raise ValueError("Either source or sources must be provided")
+        return self
 
 
 class ClusterResponse(BaseModel):
@@ -74,6 +80,11 @@ class SettingsUpdate(BaseModel):
     sampling_threshold: Optional[int] = Field(None, ge=1000)
     auto_analyze: Optional[bool] = None
     slack_webhook_url: Optional[str] = None
+    s3_enabled: Optional[bool] = None
+    s3_endpoint: Optional[str] = None
+    s3_bucket: Optional[str] = None
+    s3_access_key: Optional[str] = None
+    s3_secret_key: Optional[str] = None
 
 
 # ── Ingestion ────────────────────────────────────────────────────────────────

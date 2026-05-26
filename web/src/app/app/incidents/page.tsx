@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { ShieldAlert, Database, ChevronRight, Clock, CheckCircle2, X, Zap, AlertTriangle, Trash2 } from 'lucide-react';
+import { ShieldAlert, Database, Clock, CheckCircle2, X, Zap, AlertTriangle, Trash2 } from 'lucide-react';
 import { apiFetch, apiPut, apiDelete } from '@/lib/api';
 
 export default function IncidentMemoryPage() {

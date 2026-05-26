@@ -1,7 +1,7 @@
 'use client';
  
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, FileText, Upload, RefreshCw, HardDrive, Trash2, Play, Database, X, Terminal, Cpu } from 'lucide-react';
+import { Plus, FileText, Upload, RefreshCw, HardDrive, Trash2, Play, Database, X, Cpu } from 'lucide-react';
 import { apiFetch, API_BASE, apiDelete } from '@/lib/api';
 import { useRouter } from 'next/navigation';
  

@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Database, Zap, Loader2, AlertTriangle, RefreshCw, FileText, Network, Maximize2, Minimize2, Activity, HelpCircle, ArrowRight, Clock } from 'lucide-react';
-import { apiFetch, apiPost } from '@/lib/api';
+import { Zap, Loader2, AlertTriangle, RefreshCw, FileText, Network, Maximize2, Minimize2, Activity, ArrowRight, Clock } from 'lucide-react';
+import { apiFetch, runAnalysis as runAnalysisJob } from '@/lib/api';
 
 interface Node {
   id: string;
@@ -153,7 +153,7 @@ export default function ServiceTopology() {
     setSelectedLink(null);
 
     try {
-      const result = await apiPost('/analyze', { source: selectedSource, intelligence: true });
+      const result = await runAnalysisJob({ source: selectedSource, intelligence: true });
       
       if (!result.causal_links || result.causal_links.length === 0) {
         setError("Analysis complete, but no cross-service causal co-occurrences were found in these logs. Reverted to interactive demo data.");
@@ -762,7 +762,7 @@ export default function ServiceTopology() {
                   <span className="absolute top-2 right-2 text-[8px] font-bold px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
                     {selectedLink.source} (CAUSE)
                   </span>
-                  <div className="text-zinc-500 mt-2 font-bold select-none">// Log Pattern:</div>
+                  <div className="text-zinc-500 mt-2 font-bold select-none">{'// Log Pattern:'}</div>
                   <div className="text-zinc-300 leading-relaxed mt-1">{selectedLink.sourceTemplate}</div>
                 </div>
 
@@ -780,7 +780,7 @@ export default function ServiceTopology() {
                   <span className="absolute top-2 right-2 text-[8px] font-bold px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">
                     {selectedLink.target} (EFFECT)
                   </span>
-                  <div className="text-zinc-500 mt-2 font-bold select-none">// Log Pattern:</div>
+                  <div className="text-zinc-500 mt-2 font-bold select-none">{'// Log Pattern:'}</div>
                   <div className="text-zinc-300 leading-relaxed mt-1">{selectedLink.targetTemplate}</div>
                 </div>
               </div>

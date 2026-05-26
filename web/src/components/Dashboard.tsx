@@ -3,15 +3,24 @@
 import React, { useState, useEffect, useRef } from 'react';
 import ReactEcharts from 'echarts-for-react';
 import { 
-  Title, Text, Flex, Badge, Divider, Button, 
-  TabGroup, TabList, Tab, TabPanels, TabPanel, Card, Grid,
-  ProgressBar
+  Flex, Badge, Button,
+  TabGroup, TabPanels, TabPanel, Card, Grid
 } from '@tremor/react';
 import { 
-  Zap, ShieldCheck, RefreshCw, Terminal, Activity, BarChart3, 
-  Database, History, TrendingUp, Cpu, LayoutDashboard, AlertTriangle, 
-  Settings, Search, Bell, ShieldAlert, Network
+  Zap, RefreshCw, Terminal, History, LayoutDashboard, Bell
 } from 'lucide-react';
+import { runAnalysis as runAnalysisApi } from '@/lib/api';
+
+const seededValue = (index: number, seed: number) => {
+    const x = Math.sin(index * 12.9898 + seed * 78.233) * 43758.5453;
+    return x - Math.floor(x);
+};
+
+const INITIAL_METRICS = Array.from({ length: 30 }, (_, i) => ({
+    time: i,
+    cpu: 15 + seededValue(i, 1) * 5,
+    mem: 40 + seededValue(i, 2) * 5,
+}));
 
 const StatusBadge = ({ label }: { label: string }) => {
     const colors: Record<string, string> = {
@@ -29,25 +38,22 @@ const StatusBadge = ({ label }: { label: string }) => {
 };
 
 export default function Dashboard({ userRole }: { userRole: 'admin' | 'sre' | 'viewer' | null }) {
+    void userRole;
+
     const [activeTab, setActiveTab] = useState(0);
     const [loading, setLoading] = useState(false);
     const [data, setData] = useState<any>(null);
     const [liveLogs, setLiveLogs] = useState<string[]>([]);
-    const [metrics, setMetrics] = useState<any[]>(Array.from({ length: 30 }, (_, i) => ({ time: i, cpu: 15 + Math.random() * 5, mem: 40 + Math.random() * 5 })));
+    const [metrics] = useState<any[]>(INITIAL_METRICS);
     const scrollRef = useRef<HTMLDivElement>(null);
 
     const runAnalysis = async () => {
         setLoading(true);
         try {
-            const response = await fetch('http://localhost:8000/analyze', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ source: 'data/stress_test_1M.log', intelligence: true })
-            });
-            const result = await response.json();
+            const result = await runAnalysisApi({ source: 'data/stress_test_1M.log', intelligence: true });
             setData(result);
             setLiveLogs(prev => [...prev, `[NEURAL ENGINE] Signal Synchronization Successful.`]);
-        } catch (err) {
+        } catch {
             setLiveLogs(prev => [...prev, `[ERROR] Analysis connection failed.`]);
         } finally {
             setLoading(false);
@@ -65,26 +71,6 @@ export default function Dashboard({ userRole }: { userRole: 'admin' | 'sre' | 'v
     useEffect(() => {
         if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }, [liveLogs]);
-
-    const getTopologyOption = () => {
-        if (!data?.clusters) return {};
-        const scatterData = data.clusters.map((c: any) => [
-            Math.random() * 10, Math.random() * 10, c.size, c.summary,
-            c.cluster_id === -1 ? '#f43f5e' : '#10b981'
-        ]);
-        return {
-            backgroundColor: 'transparent',
-            tooltip: { trigger: 'item' },
-            grid: { top: 10, bottom: 10, left: 10, right: 10 },
-            xAxis: { show: false }, yAxis: { show: false },
-            series: [{
-                type: 'scatter',
-                symbolSize: (val: any) => Math.log(val[2] + 1) * 15,
-                data: scatterData,
-                itemStyle: { color: (p: any) => p.data[4], opacity: 0.6 }
-            }]
-        };
-    };
 
     const getMetricOption = () => ({
         backgroundColor: 'transparent',

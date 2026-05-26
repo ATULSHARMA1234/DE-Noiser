@@ -1,10 +1,10 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { LayoutGrid, Terminal, ShieldAlert, History, Database, Settings, Search, Play, Cpu, X, Upload, FileText, Loader2, Network } from 'lucide-react';
-import { apiFetch, apiPost } from '@/lib/api';
+import { LayoutGrid, Terminal, ShieldAlert, History, Database, Settings, Search, Play, Cpu, X, FileText, Loader2, Network } from 'lucide-react';
+import { apiFetch, runAnalysis } from '@/lib/api';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -41,7 +41,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     if (!selectedSource) return;
     setIsRunning(true);
     try {
-      await apiPost('/analyze', { source: selectedSource, intelligence: true });
+      await runAnalysis({ source: selectedSource, intelligence: true });
       setShowRunModal(false);
       // Navigate to command center to see results
       router.push('/app');

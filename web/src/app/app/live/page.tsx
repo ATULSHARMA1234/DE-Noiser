@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Pause, Play, Filter, TerminalSquare, Trash2, Download } from 'lucide-react';
+import { Pause, Play, TerminalSquare, Trash2, Download } from 'lucide-react';
 import { WS_BASE } from '@/lib/api';
 
 type LogEntry = {

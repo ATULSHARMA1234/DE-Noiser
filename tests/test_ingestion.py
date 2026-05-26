@@ -3,14 +3,14 @@ Task 7: Unit tests for the log ingestion pipeline.
 Tests LogReader, Normalizer, and Deduplicator.
 """
 
-import os
-import tempfile
+import io
 import pytest
 
 from denoiser.ingestion.reader import LogReader
+from denoiser.ingestion.stdin import StdinReader
 from denoiser.preprocessing.normalization import Normalizer
 from denoiser.preprocessing.deduplication import Deduplicator
-from denoiser.preprocessing.redaction import Redactor
+from denoiser.exceptions import IngestionError
 
 
 # ── LogReader Tests ──────────────────────────────────────────────────────────
@@ -57,6 +57,63 @@ class TestLogReader:
         # Should only get the .log file
         texts = [r.raw_text for r in records]
         assert any("real log line" in t for t in texts)
+
+    def test_missing_path_raises_ingestion_error(self, tmp_path):
+        """LogReader should raise a domain error for missing paths."""
+        reader = LogReader()
+        with pytest.raises(IngestionError):
+            list(reader.read(tmp_path / "missing.log"))
+
+    def test_jsonl_extracts_message_and_metadata(self, tmp_path):
+        """JSONL records should expose message text and structured metadata."""
+        log_file = tmp_path / "structured.jsonl"
+        log_file.write_text('{"message":"structured failure","level":"ERROR"}\nnot-json\n')
+
+        records = list(LogReader().read(log_file))
+
+        assert records[0].raw_text == "structured failure"
+        assert records[0].metadata["level"] == "ERROR"
+        assert records[1].raw_text == "not-json"
+
+    def test_long_line_is_truncated(self, tmp_path):
+        """Very long log lines should be capped before processing."""
+        log_file = tmp_path / "long.log"
+        log_file.write_text("x" * 50)
+        reader = LogReader()
+        reader.max_line_length = 10
+
+        records = list(reader.read(log_file))
+
+        assert records[0].raw_text == "x" * 10
+
+
+class TestStdinReader:
+    """Tests for stdin ingestion."""
+
+    def test_reads_plain_stdin_lines(self, monkeypatch):
+        monkeypatch.setattr("sys.stdin", io.StringIO("first\n\nsecond\n"))
+
+        records = list(StdinReader().read())
+
+        assert [r.raw_text for r in records] == ["first", "second"]
+        assert all(r.source == "stdin" for r in records)
+
+    def test_reads_json_stdin_message(self, monkeypatch):
+        monkeypatch.setattr("sys.stdin", io.StringIO('{"msg":"hello","level":"INFO"}\n'))
+
+        records = list(StdinReader().read())
+
+        assert records[0].raw_text == "hello"
+        assert records[0].metadata["level"] == "INFO"
+
+    def test_truncates_long_stdin_line(self, monkeypatch):
+        monkeypatch.setattr("sys.stdin", io.StringIO("abcdef\n"))
+        reader = StdinReader()
+        reader.max_line_length = 3
+
+        records = list(reader.read())
+
+        assert records[0].raw_text == "abc"
 
 
 # ── Normalizer Tests ─────────────────────────────────────────────────────────
@@ -122,3 +179,18 @@ class TestDeduplicator:
 
         templates = deduper.get_unique_templates()
         assert len(templates) == 3
+
+    def test_dedup_falls_back_to_raw_text_and_clear(self):
+        """Records without normalized text are still grouped and can be cleared."""
+        from denoiser.ingestion.models import LogRecord
+
+        deduper = Deduplicator()
+        deduper.add(LogRecord(raw_text="raw only", source="test.log", line_number=1))
+
+        assert deduper.get_records_for_template("raw only")
+        assert deduper.unique_count == 1
+
+        deduper.clear()
+
+        assert deduper.total_count == 0
+        assert deduper.unique_count == 0

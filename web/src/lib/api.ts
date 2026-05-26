@@ -30,3 +30,27 @@ export async function apiPut(path: string, body: any) {
 export async function apiDelete(path: string) {
   return apiFetch(path, { method: 'DELETE' });
 }
+
+export async function runAnalysis(body: any) {
+  // Submit the job to Celery
+  const initRes = await apiPost('/analyze', body);
+  
+  if (!initRes.task_id) {
+      return initRes; // fallback in case it was synchronous
+  }
+
+  const taskId = initRes.task_id;
+  
+  // Poll until completion
+  while (true) {
+      await new Promise(r => setTimeout(r, 1000));
+      const statusRes = await apiFetch(`/tasks/${taskId}`);
+      
+      if (statusRes.status === 'SUCCESS') {
+          return statusRes.result;
+      } else if (statusRes.status === 'FAILURE') {
+          throw new Error('Analysis job failed on the backend.');
+      }
+      // If 'PENDING' or 'PROGRESS', just continue loop
+  }
+}
