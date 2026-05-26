@@ -14,6 +14,9 @@ from typing import Any, List, Optional
 from denoiser.logging import get_logger
 
 logger = get_logger(__name__)
+import redis.asyncio as redis_asyncio
+
+redis_client = redis_asyncio.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"), decode_responses=True)
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -249,6 +252,11 @@ async def ingest_logs(payload: IngestPayload):
         # Assuming body is a list of dicts, if strings, we skip ClickHouse for now
         if isinstance(body[0], dict):
             clickhouse_store.insert_logs(body)
+            
+        # Task 45: Publish to Redis Pub/Sub for horizontally scaled WebSockets
+        for log_entry in body:
+            msg = json.dumps(log_entry) if isinstance(log_entry, dict) else str(log_entry)
+            await redis_client.publish("log_stream", msg)
                     
         return {"status": "success", "ingested": len(body)}
     except Exception as e:
@@ -504,85 +512,58 @@ def update_settings(new_settings: SettingsUpdate):
 @app.websocket("/stream")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
+    
+    # Task 45: Redis Pub/Sub for WebSockets
+    pubsub = redis_client.pubsub()
+    await pubsub.subscribe("log_stream")
+    
     try:
-        # Check if there's a specific file to tail
-        data = None
-        try:
-            data = await asyncio.wait_for(websocket.receive_json(), timeout=2.0)
-        except (asyncio.TimeoutError, Exception):
-            pass
-
-        target_file = data.get("file") if data else None
-
-        if target_file and Path(target_file).exists():
-            # Real file tailing mode
-            await _tail_file(websocket, Path(target_file))
-        else:
-            # Demo stream mode — cycle through simulated production logs
-            await _demo_stream(websocket)
-
-    except WebSocketDisconnect:
-        pass
-
-
-async def _tail_file(ws: WebSocket, path: Path):
-    """Tail a real log file and stream new lines as they appear."""
-    line_id = 0
-    with open(path, "r") as f:
-        # Start from end of file
-        f.seek(0, 2)
-        while True:
-            line = f.readline()
-            if line:
+        # We simulate the UI format expected by the frontend
+        # The frontend expects {id, level, service, message, timestamp}
+        line_id = 0
+        async for message in pubsub.listen():
+            if message["type"] == "message":
                 line_id += 1
-                level = "INFO"
-                if "ERROR" in line.upper():
-                    level = "ERROR"
-                elif "WARN" in line.upper():
-                    level = "WARN"
-                elif "FATAL" in line.upper() or "CRITICAL" in line.upper():
-                    level = "ANOMALY"
-                await ws.send_json({
-                    "id": str(line_id).zfill(4),
-                    "level": level,
-                    "service": path.stem,
-                    "message": line.strip()[:200],
-                    "timestamp": time.time(),
-                })
-            else:
-                await asyncio.sleep(0.5)
+                try:
+                    payload = json.loads(message["data"])
+                    # Transform raw payload to UI expected format if needed
+                    # If it's just raw log, make a best guess
+                    level = "INFO"
+                    raw_msg = str(payload.get("message", payload.get("log", str(payload))))
+                    if "ERROR" in raw_msg.upper(): level = "ERROR"
+                    elif "WARN" in raw_msg.upper(): level = "WARN"
+                    elif "FATAL" in raw_msg.upper() or "CRITICAL" in raw_msg.upper(): level = "ANOMALY"
+                    
+                    ws_msg = {
+                        "id": str(line_id).zfill(4),
+                        "level": payload.get("level", level).upper(),
+                        "service": payload.get("service", "api"),
+                        "message": raw_msg[:200],
+                        "timestamp": payload.get("timestamp", time.time()),
+                    }
+                    await websocket.send_json(ws_msg)
+                except Exception:
+                    # Fallback for plain string
+                    raw_msg = message["data"]
+                    level = "INFO"
+                    if "ERROR" in raw_msg.upper(): level = "ERROR"
+                    elif "WARN" in raw_msg.upper(): level = "WARN"
+                    
+                    await websocket.send_json({
+                        "id": str(line_id).zfill(4),
+                        "level": level,
+                        "service": "unknown",
+                        "message": raw_msg[:200],
+                        "timestamp": time.time(),
+                    })
+    except WebSocketDisconnect:
+        await pubsub.unsubscribe("log_stream")
+        await pubsub.close()
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}")
+        await pubsub.unsubscribe("log_stream")
+        await pubsub.close()
 
-
-async def _demo_stream(ws: WebSocket):
-    """Simulated production log stream for demo purposes."""
-    demo_logs = [
-        {"level": "INFO",  "service": "api-gateway",   "message": "GET /api/v2/users → 200 OK (12ms)"},
-        {"level": "INFO",  "service": "auth-svc",      "message": "JWT token validated for user_8291"},
-        {"level": "WARN",  "service": "worker-3",      "message": "Memory usage at 82% — approaching threshold"},
-        {"level": "INFO",  "service": "api-gateway",   "message": "POST /api/v2/orders → 201 Created (45ms)"},
-        {"level": "ERROR", "service": "db-primary",    "message": "Connection pool exhausted: 100/100 active connections"},
-        {"level": "INFO",  "service": "cache-layer",   "message": "Redis PING → PONG (0.3ms)"},
-        {"level": "WARN",  "service": "auth-svc",      "message": "Rate limit approaching for tenant org_42"},
-        {"level": "INFO",  "service": "worker-1",      "message": "Job batch_export_7291 completed in 3.2s"},
-        {"level": "ANOMALY", "service": "db-primary",  "message": "Replication lag detected: 4200ms behind primary", "highlight": True},
-        {"level": "ERROR", "service": "api-gateway",   "message": "Upstream timeout: payment-svc did not respond in 5000ms"},
-        {"level": "INFO",  "service": "scheduler",     "message": "Cron job cleanup_stale_sessions triggered"},
-        {"level": "WARN",  "service": "worker-2",      "message": "Disk I/O latency spike: 340ms avg (normal: 12ms)"},
-        {"level": "INFO",  "service": "api-gateway",   "message": "GET /api/v2/health → 200 OK (1ms)"},
-        {"level": "ERROR", "service": "notification-svc", "message": "SMTP relay failed: connection refused to smtp.internal:587"},
-        {"level": "INFO",  "service": "cache-layer",   "message": "Cache hit ratio: 94.2% (last 5m window)"},
-        {"level": "ANOMALY", "service": "k8s-controller", "message": "Pod api-gateway-7f9d8 OOMKilled — restarting (attempt 3/5)", "highlight": True},
-    ]
-    line_id = 0
-    while True:
-        for log in demo_logs:
-            line_id += 1
-            await ws.send_json({
-                "id": str(line_id).zfill(4),
-                "timestamp": time.time(),
-                **log,
-            })
-            await asyncio.sleep(1.5 + (0.5 if log["level"] == "INFO" else 0))
 
 
 # ─── ANALYZE — Core analysis engine ──────────────────────────────────────────
