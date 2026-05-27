@@ -3,12 +3,14 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { LayoutGrid, Terminal, ShieldAlert, History, Database, Settings, Search, Play, Cpu, X, FileText, Loader2, Network, Users, Bell } from 'lucide-react';
+import { LayoutGrid, Terminal, ShieldAlert, History, Database, Settings, Search, Play, Cpu, X, FileText, Loader2, Network, Users, Bell, Sun, Moon } from 'lucide-react';
 import { apiFetch, runAnalysis } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
+import { useTheme } from '@/context/ThemeContext';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, loading, logout, hasRole } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const pathname = usePathname();
   const router = useRouter();
   const [showRunModal, setShowRunModal] = useState(false);
@@ -160,6 +162,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               >
                 <Play size={14} fill="currentColor" /> Run Analysis
               </button>
+              <button
+                 onClick={toggleTheme}
+                 className="p-2 rounded-lg bg-white/[0.02] hover:bg-white/5 border border-white/10 text-zinc-400 hover:text-white cursor-pointer transition-all flex items-center justify-center h-9 w-9"
+                 title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+               >
+                 {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
+               </button>
               <div className="flex items-center gap-3 bg-white/[0.02] border border-white/10 px-3 py-1.5 rounded-full">
                 <div className="flex flex-col text-right hidden md:flex">
                   <span className="text-[10px] font-bold text-white max-w-[120px] truncate">{user.email}</span>
