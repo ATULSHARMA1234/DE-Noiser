@@ -68,11 +68,38 @@ class AnalysisRun(Base):
     clusters_snapshot = Column(JSON, nullable=True)
 
 
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, unique=True, index=True, nullable=False)
+    hashed_password = Column(String, nullable=False)
+    role = Column(String, default="VIEWER", nullable=False)  # ADMIN, ANALYST, VIEWER
+
+
 # ── Session helpers ──────────────────────────────────────────────────────────
 
 def init_db():
-    """Create all tables if they don't exist."""
+    """Create all tables if they don't exist and seed default admin."""
     Base.metadata.create_all(bind=engine)
+    
+    db = SessionLocal()
+    try:
+        admin_email = "admin@semanticos.io"
+        exists = db.query(User).filter(User.email == admin_email).first()
+        if not exists:
+            from passlib.hash import bcrypt
+            admin_user = User(
+                email=admin_email,
+                hashed_password=bcrypt.hash("admin123"),
+                role="ADMIN"
+            )
+            db.add(admin_user)
+            db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
 
 
 def get_db():
