@@ -3,16 +3,18 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { LayoutGrid, Terminal, ShieldAlert, History, Database, Settings, Search, Play, Cpu, X, FileText, Loader2, Network, Users, Bell, Sun, Moon } from 'lucide-react';
+import { LayoutGrid, Terminal, ShieldAlert, History, Database, Settings, Search, Play, Cpu, X, FileText, Loader2, Network, Users, Bell, Sun, Moon, Menu } from 'lucide-react';
 import { apiFetch, runAnalysis } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/context/ThemeContext';
 import { useToast } from '@/context/ToastContext';
+import { OnboardingWizard } from '@/components/OnboardingWizard';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, loading, logout, hasRole } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const { toast } = useToast();
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
   const [showRunModal, setShowRunModal] = useState(false);
@@ -146,15 +148,34 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-screen bg-[#0a0a0c] text-white font-sans overflow-hidden">
       
+      {/* Translucent background overlay on mobile when sidebar drawer is active */}
+      {mobileSidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-black/60 backdrop-blur-xs z-45 md:hidden" 
+          onClick={() => setMobileSidebarOpen(false)} 
+        />
+      )}
+      
       {/* SIDEBAR */}
-      <aside className="w-64 border-r border-white/5 bg-[#0a0a0c] flex flex-col z-50 shrink-0">
+      <aside className={`fixed inset-y-0 left-0 w-64 border-r border-white/5 bg-[#0a0a0c] flex flex-col z-50 shrink-0 transform md:relative md:translate-x-0 transition-transform duration-300 ${
+        mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'
+      }`}>
         
         {/* Logo Area */}
-        <div className="h-16 flex items-center gap-3 px-6 border-b border-transparent shrink-0">
-          <div className="w-6 h-6 bg-transparent flex items-center justify-center">
-             <Cpu size={24} className="text-fuchsia-500" strokeWidth={2.5} />
+        <div className="h-16 flex items-center justify-between px-6 border-b border-transparent shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="w-6 h-6 bg-transparent flex items-center justify-center">
+               <Cpu size={24} className="text-fuchsia-500" strokeWidth={2.5} />
+            </div>
+            <h1 className="text-base font-bold tracking-tight text-white">SemanticOS</h1>
           </div>
-          <h1 className="text-base font-bold tracking-tight text-white">SemanticOS</h1>
+          {/* Close button on mobile */}
+          <button 
+            onClick={() => setMobileSidebarOpen(false)}
+            className="p-1 text-zinc-500 hover:text-white md:hidden cursor-pointer bg-transparent border-none"
+          >
+            <X size={16} />
+          </button>
         </div>
 
         {/* Navigation */}
@@ -195,6 +216,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         {/* TOP HEADER */}
         <header className="h-16 border-b border-white/5 bg-[#0a0a0c] flex items-center justify-between px-8 shrink-0 z-40">
            
+           {/* Mobile hamburger menu */}
+           <button 
+             onClick={() => setMobileSidebarOpen(true)} 
+             className="p-2 -ml-2 mr-3 text-zinc-400 hover:text-white md:hidden cursor-pointer bg-transparent border-none"
+           >
+             <Menu size={20} />
+           </button>
+
            {/* Search Bar */}
            <div className="flex-1 max-w-md">
              <div className="relative flex items-center w-full h-9 rounded-md bg-zinc-900 border border-white/10 px-3 overflow-hidden">
@@ -332,6 +361,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </div>
           </div>
         </div>
+      )}
       {/* ═══ COMMAND PALETTE MODAL ═══ */}
       {showCommandPalette && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[200] flex items-start justify-center pt-[15vh] px-4">
@@ -371,6 +401,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       )}
+      {/* ═══ ONBOARDING WIZARD ═══ */}
+      <OnboardingWizard />
     </div>
   );
 }
