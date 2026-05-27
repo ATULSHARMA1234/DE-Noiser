@@ -127,3 +127,31 @@ class AwsFetchRequest(BaseModel):
 
 class DockerFetchRequest(BaseModel):
     container_name: str
+
+
+# ── Authentication ──────────────────────────────────────────────────────────
+
+class UserLogin(BaseModel):
+    email: str
+    password: str
+
+
+class UserResponse(BaseModel):
+    id: int
+    email: str
+    role: str
+
+    class Config:
+        from_attributes = True
+
+
+class UserCreate(BaseModel):
+    email: str
+    password: str
+    role: str = "VIEWER"  # VIEWER, ANALYST, ADMIN
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserResponse

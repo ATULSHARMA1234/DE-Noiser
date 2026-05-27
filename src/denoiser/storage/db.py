@@ -88,10 +88,11 @@ def init_db():
         admin_email = "admin@semanticos.io"
         exists = db.query(User).filter(User.email == admin_email).first()
         if not exists:
-            from passlib.hash import bcrypt
+            import bcrypt
+            hashed = bcrypt.hashpw(b"admin123", bcrypt.gensalt()).decode("utf-8")
             admin_user = User(
                 email=admin_email,
-                hashed_password=bcrypt.hash("admin123"),
+                hashed_password=hashed,
                 role="ADMIN"
             )
             db.add(admin_user)

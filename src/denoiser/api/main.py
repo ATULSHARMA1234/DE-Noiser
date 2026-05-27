@@ -26,9 +26,10 @@ from sqlalchemy.orm import Session
 
 from denoiser.cli.main import Normalizer, Redactor, Deduplicator, LogReader, LocalEmbeddingProvider, LogClusterer, BaselineManager, AnomalyScorer, IncidentIntelligence
 from denoiser.config import settings, AnalysisMode
-from denoiser.storage.db import init_db, get_db, Incident, AnalysisRun
-from denoiser.api.schemas import AnalysisRequest, AnalysisResponse, ResolveRequest, SettingsUpdate, IngestPayload
+from denoiser.storage.db import init_db, get_db, Incident, AnalysisRun, User
+from denoiser.api.schemas import AnalysisRequest, AnalysisResponse, ResolveRequest, SettingsUpdate, IngestPayload, UserLogin, UserResponse, UserCreate, TokenResponse
 from denoiser.api.middleware import CorrelationIDMiddleware, RateLimitMiddleware, register_exception_handlers
+from denoiser.api.auth import verify_password, create_access_token, get_current_user, require_role
 from denoiser.ingestion.models import LogRecord
 from denoiser.preprocessing.timestamp import TimestampExtractor
 from denoiser.detection.causal_scorer import CausalScorer
@@ -112,6 +113,27 @@ def on_shutdown():
 
 
 # ─── MODELS — Now imported from denoiser.api.schemas ─────────────────────────
+
+
+# ─── AUTHENTICATION ───────────────────────────────────────────────────────────
+
+@app.post("/auth/login", response_model=TokenResponse)
+def login(payload: UserLogin, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == payload.email).first()
+    if not user or not verify_password(payload.password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    
+    access_token = create_access_token(data={"sub": user.email})
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": user
+    }
+
+
+@app.get("/auth/me", response_model=UserResponse)
+def get_me(current_user: User = Depends(get_current_user)):
+    return current_user
 
 
 # ─── HEALTH ───────────────────────────────────────────────────────────────────
