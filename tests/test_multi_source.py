@@ -15,8 +15,16 @@ class TestMultiSourceAnalysis:
 
     @pytest.fixture
     def client(self):
+        from denoiser.api.auth import get_current_user
+        from denoiser.storage.db import User
+        
+        mock_user = User(id=1, email="admin@semanticos.io", role="ADMIN")
+        app.dependency_overrides[get_current_user] = lambda: mock_user
+        
         with TestClient(app) as c:
             yield c
+            
+        app.dependency_overrides.clear()
 
     def test_multi_source_analysis_success(self, client, tmp_path):
         """Analyze should merge multiple sources and return combined results."""

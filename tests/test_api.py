@@ -12,10 +12,21 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture(scope="module")
 def client():
-    """Create a test client for the SemanticOS API."""
+    """Create a test client for the SemanticOS API with bypassed authentication."""
     from denoiser.api.main import app
+    from denoiser.api.auth import get_current_user
+    from denoiser.storage.db import User
+    
+    from denoiser.api.main import verify_ingest_auth
+    
+    mock_user = User(id=1, email="admin@semanticos.io", role="ADMIN")
+    app.dependency_overrides[get_current_user] = lambda: mock_user
+    app.dependency_overrides[verify_ingest_auth] = lambda: None
+    
     with TestClient(app) as c:
         yield c
+        
+    app.dependency_overrides.clear()
 
 
 class TestHealthEndpoint:
