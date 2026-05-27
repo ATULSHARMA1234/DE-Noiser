@@ -35,6 +35,67 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     navItems.push({ name: 'User Directory', path: '/app/users', icon: Users });
   }
 
+  const [showCommandPalette, setShowCommandPalette] = useState(false);
+  const [paletteSearch, setPaletteSearch] = useState('');
+
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Escape closes modals
+      if (e.key === 'Escape') {
+        setShowRunModal(false);
+        setShowCommandPalette(false);
+      }
+
+      // Command+K / Ctrl+K toggles Command Palette
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setShowCommandPalette(prev => !prev);
+      }
+
+      // Command+R / Ctrl+R triggers analysis
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'r') {
+        e.preventDefault();
+        fetchSources();
+        setShowRunModal(true);
+      }
+
+      // Command+L / Ctrl+L routes to live stream
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'l') {
+        e.preventDefault();
+        router.push('/app/live');
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [router]);
+
+  const commandPaletteItems = [
+    { name: 'Go to Command Center', action: () => { router.push('/app'); setShowCommandPalette(false); }, icon: LayoutGrid },
+    { name: 'Go to Live Pulse', action: () => { router.push('/app/live'); setShowCommandPalette(false); }, icon: Terminal },
+    { name: 'Go to Service Topology', action: () => { router.push('/app/topology'); setShowCommandPalette(false); }, icon: Network },
+    { name: 'Go to Incident Memory', action: () => { router.push('/app/incidents'); setShowCommandPalette(false); }, icon: ShieldAlert },
+    { name: 'Go to Analysis Runs', action: () => { router.push('/app/runs'); setShowCommandPalette(false); }, icon: History },
+    { name: 'Go to Sources', action: () => { router.push('/app/sources'); setShowCommandPalette(false); }, icon: Database },
+    { name: 'Go to Alerts Panel', action: () => { router.push('/app/alerts'); setShowCommandPalette(false); }, icon: Bell },
+    { name: 'Go to Settings', action: () => { router.push('/app/settings'); setShowCommandPalette(false); }, icon: Settings },
+  ];
+
+  if (user?.role === 'ADMIN') {
+    commandPaletteItems.push({ name: 'Go to User Directory', action: () => { router.push('/app/users'); setShowCommandPalette(false); }, icon: Users });
+    commandPaletteItems.push({ name: 'Go to Security Audit Logs', action: () => { router.push('/app/audit'); setShowCommandPalette(false); }, icon: ShieldAlert });
+  }
+
+  commandPaletteItems.push(
+    { name: 'Toggle Light/Dark Theme', action: () => { toggleTheme(); setShowCommandPalette(false); }, icon: Sun },
+    { name: 'Trigger New Analysis Modal', action: () => { fetchSources(); setShowRunModal(true); setShowCommandPalette(false); }, icon: Play },
+    { name: 'Sign Out / Log Out', action: () => { logout(); setShowCommandPalette(false); }, icon: X }
+  );
+
+  const filteredCommands = commandPaletteItems.filter(cmd =>
+    cmd.name.toLowerCase().includes(paletteSearch.toLowerCase())
+  );
+
   const fetchSources = async () => {
     try {
       const data = await apiFetch('/sources');
@@ -266,6 +327,44 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                   </>
                 )}
               </button>
+            </div>
+          </div>
+        </div>
+      {/* ═══ COMMAND PALETTE MODAL ═══ */}
+      {showCommandPalette && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[200] flex items-start justify-center pt-[15vh] px-4">
+          <div className="bg-[#0f0f13] border border-white/10 rounded-2xl w-[580px] overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            <div className="p-4 border-b border-white/5 flex items-center gap-3">
+              <Search size={18} className="text-zinc-500 shrink-0" />
+              <input
+                type="text"
+                autoFocus
+                placeholder="Search commands, destinations, actions... (e.g. 'Topology')"
+                value={paletteSearch}
+                onChange={(e) => setPaletteSearch(e.target.value)}
+                className="bg-transparent border-none outline-none text-sm text-zinc-200 w-full placeholder-zinc-600"
+              />
+              <span className="text-[9px] font-bold text-zinc-500 bg-white/5 border border-white/10 px-2 py-1 rounded">ESC</span>
+            </div>
+            
+            <div className="max-h-[300px] overflow-y-auto p-2">
+              {filteredCommands.length === 0 ? (
+                <div className="text-center py-8 text-zinc-500 text-xs">No matching actions found</div>
+              ) : (
+                filteredCommands.map((cmd, idx) => {
+                  const Icon = cmd.icon;
+                  return (
+                    <button
+                      key={idx}
+                      onClick={cmd.action}
+                      className="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-zinc-400 hover:text-white hover:bg-white/[0.04] transition-all cursor-pointer border-none bg-transparent"
+                    >
+                      <Icon size={14} className="text-fuchsia-400 shrink-0" />
+                      <span>{cmd.name}</span>
+                    </button>
+                  );
+                })
+              )}
             </div>
           </div>
         </div>
