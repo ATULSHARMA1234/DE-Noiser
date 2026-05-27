@@ -8,14 +8,22 @@ import { useToast } from '@/context/ToastContext';
 export default function IncidentMemoryPage() {
   const { toast } = useToast();
   const [incidents, setIncidents] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [selectedIncident, setSelectedIncident] = useState<any>(null);
   const [domainFilter, setDomainFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
 
   const fetchIncidents = () => {
+    setIsLoading(true);
     apiFetch('/incidents')
-      .then(data => setIncidents(data))
-      .catch(console.error);
+      .then(data => {
+        setIncidents(data);
+        setIsLoading(false);
+      })
+      .catch(e => {
+        console.error(e);
+        setIsLoading(false);
+      });
   };
 
   useEffect(() => { fetchIncidents(); }, []);
@@ -95,7 +103,21 @@ export default function IncidentMemoryPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-transparent">
-            {filteredIncidents.length === 0 ? (
+            {isLoading ? (
+              Array.from({ length: 5 }).map((_, idx) => (
+                <tr key={idx}>
+                  <td className="p-5"><div className="shimmer-bg h-6 w-16 rounded-full" /></td>
+                  <td className="p-5">
+                    <div className="shimmer-bg h-4 w-40 rounded mb-1.5" />
+                    <div className="shimmer-bg h-3 w-20 rounded" />
+                  </td>
+                  <td className="p-5"><div className="shimmer-bg h-6 w-24 rounded" /></td>
+                  <td className="p-5"><div className="shimmer-bg h-2.5 w-20 rounded" /></td>
+                  <td className="p-5"><div className="shimmer-bg h-4 w-28 rounded" /></td>
+                  <td className="p-5"><div className="shimmer-bg h-4 w-12 rounded" /></td>
+                </tr>
+              ))
+            ) : filteredIncidents.length === 0 ? (
               <tr>
                 <td colSpan={6} className="p-8 text-center text-zinc-500">
                   {incidents.length === 0 ? 'No incidents recorded yet. Run an analysis to generate incidents.' : 'No incidents match filters.'}

@@ -4,19 +4,27 @@ import React, { useState, useEffect } from 'react';
 import { CheckCircle2, Clock, XCircle, Trash2, RefreshCw, GitCompare } from 'lucide-react';
 import { apiFetch, apiDelete } from '@/lib/api';
 import { useRouter } from 'next/navigation';
+import { useToast } from '@/context/ToastContext';
 
 export default function AnalysisRunsPage() {
   const router = useRouter();
+  const { toast } = useToast();
   const [runs, setRuns] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [selectedRuns, setSelectedRuns] = useState<string[]>([]);
 
   const fetchRuns = () => {
+    setIsLoading(true);
     apiFetch('/runs')
       .then(data => {
         setRuns(data);
         setSelectedRuns([]);
+        setIsLoading(false);
       })
-      .catch(console.error);
+      .catch(e => {
+        console.error(e);
+        setIsLoading(false);
+      });
   };
 
   useEffect(() => { fetchRuns(); }, []);
@@ -26,8 +34,9 @@ export default function AnalysisRunsPage() {
     try {
       await apiDelete(`/runs/${runId}`);
       fetchRuns();
+      toast.success('Analysis run deleted successfully.');
     } catch (e: any) {
-      alert(`Failed: ${e.message}`);
+      toast.error(`Delete failed: ${e.message}`);
     }
   };
 
@@ -120,7 +129,22 @@ export default function AnalysisRunsPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-transparent">
-            {runs.length === 0 ? (
+            {isLoading ? (
+              Array.from({ length: 5 }).map((_, idx) => (
+                <tr key={idx}>
+                  <td className="p-5 text-center"><div className="shimmer-bg h-4 w-4 rounded mx-auto" /></td>
+                  <td className="p-5"><div className="shimmer-bg h-6 w-16 rounded-full" /></td>
+                  <td className="p-5"><div className="shimmer-bg h-4 w-28 rounded" /></td>
+                  <td className="p-5"><div className="shimmer-bg h-4 w-40 rounded" /></td>
+                  <td className="p-5">
+                    <div className="shimmer-bg h-4 w-32 rounded mb-1.5" />
+                    <div className="shimmer-bg h-3 w-20 rounded" />
+                  </td>
+                  <td className="p-5"><div className="shimmer-bg h-4 w-28 rounded" /></td>
+                  <td className="p-5 text-right"><div className="shimmer-bg h-4 w-8 rounded ml-auto" /></td>
+                </tr>
+              ))
+            ) : runs.length === 0 ? (
               <tr>
                 <td colSpan={7} className="p-8 text-center text-zinc-500">
                   No analysis runs yet. Use the Run Analysis button to start one.
