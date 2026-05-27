@@ -21,7 +21,7 @@ class MetricsCollector:
         self.interval_seconds = interval_seconds
         self._running = False
         self._task = None
-        
+
         # Initialize net IO counters to get a baseline for diffing
         try:
             self._last_net = psutil.net_io_counters()
@@ -61,7 +61,7 @@ class MetricsCollector:
                 self._append_to_stream(metrics)
             except Exception as e:
                 logger.error(f"Failed to collect metrics: {e}")
-            
+
             await asyncio.sleep(self.interval_seconds)
 
     def collect_snapshot(self) -> dict:
@@ -69,7 +69,7 @@ class MetricsCollector:
         now = time.time()
         cpu_percent = psutil.cpu_percent(interval=None)
         memory = psutil.virtual_memory()
-        
+
         elapsed_net_s = max(1e-6, now - self._last_net_time)
 
         # Network diffs (drops/errors)

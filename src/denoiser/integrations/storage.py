@@ -36,7 +36,7 @@ class S3Storage:
             logger.info(f"Zipping baseline {local_path}...")
             # make_archive returns the path to the created zip file
             zip_file_path = shutil.make_archive(tmp_path.replace(".zip", ""), "zip", local_path)
-            
+
             logger.info(f"Uploading to s3://{self.bucket}/{remote_key}.zip...")
             self.client.upload_file(zip_file_path, self.bucket, f"{remote_key}.zip")
             # Cleanup the specific zip file created by make_archive
@@ -62,11 +62,11 @@ class S3Storage:
         try:
             logger.info(f"Downloading s3://{self.bucket}/{remote_key}.zip...")
             self.client.download_file(self.bucket, f"{remote_key}.zip", tmp_path)
-            
+
             if local_path.exists():
                 shutil.rmtree(local_path)
             local_path.mkdir(parents=True)
-            
+
             logger.info(f"Extracting to {local_path}...")
             shutil.unpack_archive(tmp_path, local_path, "zip")
             return True

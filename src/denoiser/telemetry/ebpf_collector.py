@@ -5,7 +5,6 @@ import threading
 import time
 from pathlib import Path
 
-
 logger = logging.getLogger(__name__)
 
 class EBPFCollector:
@@ -21,7 +20,7 @@ class EBPFCollector:
         self._thread: threading.Thread | None = None
 
         self.events_path = Path("data") / "ebpf_events.jsonl"
-        
+
         if not self.is_supported:
             logger.warning(f"eBPF tracing is not supported on {self.os_type}. eBPFCollector disabled.")
 

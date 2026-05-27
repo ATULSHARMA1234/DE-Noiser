@@ -11,7 +11,6 @@ import sqlite3
 from pathlib import Path
 
 import numpy as np
-import polars as pl
 from sentence_transformers import SentenceTransformer
 
 from denoiser.config import settings
@@ -89,10 +88,10 @@ class LocalEmbeddingProvider:
         self.model_name = settings.embedding_model
         self.batch_size = settings.embedding_batch_size
         self.dimension = settings.embedding_dimension
-        
+
         # We lazy-load the model to keep CLI startup fast for non-embedding commands
         self._model: SentenceTransformer | None = None
-        
+
         cache_dir = settings.ensure_cache_dir()
         self.cache = EmbeddingCache(cache_dir)
 
@@ -104,7 +103,7 @@ class LocalEmbeddingProvider:
                 device = "cuda"
             elif torch.backends.mps.is_available():
                 device = "mps"
-            
+
             logger.info("Loading embedding model", extra={"model": self.model_name, "device": device})
             try:
                 self._model = SentenceTransformer(self.model_name, device=device)
@@ -124,15 +123,15 @@ class LocalEmbeddingProvider:
         for i in range(0, len(texts), chunk_size):
             chunk = texts[i:i + chunk_size]
             cached.update(self.cache.get_many(chunk))
-        
+
         # 2. Identify missing texts
         missing_texts = [t for t in texts if t not in cached]
-        
+
         # 3. Compute missing with hardware acceleration
         if missing_texts:
             self._load_model()
             assert self._model is not None
-            
+
             logger.info("Computing embeddings for unseen templates", extra={"count": len(missing_texts)})
             try:
                 computed_vectors = self._model.encode(
@@ -143,12 +142,12 @@ class LocalEmbeddingProvider:
                 )
             except Exception as e:
                 raise EmbeddingError(f"Failed to compute embeddings: {e}") from e
-                
+
             if not isinstance(computed_vectors, np.ndarray):
                 computed_vectors = np.array(computed_vectors)
-                
+
             self.cache.set_many(missing_texts, computed_vectors)
-            
+
             # Merge computed back into our working dict
             for text, vector in zip(missing_texts, computed_vectors):
                 cached[text] = vector

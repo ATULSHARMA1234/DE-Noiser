@@ -10,7 +10,7 @@ from __future__ import annotations
 import datetime
 import os
 
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, JSON, Boolean
+from sqlalchemy import JSON, Column, DateTime, Float, Integer, String, create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
@@ -77,12 +77,37 @@ class User(Base):
     role = Column(String, default="VIEWER", nullable=False)  # ADMIN, ANALYST, VIEWER
 
 
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, nullable=True)  # Nullable for unauthenticated actions
+    action = Column(String, nullable=False)
+    resource_type = Column(String, nullable=False)
+    resource_id = Column(String, nullable=True)
+    details = Column(JSON, nullable=True)
+    ip_address = Column(String, nullable=True)
+    timestamp = Column(DateTime, default=datetime.datetime.utcnow, index=True)
+
+class AlertLog(Base):
+    __tablename__ = "alert_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    webhook_id = Column(String, index=True)
+    alert_fingerprint = Column(String, index=True)
+    priority = Column(String)
+    status = Column(String)
+    http_status = Column(Integer, nullable=True)
+    latency_ms = Column(Float, nullable=True)
+    error = Column(String, nullable=True)
+    timestamp = Column(String, default=lambda: datetime.datetime.utcnow().isoformat(), index=True)
+
 # ── Session helpers ──────────────────────────────────────────────────────────
 
 def init_db():
     """Create all tables if they don't exist and seed default admin."""
     Base.metadata.create_all(bind=engine)
-    
+
     db = SessionLocal()
     try:
         admin_email = "admin@semanticos.io"

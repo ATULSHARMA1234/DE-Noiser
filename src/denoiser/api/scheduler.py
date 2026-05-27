@@ -1,9 +1,11 @@
-import os
-import time
 import gzip
+import os
 import shutil
+import time
 from pathlib import Path
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
 from denoiser.logging import get_logger
 from denoiser.storage.object_store import ObjectStore
 
@@ -44,7 +46,7 @@ async def archive_old_logs_to_s3():
 
     retention_days = int(storage_settings.get("retention_days", get_retention_days()))
     cutoff_time = time.time() - (retention_days * 86400)
-    
+
     try:
         store = ObjectStore(
             endpoint_url=storage_settings.get("s3_endpoint"),
@@ -61,7 +63,7 @@ async def archive_old_logs_to_s3():
         for file_path in DATA_DIR.glob(ext):
             if file_path.name == "live_stream.log":
                 continue  # Let log rotation handle the live file
-                
+
             stat = file_path.stat()
             if stat.st_mtime < cutoff_time:
                 # 1. Compress it
@@ -70,7 +72,7 @@ async def archive_old_logs_to_s3():
                     with open(file_path, 'rb') as f_in:
                         with gzip.open(gz_path, 'wb') as f_out:
                             shutil.copyfileobj(f_in, f_out)
-                    
+
                     # 2. Upload to S3
                     object_name = f"archive/{file_path.name}.gz"
                     if store.upload_file(gz_path, object_name):
@@ -84,9 +86,36 @@ async def archive_old_logs_to_s3():
                 except Exception as e:
                     logger.error(f"Error archiving file {file_path.name}: {e}")
 
+async def cleanup_database_records():
+    """
+    Deletes AnalysisRun and AuditLog records older than the configured retention_days.
+    """
+    logger.info("Running Database Retention Scheduler Job...")
+    retention_days = int(get_retention_days())
+    import datetime
+    cutoff_time = datetime.datetime.utcnow() - datetime.timedelta(days=retention_days)
+
+    try:
+        from denoiser.storage.db import AnalysisRun, AuditLog, SessionLocal
+        db = SessionLocal()
+
+        # Delete old AnalysisRuns
+        deleted_runs = db.query(AnalysisRun).filter(AnalysisRun.created_at < cutoff_time).delete()
+
+        # Delete old AuditLogs
+        deleted_logs = db.query(AuditLog).filter(AuditLog.timestamp < cutoff_time).delete()
+
+        db.commit()
+        logger.info(f"Deleted {deleted_runs} old analysis runs and {deleted_logs} old audit logs.")
+    except Exception as e:
+        logger.error(f"Failed to cleanup database records: {e}")
+    finally:
+        db.close()
+
 scheduler = AsyncIOScheduler()
 # Run nightly at 2:00 AM
 scheduler.add_job(archive_old_logs_to_s3, 'cron', hour=2, minute=0)
+scheduler.add_job(cleanup_database_records, 'cron', hour=3, minute=0)
 
 def start_scheduler():
     if scheduler.running:

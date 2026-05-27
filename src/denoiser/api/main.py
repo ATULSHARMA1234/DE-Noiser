@@ -1,15 +1,11 @@
 from __future__ import annotations
 
-import os
-import glob
 import json
-import asyncio
-import uuid
+import os
 import time
-import logging
 from collections import deque
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any
 
 from denoiser.logging import get_logger
 
@@ -17,32 +13,49 @@ logger = get_logger(__name__)
 import redis.asyncio as redis_asyncio
 
 redis_client = redis_asyncio.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"), decode_responses=True)
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends, UploadFile, File, Form, Request
+
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import polars as pl
-from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
-from denoiser.cli.main import Normalizer, Redactor, Deduplicator, LogReader, LocalEmbeddingProvider, LogClusterer, BaselineManager, AnomalyScorer, IncidentIntelligence
-from denoiser.config import settings, AnalysisMode
-from denoiser.storage.db import init_db, get_db, Incident, AnalysisRun, User
-from denoiser.api.schemas import AnalysisRequest, AnalysisResponse, ResolveRequest, SettingsUpdate, IngestPayload, UserLogin, UserResponse, UserCreate, TokenResponse
-from denoiser.api.middleware import CorrelationIDMiddleware, RateLimitMiddleware, register_exception_handlers
-from denoiser.api.auth import verify_password, create_access_token, get_current_user, require_role
-from denoiser.ingestion.models import LogRecord
-from denoiser.preprocessing.timestamp import TimestampExtractor
-from denoiser.detection.causal_scorer import CausalScorer
-from denoiser.detection.severity import SeverityScorer
-from denoiser.integrations.alert_router import (
-    AlertRouter, AlertPayload, WebhookConfig, ChannelType, alert_router
+from denoiser.analysis.drift import ClusterSnapshot, DriftDetector
+from denoiser.api.auth import create_access_token, get_current_user, require_role, verify_password
+from denoiser.api.middleware import (
+    CorrelationIDMiddleware,
+    RateLimitMiddleware,
+    register_exception_handlers,
 )
-from denoiser.analysis.drift import DriftDetector, ClusterSnapshot
-from denoiser.telemetry.metrics_collector import MetricsCollector
-from denoiser.telemetry.ebpf_collector import EBPFCollector
-from denoiser.detection.metrics_correlator import MetricsCorrelator
 from denoiser.api.scheduler import start_scheduler, stop_scheduler
+from denoiser.api.schemas import (
+    AnalysisRequest,
+    IngestPayload,
+    ResolveRequest,
+    SettingsUpdate,
+    TokenResponse,
+    UserCreate,
+    UserLogin,
+    UserResponse,
+)
+from denoiser.integrations.alert_router import (
+    AlertPayload,
+    ChannelType,
+    WebhookConfig,
+    alert_router,
+)
 from denoiser.storage.clickhouse_store import ClickHouseStore
+from denoiser.storage.db import AnalysisRun, Incident, User, get_db, init_db
+from denoiser.telemetry.ebpf_collector import EBPFCollector
+from denoiser.telemetry.metrics_collector import MetricsCollector
 
 # Background agents
 metrics_agent = MetricsCollector()
@@ -61,6 +74,14 @@ app.add_middleware(
 )
 app.add_middleware(RateLimitMiddleware, max_requests=100, window_seconds=60)
 app.add_middleware(CorrelationIDMiddleware)
+
+from denoiser.api.alerts import router as alerts_router
+from denoiser.api.audit import AuditMiddleware
+from denoiser.api.audit import router as audit_router
+
+app.add_middleware(AuditMiddleware)
+app.include_router(audit_router)
+app.include_router(alerts_router)
 
 # Register global exception handlers (Task 3)
 register_exception_handlers(app)
@@ -122,7 +143,7 @@ def login(payload: UserLogin, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == payload.email).first()
     if not user or not verify_password(payload.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid email or password")
-    
+
     access_token = create_access_token(data={"sub": user.email})
     return {
         "access_token": access_token,
@@ -136,7 +157,7 @@ def get_me(current_user: User = Depends(get_current_user)):
     return current_user
 
 
-@app.get("/users", response_model=List[UserResponse])
+@app.get("/users", response_model=list[UserResponse])
 def list_users(db: Session = Depends(get_db), current_user: User = Depends(require_role(["ADMIN"]))):
     return db.query(User).all()
 
@@ -146,7 +167,7 @@ def create_user(payload: UserCreate, db: Session = Depends(get_db), current_user
     exists = db.query(User).filter(User.email == payload.email).first()
     if exists:
         raise HTTPException(status_code=400, detail="User with this email already exists")
-    
+
     from denoiser.api.auth import get_password_hash
     user = User(
         email=payload.email,
@@ -164,10 +185,10 @@ def delete_user(user_id: int, db: Session = Depends(get_db), current_user: User 
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
+
     if user.email == current_user.email:
         raise HTTPException(status_code=400, detail="Cannot delete currently logged in admin user")
-        
+
     db.delete(user)
     db.commit()
     return {"status": "deleted", "id": user_id}
@@ -194,7 +215,7 @@ def get_vitals(limit: int = 20, current_user: User = Depends(require_role(["VIEW
         limit = max(1, min(int(limit), 120))
         buf: deque[dict[str, Any]] = deque(maxlen=limit)
 
-        with open(metrics_agent.stream_path, "r") as f:
+        with open(metrics_agent.stream_path) as f:
             for line in f:
                 if not line.strip():
                     continue
@@ -236,7 +257,7 @@ def get_metrics_stream(limit: int = 100, current_user: User = Depends(require_ro
         if not metrics_agent.stream_path.exists():
             return {"status": "no_data", "entries": []}
         buf: deque[dict[str, Any]] = deque(maxlen=max(1, min(int(limit), 1000)))
-        with open(metrics_agent.stream_path, "r") as f:
+        with open(metrics_agent.stream_path) as f:
             for line in f:
                 if line.strip():
                     buf.append(json.loads(line))
@@ -293,11 +314,11 @@ def delete_source(filename: str, current_user: User = Depends(require_role(["ADM
     """Delete a log file from the data/ directory."""
     if ".." in filename or "/" in filename:
         raise HTTPException(status_code=400, detail="Invalid filename")
-    
+
     file_path = DATA_DIR / filename
     if not file_path.exists() or file_path.name == "settings.json" or file_path.suffix == ".db":
         raise HTTPException(status_code=404, detail="File not found or protected")
-    
+
     try:
         file_path.unlink()
         return {"status": "deleted", "filename": filename}
@@ -306,28 +327,29 @@ def delete_source(filename: str, current_user: User = Depends(require_role(["ADM
 
 
 from fastapi.security import APIKeyHeader
+
 from denoiser.api.auth import oauth2_scheme
 
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
 def verify_ingest_auth(
-    api_key: Optional[str] = Depends(api_key_header),
-    token: Optional[str] = Depends(oauth2_scheme),
+    api_key: str | None = Depends(api_key_header),
+    token: str | None = Depends(oauth2_scheme),
     db: Session = Depends(get_db)
 ):
     """Allow ingest if X-API-Key header matches static config, or if a valid JWT is present."""
     static_key = os.getenv("INGEST_API_KEY", "semanticos-ingest-key-123")
     if api_key and api_key == static_key:
         return
-    
+
     if token:
         try:
             get_current_user(token, db)
             return
         except Exception:
             pass
-            
+
     raise HTTPException(status_code=401, detail="Invalid API Key or JWT token")
 
 
@@ -342,15 +364,15 @@ async def ingest_logs(payload: IngestPayload):
         body = payload.logs
         if not body:
             raise HTTPException(status_code=400, detail="logs must not be empty")
-            
+
         stream_file = DATA_DIR / "live_stream.log"
-        
+
         # Auto-rotate if > 100MB
         if stream_file.exists() and stream_file.stat().st_size > 100 * 1024 * 1024:
             rotated_name = f"live_stream_{int(time.time())}.log"
             stream_file.rename(DATA_DIR / rotated_name)
             logger.info(f"Rotated live_stream.log to {rotated_name}")
-        
+
         with open(stream_file, "a") as f:
             for log_entry in body:
                 # Ensure it's a JSON string
@@ -358,12 +380,12 @@ async def ingest_logs(payload: IngestPayload):
                     f.write(json.dumps(log_entry) + "\n")
                 else:
                     f.write(str(log_entry) + "\n")
-        
+
         # Dual-write to ClickHouse for analytics (Task 40)
         # Assuming body is a list of dicts, if strings, we skip ClickHouse for now
         if isinstance(body[0], dict):
             clickhouse_store.insert_logs(body)
-            
+
         # Task 45: Publish to Redis Pub/Sub for horizontally scaled WebSockets
         try:
             for log_entry in body:
@@ -371,11 +393,11 @@ async def ingest_logs(payload: IngestPayload):
                 await redis_client.publish("log_stream", msg)
         except Exception as re:
             logger.warning(f"Failed to publish ingest logs to Redis: {re}")
-                    
+
         return {"status": "success", "ingested": len(body)}
     except Exception as e:
         logger.exception("Ingest failed")
-        raise HTTPException(status_code=400, detail=f"Invalid payload: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Invalid payload: {e!s}")
 
 
 # ─── CONNECTORS — Kubernetes, AWS, and Docker ───────────────────────────────
@@ -397,7 +419,7 @@ def list_k8s_pods(current_user: User = Depends(require_role(["VIEWER", "ANALYST"
                 "ip": pod.status.pod_ip,
             })
         return {"status": "connected", "pods": result}
-    except Exception as e:
+    except Exception:
         # Fallback to simulated enterprise clusters for demo purposes
         return {
             "status": "simulated",
@@ -417,19 +439,19 @@ async def fetch_k8s_logs(namespace: str = Form(...), pod_name: str = Form(...), 
     """Fetch logs from K8s pod and save as a dynamic log source."""
     filename = f"k8s_{namespace}_{pod_name}.log"
     dest = DATA_DIR / filename
-    
+
     try:
         from denoiser.integrations.k8s import KubernetesReader
         reader = KubernetesReader()
         records = list(reader.read(namespace, pod_name))
-        
+
         # Write to file
         with open(dest, "w") as f:
             for r in records:
                 f.write(r.raw_text + "\n")
-        
+
         return {"status": "success", "source": filename, "lines": len(records)}
-    except Exception as e:
+    except Exception:
         # Simulated log generation for sandbox demo
         simulated_logs = [
             f"2026-05-17T17:15:00Z [INFO] [{pod_name}] Starting bootstrap process...",
@@ -441,7 +463,7 @@ async def fetch_k8s_logs(namespace: str = Form(...), pod_name: str = Form(...), 
         with open(dest, "w") as f:
             for line in simulated_logs:
                 f.write(line + "\n")
-                
+
         return {
             "status": "simulated",
             "message": "Local kubeconfig not detected. Generated sandbox log sequence.",
@@ -465,7 +487,7 @@ def list_aws_groups(current_user: User = Depends(require_role(["VIEWER", "ANALYS
                 "stored_bytes": g.get("storedBytes", 0),
             })
         return {"status": "connected", "groups": result}
-    except Exception as e:
+    except Exception:
         # Fallback to simulated CloudWatch log groups
         return {
             "status": "simulated",
@@ -480,35 +502,35 @@ def list_aws_groups(current_user: User = Depends(require_role(["VIEWER", "ANALYS
 
 
 @app.post("/connectors/aws/fetch")
-async def fetch_aws_logs(log_group: str = Form(...), log_stream: Optional[str] = Form(None), current_user: User = Depends(require_role(["ANALYST", "ADMIN"]))):
+async def fetch_aws_logs(log_group: str = Form(...), log_stream: str | None = Form(None), current_user: User = Depends(require_role(["ANALYST", "ADMIN"]))):
     """Fetch logs from AWS CloudWatch and save as a dynamic log source."""
     safe_name = log_group.replace("/", "_").strip("_")
     filename = f"aws_{safe_name}.log"
     dest = DATA_DIR / filename
-    
+
     try:
         from denoiser.integrations.aws import CloudWatchReader
         reader = CloudWatchReader()
         records = list(reader.read(log_group, log_stream))
-        
+
         with open(dest, "w") as f:
             for r in records:
                 f.write(r.raw_text + "\n")
-                
+
         return {"status": "success", "source": filename, "lines": len(records)}
-    except Exception as e:
+    except Exception:
         # Simulated log generation
         simulated_logs = [
-            f"1715934500000\t[INFO]\tINIT\tContainer runtime: fargate-2.0",
-            f"1715934502000\t[INFO]\tSTART\tRequest ID: req-8219-cba0",
-            f"1715934505000\t[WARN]\tLATENCY\tDynamoDB batch_write took 450ms (threshold 100ms)",
-            f"1715934508000\t[ERROR]\tSNS\tFailed to publish event to topic: arn:aws:sns:us-east-1:123:notifications",
-            f"1715934510000\t[INFO]\tEND\tDuration: 520ms, Memory Used: 128MB",
+            "1715934500000\t[INFO]\tINIT\tContainer runtime: fargate-2.0",
+            "1715934502000\t[INFO]\tSTART\tRequest ID: req-8219-cba0",
+            "1715934505000\t[WARN]\tLATENCY\tDynamoDB batch_write took 450ms (threshold 100ms)",
+            "1715934508000\t[ERROR]\tSNS\tFailed to publish event to topic: arn:aws:sns:us-east-1:123:notifications",
+            "1715934510000\t[INFO]\tEND\tDuration: 520ms, Memory Used: 128MB",
         ]
         with open(dest, "w") as f:
             for line in simulated_logs:
                 f.write(line + "\n")
-                
+
         return {
             "status": "simulated",
             "message": "AWS credentials not detected. Generated sandbox log sequence.",
@@ -533,7 +555,7 @@ def list_docker_containers(current_user: User = Depends(require_role(["VIEWER", 
                 "status": c.status,
             })
         return {"status": "connected", "containers": result}
-    except Exception as e:
+    except Exception:
         return {
             "status": "simulated",
             "message": "Docker socket not detected. Operating in sandbox mode.",
@@ -551,29 +573,29 @@ async def fetch_docker_logs(container_name: str = Form(...), current_user: User 
     """Fetch logs from a Docker container and save as a dynamic log source."""
     filename = f"docker_{container_name}.log"
     dest = DATA_DIR / filename
-    
+
     try:
         import docker
         client = docker.from_env()
         container = client.containers.get(container_name)
         logs = container.logs(tail=1000).decode('utf-8')
-        
+
         with open(dest, "w") as f:
             f.write(logs)
-            
+
         return {"status": "success", "source": filename, "lines": len(logs.splitlines())}
-    except Exception as e:
+    except Exception:
         simulated_logs = [
-            f"node-api-1 | 2026-05-17 17:15:00 [info]: Express app listening on port 3000",
-            f"node-api-1 | 2026-05-17 17:15:02 [info]: Connected to PostgreSQL database at postgres-db:5432",
-            f"node-api-1 | 2026-05-17 17:15:04 [warn]: Redis cache connection missed for key 'user:123'",
-            f"node-api-1 | 2026-05-17 17:15:06 [error]: uncaughtException: Cannot read properties of undefined (reading 'email')",
-            f"node-api-1 | 2026-05-17 17:15:07 [info]: Process exited with code 1",
+            "node-api-1 | 2026-05-17 17:15:00 [info]: Express app listening on port 3000",
+            "node-api-1 | 2026-05-17 17:15:02 [info]: Connected to PostgreSQL database at postgres-db:5432",
+            "node-api-1 | 2026-05-17 17:15:04 [warn]: Redis cache connection missed for key 'user:123'",
+            "node-api-1 | 2026-05-17 17:15:06 [error]: uncaughtException: Cannot read properties of undefined (reading 'email')",
+            "node-api-1 | 2026-05-17 17:15:07 [info]: Process exited with code 1",
         ]
         with open(dest, "w") as f:
             for line in simulated_logs:
                 f.write(line + "\n")
-                
+
         return {
             "status": "simulated",
             "message": "Docker daemon not detected. Generated sandbox log sequence.",
@@ -595,7 +617,7 @@ def _estimate_lines(path: Path, size_bytes: int) -> int:
     if size_bytes == 0:
         return 0
     try:
-        with open(path, "r") as f:
+        with open(path) as f:
             sample = f.read(min(8192, size_bytes))
             lines_in_sample = sample.count("\n")
             if lines_in_sample == 0:
@@ -625,20 +647,20 @@ def update_settings(new_settings: SettingsUpdate, current_user: User = Depends(r
 # ─── WEBSOCKET — Real-time log streaming ─────────────────────────────────────
 
 @app.websocket("/stream")
-async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = None, db: Session = Depends(get_db)):
+async def websocket_endpoint(websocket: WebSocket, token: str | None = None, db: Session = Depends(get_db)):
     await websocket.accept()
-    
+
     if token:
         try:
             get_current_user(token, db)
         except Exception:
             await websocket.close(code=4001, reason="Invalid token")
             return
-    
+
     # Task 45: Redis Pub/Sub for WebSockets
     pubsub = redis_client.pubsub()
     await pubsub.subscribe("log_stream")
-    
+
     try:
         # We simulate the UI format expected by the frontend
         # The frontend expects {id, level, service, message, timestamp}
@@ -655,7 +677,7 @@ async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = None, 
                     if "ERROR" in raw_msg.upper(): level = "ERROR"
                     elif "WARN" in raw_msg.upper(): level = "WARN"
                     elif "FATAL" in raw_msg.upper() or "CRITICAL" in raw_msg.upper(): level = "ANOMALY"
-                    
+
                     ws_msg = {
                         "id": str(line_id).zfill(4),
                         "level": payload.get("level", level).upper(),
@@ -670,7 +692,7 @@ async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = None, 
                     level = "INFO"
                     if "ERROR" in raw_msg.upper(): level = "ERROR"
                     elif "WARN" in raw_msg.upper(): level = "WARN"
-                    
+
                     await websocket.send_json({
                         "id": str(line_id).zfill(4),
                         "level": level,
@@ -704,7 +726,7 @@ async def run_analysis(request: AnalysisRequest, current_user: User = Depends(re
     from denoiser.workers.analysis_worker import run_analysis_task
 
     payload = request.model_dump()
-    
+
     # If running inside pytest, force synchronous execution for test compatibility
     if "PYTEST_CURRENT_TEST" in os.environ:
         result = run_analysis_task.apply(args=[payload])
@@ -818,19 +840,19 @@ def compare_runs(run_a: str, run_b: str, db: Session = Depends(get_db), current_
     """Compare two analysis runs and return a DriftReport."""
     db_run_a = db.query(AnalysisRun).filter(AnalysisRun.id == run_a).first()
     db_run_b = db.query(AnalysisRun).filter(AnalysisRun.id == run_b).first()
-    
+
     if not db_run_a or not db_run_b:
         raise HTTPException(status_code=404, detail="One or both runs not found")
-        
+
     snap_a_data = db_run_a.clusters_snapshot or []
     snap_b_data = db_run_b.clusters_snapshot or []
-    
+
     clusters_a = [ClusterSnapshot(**d) for d in snap_a_data]
     clusters_b = [ClusterSnapshot(**d) for d in snap_b_data]
-    
+
     detector = DriftDetector()
     report = detector.compare(run_a, clusters_a, run_b, clusters_b)
-    
+
     return report.to_dict()
 
 

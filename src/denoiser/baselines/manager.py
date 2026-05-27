@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -58,11 +58,11 @@ class BaselineManager:
             # It's a managed baseline.
             # Local cache: ~/.sld/baselines/<org_id>/<name>
             name = path_str.replace("s3://", "").replace("sld://", "").split("/")[0]
-            
+
             # Scoped path for multi-tenancy
             scope = self.org_id if self.org_id else "default"
             cache_dir = Path.home() / ".sld" / "baselines" / scope / name
-            
+
             if not cache_dir.exists():
                 logger.info(f"Managed baseline '{name}' for tenant '{scope}' not found locally. Pulling...")
                 from denoiser.integrations.storage import S3Storage
@@ -71,9 +71,9 @@ class BaselineManager:
                 remote_key = f"{scope}/{name}"
                 if not storage.pull(remote_key, cache_dir):
                     raise BaselineError(f"Could not pull managed baseline '{name}' for tenant '{scope}' from S3.")
-            
+
             return cache_dir
-        
+
         return Path(path_str)
 
     def _get_db(self) -> lancedb.DBConnection:
@@ -106,7 +106,7 @@ class BaselineManager:
 
         # Fix the schema vector dimension dynamically
         dim = valid_clusters[0].centroid.shape[0] if valid_clusters else settings.embedding_dimension
-        
+
         # PyArrow requires explicit sizing for vector similarity search in some versions
         # Let's create a dynamic schema
         dynamic_schema = pa.schema([
@@ -141,7 +141,7 @@ class BaselineManager:
         # Write metadata
         metadata = BaselineMetadata(
             version="1.0",
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=datetime.now(UTC).isoformat(),
             embedding_model=settings.embedding_model,
             cluster_count=len(valid_clusters),
             total_logs_processed=total_logs,
@@ -237,7 +237,7 @@ class BaselineManager:
             True if successful.
         """
         table = self.load()
-        
+
         updates = {}
         if label is not None:
             updates["label"] = f"'{label}'"

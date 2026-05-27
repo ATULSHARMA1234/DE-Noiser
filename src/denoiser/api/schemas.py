@@ -6,21 +6,21 @@ Task 2: Strongly-typed input validation replaces raw dict payloads.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field, model_validator
+from typing import Any
 
+from pydantic import BaseModel, Field, model_validator
 
 # ── Analysis ─────────────────────────────────────────────────────────────────
 
 class AnalysisRequest(BaseModel):
-    source: Optional[str] = Field(None, description="Path to log file or directory to analyze")
-    sources: Optional[List[str]] = Field(None, description="Multiple sources for cross-service correlation")
-    baseline: Optional[str] = Field(None, description="Path to a baseline index for anomaly comparison")
+    source: str | None = Field(None, description="Path to log file or directory to analyze")
+    sources: list[str] | None = Field(None, description="Multiple sources for cross-service correlation")
+    baseline: str | None = Field(None, description="Path to a baseline index for anomaly comparison")
     intelligence: bool = Field(True, description="Enable LLM-based incident intelligence")
     top_n: int = Field(10, ge=1, le=100, description="Number of top clusters to return")
 
     @model_validator(mode="after")
-    def _require_source(self) -> "AnalysisRequest":
+    def _require_source(self) -> AnalysisRequest:
         if not self.source and not self.sources:
             raise ValueError("Either source or sources must be provided")
         return self
@@ -40,10 +40,10 @@ class ClusterResponse(BaseModel):
 
 class AnalysisResponse(BaseModel):
     total_logs: int
-    clusters: List[Any]
-    intelligence: Optional[Dict[str, Any]] = None
-    causal_links: List[Dict[str, Any]] = Field(default_factory=list)
-    metrics_context: Optional[Dict[str, Any]] = None
+    clusters: list[Any]
+    intelligence: dict[str, Any] | None = None
+    causal_links: list[dict[str, Any]] = Field(default_factory=list)
+    metrics_context: dict[str, Any] | None = None
     timestamp: str
 
 
@@ -56,42 +56,42 @@ class ResolveRequest(BaseModel):
 class IncidentResponse(BaseModel):
     id: int
     status: str
-    title: Optional[str] = None
-    domain: Optional[str] = None
-    impact_score: Optional[float] = None
-    created_at: Optional[str] = None
-    resolved_at: Optional[str] = None
-    summary: Optional[Any] = None
-    remediation_hints: Optional[Any] = None
-    run_id: Optional[str] = None
-    source: Optional[str] = None
-    total_logs: Optional[int] = None
-    cluster_count: Optional[int] = None
+    title: str | None = None
+    domain: str | None = None
+    impact_score: float | None = None
+    created_at: str | None = None
+    resolved_at: str | None = None
+    summary: Any | None = None
+    remediation_hints: Any | None = None
+    run_id: str | None = None
+    source: str | None = None
+    total_logs: int | None = None
+    cluster_count: int | None = None
 
 
 # ── Settings ─────────────────────────────────────────────────────────────────
 
 class SettingsUpdate(BaseModel):
-    store_raw_logs: Optional[bool] = None
-    redact_pii: Optional[bool] = None
-    llm_model: Optional[str] = None
-    confidence_threshold: Optional[int] = Field(None, ge=0, le=100)
-    retention_days: Optional[int] = Field(None, ge=1, le=365)
-    sampling_threshold: Optional[int] = Field(None, ge=1000)
-    auto_analyze: Optional[bool] = None
-    slack_webhook_url: Optional[str] = None
-    s3_enabled: Optional[bool] = None
-    s3_endpoint: Optional[str] = None
-    s3_bucket: Optional[str] = None
-    s3_access_key: Optional[str] = None
-    s3_secret_key: Optional[str] = None
+    store_raw_logs: bool | None = None
+    redact_pii: bool | None = None
+    llm_model: str | None = None
+    confidence_threshold: int | None = Field(None, ge=0, le=100)
+    retention_days: int | None = Field(None, ge=1, le=365)
+    sampling_threshold: int | None = Field(None, ge=1000)
+    auto_analyze: bool | None = None
+    slack_webhook_url: str | None = None
+    s3_enabled: bool | None = None
+    s3_endpoint: str | None = None
+    s3_bucket: str | None = None
+    s3_access_key: str | None = None
+    s3_secret_key: str | None = None
 
 
 # ── Ingestion ────────────────────────────────────────────────────────────────
 
 class IngestPayload(BaseModel):
     """Structured ingestion payload. Accepts a list of log entries."""
-    logs: List[Any] = Field(default_factory=list, description="Array of log entries (string or JSON objects)")
+    logs: list[Any] = Field(default_factory=list, description="Array of log entries (string or JSON objects)")
 
     @model_validator(mode="before")
     @classmethod
@@ -122,7 +122,7 @@ class K8sFetchRequest(BaseModel):
 
 class AwsFetchRequest(BaseModel):
     log_group: str
-    log_stream: Optional[str] = None
+    log_stream: str | None = None
 
 
 class DockerFetchRequest(BaseModel):

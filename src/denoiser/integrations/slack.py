@@ -56,7 +56,7 @@ class SlackNotifier:
             slack_data = payload
 
         try:
-            logger.info(f"Sending report to Slack...")
+            logger.info("Sending report to Slack...")
             response = requests.post(
                 self.webhook_url,
                 data=json.dumps(slack_data),
@@ -76,7 +76,7 @@ class SlackNotifier:
         anomalies_found: bool = False
     ) -> dict[str, Any]:
         """Convert analysis results into Slack Block Kit format."""
-        
+
         blocks = [
             {
                 "type": "header",
@@ -98,7 +98,7 @@ class SlackNotifier:
         if intelligence:
             summary = intelligence.get("incident_summary", "N/A")
             domain = intelligence.get("failure_domain", "N/A")
-            
+
             blocks.append({"type": "divider"})
             blocks.append({
                 "type": "section",
@@ -107,14 +107,14 @@ class SlackNotifier:
                     "text": f"*AI Intelligence Summary*\n*Failure Domain:* `{domain}`\n\n{summary}"
                 }
             })
-            
+
             hints = intelligence.get("root_cause_hints")
             if hints:
                 if isinstance(hints, list):
                     hints_str = "\n".join([f"• {h}" for h in hints])
                 else:
                     hints_str = str(hints)
-                    
+
                 blocks.append({
                     "type": "section",
                     "text": {

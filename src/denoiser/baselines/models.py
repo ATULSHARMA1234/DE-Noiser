@@ -5,7 +5,6 @@ Data models for historical baselines.
 from __future__ import annotations
 
 import dataclasses
-from datetime import datetime
 from typing import Any
 
 

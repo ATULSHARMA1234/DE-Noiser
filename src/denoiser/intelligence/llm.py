@@ -11,7 +11,7 @@ from typing import Any
 from openai import OpenAI
 
 from denoiser.clustering.models import Cluster
-from denoiser.config import AnomalyLabel, settings
+from denoiser.config import settings
 from denoiser.detection.models import AnomalyResult
 from denoiser.logging import get_logger
 
@@ -30,7 +30,7 @@ class IncidentIntelligence:
         self.enabled = settings.llm_enabled
         self.model = settings.llm_model
         self.client = None
-        
+
         if self.enabled:
             if not settings.llm_api_key and not settings.llm_base_url:
                 logger.warning("LLM is enabled but no API key or base URL is configured.")

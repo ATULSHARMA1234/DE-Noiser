@@ -8,11 +8,11 @@ Task 4: Rate limiting — prevents abuse of the /ingest endpoint.
 
 from __future__ import annotations
 
-import uuid
-import time
 import logging
+import time
+import uuid
+from collections.abc import Callable
 from contextvars import ContextVar
-from typing import Callable
 
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse

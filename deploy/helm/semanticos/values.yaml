@@ -1,0 +1,35 @@
+replicaCount: 1
+
+image:
+  apiRepository: ghcr.io/atulsharma1234/de-noiser/semanticos-api
+  webRepository: ghcr.io/atulsharma1234/de-noiser/semanticos-web
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  apiPort: 8000
+  webPort: 3000
+
+ingress:
+  enabled: true
+  className: "nginx"
+  hosts:
+    - host: semanticos.local
+      paths:
+        - path: /
+          pathType: Prefix
+          backend: web
+        - path: /api/
+          pathType: Prefix
+          backend: api
+  tls: []
+
+postgres:
+  host: "postgres-db"
+  user: "postgres"
+  password: "password"
+  db: "semanticos"
+
+redis:
+  url: "redis://redis-master:6379/0"

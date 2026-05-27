@@ -1,26 +1,35 @@
+import asyncio
+import json
 import os
 import time
 import uuid
-import json
+from datetime import UTC, datetime
 from pathlib import Path
-from datetime import datetime, timezone
+
 import polars as pl
 from celery import Celery
 
-from denoiser.logging import get_logger
-from denoiser.config import settings
-from denoiser.storage.db import SessionLocal, Incident, AnalysisRun
-from denoiser.storage.vector_store import VectorStore
-
 from denoiser.cli.main import (
-    Redactor, Normalizer, Deduplicator, LogReader, 
-    LocalEmbeddingProvider, LogClusterer, BaselineManager, 
-    AnomalyScorer, IncidentIntelligence
+    AnomalyScorer,
+    BaselineManager,
+    Deduplicator,
+    IncidentIntelligence,
+    LocalEmbeddingProvider,
+    LogClusterer,
+    LogReader,
+    Normalizer,
+    Redactor,
 )
-from denoiser.preprocessing.timestamp import TimestampExtractor
+from denoiser.config import settings
 from denoiser.detection.causal_scorer import CausalScorer
-from denoiser.detection.severity import SeverityScorer
 from denoiser.detection.metrics_correlator import MetricsCorrelator
+from denoiser.detection.severity import SeverityScorer
+from denoiser.integrations.alert_router import AlertPayload, alert_router
+from denoiser.integrations.email import email_notifier
+from denoiser.logging import get_logger
+from denoiser.preprocessing.timestamp import TimestampExtractor
+from denoiser.storage.db import AnalysisRun, Incident, SessionLocal
+from denoiser.storage.vector_store import VectorStore
 
 logger = get_logger(__name__)
 
@@ -49,18 +58,18 @@ def run_analysis_task(self, request_dict: dict):
     """
     logger.info(f"Starting async analysis task: {self.request.id}")
     self.update_state(state='PROGRESS', meta={'progress': 10, 'status': 'Ingesting files'})
-    
+
     start_time = time.time()
-    
+
     # Unpack request
     sources = request_dict.get("sources", [])
     if not sources and "source" in request_dict:
         sources = [request_dict.get("source")]
-    
+
     baseline = request_dict.get("baseline")
     intelligence = request_dict.get("intelligence", False)
     top_n = request_dict.get("top_n", 3)
-    
+
     # 1. Ingestion
     timestamp_extractor = TimestampExtractor()
     records_data = []
@@ -72,11 +81,11 @@ def run_analysis_task(self, request_dict: dict):
             for record in reader.read(src):
                 epoch_ms = timestamp_extractor.extract(record.raw_text)
                 dt = (
-                    datetime.fromtimestamp(epoch_ms / 1000.0, timezone.utc)
+                    datetime.fromtimestamp(epoch_ms / 1000.0, UTC)
                     if epoch_ms is not None
                     else None
                 )
-                
+
                 records_data.append({
                     "raw_text": record.raw_text,
                     "source_path": record.source,
@@ -94,11 +103,11 @@ def run_analysis_task(self, request_dict: dict):
 
     self.update_state(state='PROGRESS', meta={'progress': 30, 'status': 'Redacting and Normalizing'})
     df = pl.DataFrame(records_data)
-    
+
     # 3. Apply Redaction and Normalization
     redactor = Redactor(enabled=True)
     normalizer = Normalizer()
-    
+
     raw_texts = df["raw_text"].to_list()
     redacted_texts = [redactor.redact(t) for t in raw_texts]
     normalized_texts = normalizer.normalize_batch(redacted_texts)
@@ -129,7 +138,7 @@ def run_analysis_task(self, request_dict: dict):
     self.update_state(state='PROGRESS', meta={'progress': 50, 'status': 'Generating Embeddings'})
     embedder = LocalEmbeddingProvider()
     vectors = embedder.embed(unique_templates)
-    
+
     # Persist vectors to LanceDB (Task 38)
     try:
         groups = deduper.get_all_groups()
@@ -203,7 +212,7 @@ def run_analysis_task(self, request_dict: dict):
             res = anomalies[c.representative_template]
             cluster_data["anomaly_label"] = res.label.value
             cluster_data["anomaly_score"] = res.distance
-            
+
         formatted_clusters.append(cluster_data)
 
     # 10. Cross-service causal links and severity labels
@@ -301,7 +310,7 @@ def run_analysis_task(self, request_dict: dict):
             clusters_snapshot=formatted_clusters
         )
         db.add(db_run)
-        
+
         if llm_payload:
             new_incident = Incident(
                 title=llm_payload.get("failure_domain", "Unknown Failure"),
@@ -315,14 +324,75 @@ def run_analysis_task(self, request_dict: dict):
                 cluster_count=len(clusters),
             )
             db.add(new_incident)
-        
+
+            # Dispatch alerts via AlertRouter
+            try:
+                # Find the most severe priority among clusters
+                max_priority = "P3"
+                anomaly_score = 0.0
+                representative_log = "No log available"
+                keyword_flag = False
+
+                for c in formatted_clusters:
+                    if c.get("priority") in ("P0", "P1") and max_priority not in ("P0", "P1"):
+                        max_priority = c.get("priority", "P3")
+                    if max_priority == "P0":
+                        break
+
+                if formatted_clusters:
+                    anomaly_score = formatted_clusters[0].get("anomaly_score", 0.0)
+                    representative_log = formatted_clusters[0].get("representative_log", "")
+                    keyword_flag = formatted_clusters[0].get("keyword_flag", False)
+
+                if max_priority in ("P0", "P1", "P2"):
+                    alert = AlertPayload(
+                        source=source_name,
+                        run_id=run_id,
+                        priority=max_priority,
+                        cluster_id=formatted_clusters[0].get("cluster_id", 0) if formatted_clusters else 0,
+                        cluster_summary=llm_payload.get("incident_summary", "Anomaly Detected"),
+                        representative_log=representative_log,
+                        anomaly_score=anomaly_score,
+                        causal_links=formatted_links,
+                        intelligence=llm_payload,
+                        keyword_flag=keyword_flag
+                    )
+
+                    # Fire email concurrently (using thread/synchronous send)
+                    # We send emails for P0 or P1
+                    if max_priority in ("P0", "P1"):
+                        try:
+                            email_notifier.send_alert(alert)
+                        except Exception as em_err:
+                            logger.error(f"EmailNotifier error: {em_err}")
+
+                    delivery_records = asyncio.run(alert_router.dispatch(alert))
+
+                    # Store delivery records in DB
+                    from denoiser.storage.db import AlertLog
+                    for rec in delivery_records:
+                        db_log = AlertLog(
+                            webhook_id=rec.webhook_id,
+                            alert_fingerprint=rec.alert_fingerprint,
+                            priority=rec.priority,
+                            status=rec.status.value,
+                            http_status=rec.http_status,
+                            latency_ms=rec.latency_ms,
+                            error=rec.error,
+                            timestamp=rec.timestamp
+                        )
+                        db.add(db_log)
+
+            except Exception as e:
+                logger.error(f"Failed to dispatch alerts: {e}")
+
         db.commit()
     except Exception as e:
         logger.error(f"DB Error: {e}")
         db.rollback()
     finally:
         db.close()
-        
+
     return {
         "status": "success",
         "run_id": run_id,

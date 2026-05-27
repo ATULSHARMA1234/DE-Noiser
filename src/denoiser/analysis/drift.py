@@ -28,10 +28,8 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any
-
 
 # ── Enumerations ──────────────────────────────────────────────────────────────
 
@@ -146,7 +144,7 @@ class DriftReport:
     events: list[DriftEvent]
     health_delta: float
     summary: str
-    generated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    generated_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
     def to_dict(self) -> dict:
         emerged    = [e for e in self.events if e.kind == DriftKind.EMERGED]

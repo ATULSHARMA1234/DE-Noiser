@@ -73,5 +73,5 @@ class StdinReader:
         except KeyboardInterrupt:
             logger.info("Stdin reading interrupted by user")
             return
-        
+
         logger.debug("Finished stdin read", extra={"lines_read": line_idx if 'line_idx' in locals() else 0})

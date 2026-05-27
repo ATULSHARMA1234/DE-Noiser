@@ -1,8 +1,10 @@
-import lancedb
-import pyarrow as pa
-from typing import List, Dict, Any
 from pathlib import Path
+from typing import Any
+
+import lancedb
 import numpy as np
+import pyarrow as pa
+
 from denoiser.config import settings
 from denoiser.logging import get_logger
 
@@ -30,22 +32,22 @@ class VectorStore:
             # Ensure parent dir exists
             Path(self.uri).parent.mkdir(parents=True, exist_ok=True)
             self.db = lancedb.connect(self.uri)
-            
+
             if self.table_name not in self.db.table_names():
                 logger.info(f"Creating new LanceDB table '{self.table_name}' at {self.uri}")
                 self.db.create_table(self.table_name, schema=schema)
         except Exception as e:
             logger.error(f"Failed to initialize LanceDB: {e}")
 
-    def add_embeddings(self, ids: List[str], vectors: List[List[float]], templates: List[str], sources: List[str], timestamps: List[int]):
+    def add_embeddings(self, ids: list[str], vectors: list[list[float]], templates: list[str], sources: list[str], timestamps: list[int]):
         """Persist new embeddings to the vector database"""
         if not self.db:
             return False
-            
+
         try:
             table = self.db.open_table(self.table_name)
             vector_rows = np.asarray(vectors, dtype=np.float32).tolist()
-            
+
             # Format data as a list of dictionaries matching the schema
             data = [
                 {
@@ -60,7 +62,7 @@ class VectorStore:
 
             if not data:
                 return True
-            
+
             table.add(data)
             logger.info(f"Persisted {len(ids)} embeddings to LanceDB.")
             return True
@@ -68,11 +70,11 @@ class VectorStore:
             logger.error(f"Failed to add embeddings to LanceDB: {e}")
             return False
 
-    def search(self, query_vector: List[float], limit: int = 10) -> List[Dict[str, Any]]:
+    def search(self, query_vector: list[float], limit: int = 10) -> list[dict[str, Any]]:
         """Search the persistent vector database for semantically similar logs"""
         if not self.db:
             return []
-            
+
         try:
             table = self.db.open_table(self.table_name)
             results = table.search(query_vector).limit(limit).to_list()

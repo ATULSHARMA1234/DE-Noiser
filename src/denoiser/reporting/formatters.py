@@ -5,14 +5,14 @@ Reporting formatters for CLI output (JSON, Markdown, Rich Table).
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from rich.console import Console
 from rich.table import Table
 
 from denoiser.clustering.models import Cluster
-from denoiser.config import AnomalyLabel, OutputFormat, settings
+from denoiser.config import AnomalyLabel, OutputFormat
 from denoiser.detection.models import AnomalyResult
 
 
@@ -41,13 +41,13 @@ class Reporter:
     ) -> None:
         """Print results as a Rich table."""
         self.console.print(f"\n[bold]Semantic Log Analysis[/bold] ({total_logs} logs processed)\n")
-        
+
         if intelligence:
             from rich.panel import Panel
             summary = intelligence.get("incident_summary", "N/A")
             domain = intelligence.get("failure_domain", "N/A")
             hints = intelligence.get("root_cause_hints", "N/A")
-            
+
             content = f"[bold cyan]Failure Domain:[/bold cyan] {domain}\n\n[bold]Summary:[/bold]\n{summary}\n\n[bold]Next Steps / Hints:[/bold]\n{hints}"
             self.console.print(Panel(content, title="[bold sparkler]AI Incident Intelligence[/]", border_style="cyan"))
             self.console.print()
@@ -77,19 +77,19 @@ class Reporter:
                     if res:
                         if worst_result is None or res.distance > worst_result.distance:
                             worst_result = res
-                
+
                 if worst_result:
                     cluster_label_str = worst_result.label.value
                     cluster_dist_str = f"{worst_result.distance:.2f}"
                     color = self._color_for_label(worst_result.label)
-            
+
             # Standalone Anomaly detection (Cluster -1 is noise/outlier)
             if c.cluster_id == -1 and cluster_label_str == "-":
                 cluster_label_str = "OUTLIER"
                 color = "red"
 
             cid_str = str(c.cluster_id) if c.cluster_id != -1 else "NOISE"
-            
+
             # Truncate raw text for display - increase limit for "complete" view
             display_text = c.representative_raw.replace("\n", " ")
             if len(display_text) > 200:
@@ -129,7 +129,7 @@ class Reporter:
         """Print results as JSON."""
         data = {
             "meta": {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "total_logs": total_logs,
                 "cluster_count": len(clusters),
             },
@@ -169,12 +169,12 @@ class Reporter:
         """Print results as a Markdown document."""
         lines = [
             "# Semantic Log Analysis Report",
-            f"- **Timestamp:** {datetime.now(timezone.utc).isoformat()}",
+            f"- **Timestamp:** {datetime.now(UTC).isoformat()}",
             f"- **Total Logs:** {total_logs}",
             f"- **Total Clusters:** {len(clusters)}",
             "",
         ]
-        
+
         if intelligence:
             lines.extend([
                 "## AI Incident Intelligence",
@@ -202,23 +202,23 @@ class Reporter:
                 if res:
                     label = res.label.value
                     dist = f"{res.distance:.2f}"
-            
+
             clean_raw = c.representative_raw.replace("\n", " ").replace("|", "\\|")
             if len(clean_raw) > 100:
                 clean_raw = clean_raw[:97] + "..."
-            
+
             cid = "NOISE" if c.cluster_id == -1 else str(c.cluster_id)
-            
+
             # Get semantic summary
             semantic_summary = "-"
             if intelligence and "cluster_summaries" in intelligence:
                 summaries = intelligence["cluster_summaries"]
                 if i < len(summaries):
                     semantic_summary = summaries[i]
-                    
+
             # Get source info
             source_info = f"{c.representative_source}:{c.representative_line}"
-                    
+
             lines.append(f"| {cid} | {c.size} | {label} | {dist} | {semantic_summary} | {source_info} | `{clean_raw}` |")
 
         # Use rich's markdown rendering, or just print raw text.

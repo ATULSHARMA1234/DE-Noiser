@@ -18,7 +18,6 @@ from typing import Any
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-
 # ── Enums ────────────────────────────────────────────────────────────────────
 
 
@@ -246,7 +245,7 @@ class DenoiserConfig(BaseSettings):
     # ── Validators ───────────────────────────────────────────────────────
 
     @model_validator(mode="after")
-    def _validate_thresholds(self) -> "DenoiserConfig":
+    def _validate_thresholds(self) -> DenoiserConfig:
         """Ensure anomaly thresholds are strictly ordered: low < medium < high."""
         if not (
             self.anomaly_threshold_low
@@ -263,7 +262,7 @@ class DenoiserConfig(BaseSettings):
         return self
 
     @model_validator(mode="after")
-    def _apply_verbose_override(self) -> "DenoiserConfig":
+    def _apply_verbose_override(self) -> DenoiserConfig:
         """When --verbose is set, force log level to DEBUG."""
         if self.verbose:
             self.log_level = LogLevel.DEBUG
@@ -271,7 +270,7 @@ class DenoiserConfig(BaseSettings):
 
     # ── Helpers ───────────────────────────────────────────────────────────
 
-    def apply_mode_preset(self, mode: AnalysisMode | None = None) -> "DenoiserConfig":
+    def apply_mode_preset(self, mode: AnalysisMode | None = None) -> DenoiserConfig:
         """Apply a mode preset, overriding clustering and anomaly settings.
 
         Returns a **new** config instance with the preset values merged in.

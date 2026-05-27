@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { LayoutGrid, Terminal, ShieldAlert, History, Database, Settings, Search, Play, Cpu, X, FileText, Loader2, Network, Users } from 'lucide-react';
+import { LayoutGrid, Terminal, ShieldAlert, History, Database, Settings, Search, Play, Cpu, X, FileText, Loader2, Network, Users, Bell } from 'lucide-react';
 import { apiFetch, runAnalysis } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 
@@ -25,6 +25,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     { name: 'Incident Memory', path: '/app/incidents', icon: ShieldAlert },
     { name: 'Analysis Runs', path: '/app/runs', icon: History },
     { name: 'Sources', path: '/app/sources', icon: Database },
+    { name: 'Alerts', path: '/app/alerts', icon: Bell },
     { name: 'Settings', path: '/app/settings', icon: Settings },
   ];
 

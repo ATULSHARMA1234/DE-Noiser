@@ -4,8 +4,6 @@ Out-of-distribution anomaly detection and novelty scoring.
 
 from __future__ import annotations
 
-from typing import Any
-
 import numpy as np
 
 from denoiser.baselines.manager import BaselineManager
@@ -21,7 +19,7 @@ class AnomalyScorer:
 
     def __init__(self, baseline_manager: BaselineManager) -> None:
         self.baseline = baseline_manager
-        
+
         # Load thresholds from config
         self.thresh_low = settings.anomaly_threshold_low
         self.thresh_medium = settings.anomaly_threshold_medium
@@ -59,15 +57,15 @@ class AnomalyScorer:
             return []
 
         logger.debug("Scoring batch against baseline", extra={"count": len(templates)})
-        
+
         # Search the baseline (k=1 nearest neighbor)
         # Returns list of lists of dicts: [ [ {"_distance": 0.1, "cluster_id": 5, ...} ] ]
         search_results = self.baseline.search(vectors, k=1)
-        
+
         results: list[AnomalyResult] = []
         for i, res_list in enumerate(search_results):
             template = templates[i]
-            
+
             if not res_list:
                 # Edge case: empty baseline
                 results.append(
@@ -78,15 +76,15 @@ class AnomalyScorer:
                     )
                 )
                 continue
-                
+
             nearest = res_list[0]
             # LanceDB distance depends on the metric used during table creation (default L2).
             # For cosine, LanceDB returns 1 - cosine_similarity.
             # We assume distance is already normalized 0.0 -> 1.0 or greater.
             distance = float(nearest.get("_distance", 1.0))
-            
+
             label = self._classify(distance)
-            
+
             results.append(
                 AnomalyResult(
                     template=template,
@@ -96,5 +94,5 @@ class AnomalyScorer:
                     nearest_template=nearest.get("representative_template"),
                 )
             )
-            
+
         return results

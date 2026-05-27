@@ -15,12 +15,10 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any
 
 import httpx
 
@@ -90,7 +88,7 @@ class DeliveryRecord:
     http_status: int | None = None
     latency_ms: float = 0.0
     error: str | None = None
-    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
 
 @dataclass
@@ -106,7 +104,7 @@ class AlertPayload:
     causal_links: list[dict]
     intelligence: dict | None
     keyword_flag: bool
-    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
     @property
     def fingerprint(self) -> str:

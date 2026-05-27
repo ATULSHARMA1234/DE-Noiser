@@ -1,7 +1,9 @@
 import os
+
 import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
+
 from denoiser.logging import get_logger
 
 logger = get_logger(__name__)
@@ -19,7 +21,7 @@ class ObjectStore:
         self.access_key = access_key or os.getenv("S3_ACCESS_KEY", "admin")
         self.secret_key = secret_key or os.getenv("S3_SECRET_KEY", "password123")
         self.bucket_name = bucket_name or os.getenv("S3_BUCKET", "semanticos-logs")
-        
+
         self.client = boto3.client(
             's3',
             endpoint_url=self.endpoint_url,
@@ -29,7 +31,7 @@ class ObjectStore:
             config=Config(signature_version='s3v4', s3={"addressing_style": "path"}),
             region_name='us-east-1' # dummy region
         )
-        
+
         self._ensure_bucket_exists()
 
     def _ensure_bucket_exists(self):

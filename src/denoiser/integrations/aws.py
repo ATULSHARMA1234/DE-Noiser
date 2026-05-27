@@ -4,7 +4,7 @@ AWS CloudWatch integration for fetching log events.
 
 from __future__ import annotations
 
-from typing import Iterator
+from collections.abc import Iterator
 
 import boto3
 
@@ -28,7 +28,7 @@ class CloudWatchReader:
         """
         try:
             self.client = boto3.client('logs', region_name=region_name)
-            logger.debug(f"Successfully initialized AWS CloudWatch client.")
+            logger.debug("Successfully initialized AWS CloudWatch client.")
         except Exception as e:
             raise IngestionError(f"Failed to initialize AWS client. Check your AWS credentials: {e}") from e
 
@@ -50,7 +50,7 @@ class CloudWatchReader:
             A record for each log event.
         """
         logger.info(f"Fetching logs from CloudWatch {log_group} (stream={log_stream or 'ALL'})...")
-        
+
         try:
             if log_stream:
                 response = self.client.get_log_events(
@@ -76,7 +76,7 @@ class CloudWatchReader:
         source_name = f"aws://{log_group}"
         if log_stream:
             source_name += f"/{log_stream}"
-            
+
         for i, event in enumerate(events, 1):
             message = event.get('message', '').strip()
             if not message:

@@ -1,9 +1,17 @@
-from datetime import datetime
-from typing import Optional, List
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, ForeignKey, Text, Boolean
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, relationship
 import os
+from datetime import datetime
+
+from sqlalchemy import (
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    create_engine,
+)
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import relationship, sessionmaker
 
 # Using SQLite for local persistence (easy to upgrade to PostgreSQL/ClickHouse later)
 DB_PATH = os.path.expanduser("~/Desktop/semantic-log-denoiser/data/semantic_os.db")
@@ -20,7 +28,7 @@ class AnalysisRecord(Base):
     incident_summary = Column(Text)
     failure_domain = Column(String)
     anomaly_count = Column(Integer, default=0)
-    
+
     clusters = relationship("ClusterRecord", back_populates="analysis")
 
 class ClusterRecord(Base):
@@ -33,7 +41,7 @@ class ClusterRecord(Base):
     representative_template = Column(Text)
     anomaly_label = Column(String)
     semantic_summary = Column(Text)
-    
+
     analysis = relationship("AnalysisRecord", back_populates="clusters")
 
 # Database Engine
@@ -44,9 +52,9 @@ def init_db():
     Base.metadata.create_all(bind=engine)
 
 def save_analysis(
-    source: str, 
-    total_logs: int, 
-    intelligence: dict, 
+    source: str,
+    total_logs: int,
+    intelligence: dict,
     clusters: list,
     anomalies: dict = None
 ):
@@ -62,13 +70,13 @@ def save_analysis(
         )
         session.add(analysis)
         session.flush() # Get the ID
-        
+
         # 2. Save each Cluster
         for i, c in enumerate(clusters):
             # Get semantic summary from intelligence if available
             summaries = intelligence.get("cluster_summaries", [])
             summary = summaries[i] if i < len(summaries) else "-"
-            
+
             cluster_rec = ClusterRecord(
                 analysis_id=analysis.id,
                 cluster_id=c.cluster_id,
@@ -79,7 +87,7 @@ def save_analysis(
                 semantic_summary=summary
             )
             session.add(cluster_rec)
-        
+
         session.commit()
         return analysis.id
     finally:

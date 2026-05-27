@@ -83,7 +83,7 @@ class LogClusterer:
                 # Pick a random sample for training the clusterer
                 indices = np.random.choice(n_samples, MAX_SAMPLES, replace=False)
                 train_vectors = vectors[indices]
-                
+
                 clusterer = hdbscan.HDBSCAN(
                     min_cluster_size=actual_min_cluster_size,
                     min_samples=actual_min_samples,
@@ -91,7 +91,7 @@ class LogClusterer:
                     prediction_data=True, # Critical for assigning labels to non-sampled data
                     allow_single_cluster=True,
                 )
-                
+
                 try:
                     clusterer.fit(train_vectors)
                     # Assign labels to ALL vectors based on the sampled model
@@ -118,14 +118,14 @@ class LogClusterer:
         for cluster_id in unique_labels:
             # Boolean mask for the current cluster
             mask = labels == cluster_id
-            
+
             # Subsets for this cluster
             cluster_vectors = vectors[mask]
             cluster_templates = [t for t, is_in in zip(unique_templates, mask) if is_in]
-            
+
             # Calculate centroid
             centroid = np.mean(cluster_vectors, axis=0)
-            
+
             # Find representative example (closest to centroid)
             if cluster_vectors.shape[0] == 1:
                 idx_closest = 0
@@ -133,9 +133,9 @@ class LogClusterer:
                 # Euclidean distance to centroid
                 distances = np.linalg.norm(cluster_vectors - centroid, axis=1)
                 idx_closest = int(np.argmin(distances))
-                
+
             representative_template = cluster_templates[idx_closest]
-            
+
             # Get source info for this representative template
             records = template_to_records.get(representative_template, [])
             representative_raw = records[0].raw_text if records else representative_template
@@ -145,7 +145,7 @@ class LogClusterer:
             if records and records[0].timestamp:
                 # Store epoch milliseconds for fast metrics correlation.
                 representative_timestamp_ms = int(records[0].timestamp.timestamp() * 1000)
-            
+
             # Calculate total size (total raw log lines, using our new counter)
             total_size = sum(template_to_counts.get(t, 0) for t in cluster_templates)
 

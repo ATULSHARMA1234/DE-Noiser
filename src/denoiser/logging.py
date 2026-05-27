@@ -16,10 +16,11 @@ from __future__ import annotations
 import logging
 import re
 from typing import TYPE_CHECKING
-from denoiser.api.middleware import request_id_ctx
 
 from rich.console import Console
 from rich.logging import RichHandler
+
+from denoiser.api.middleware import request_id_ctx
 
 if TYPE_CHECKING:
     from denoiser.config import LogLevel

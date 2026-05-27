@@ -1,7 +1,7 @@
 import json
 import logging
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -13,9 +13,9 @@ class MetricsCorrelator:
     """
     def __init__(self, stream_path: str = "data/metrics_stream.jsonl"):
         self.stream_path = Path(stream_path)
-        self._telemetry_cache: Optional[List[Dict[str, Any]]] = None
+        self._telemetry_cache: list[dict[str, Any]] | None = None
 
-    def _load_cache(self) -> List[Dict[str, Any]]:
+    def _load_cache(self) -> list[dict[str, Any]]:
         if self._telemetry_cache is not None:
             return self._telemetry_cache
 
@@ -23,9 +23,9 @@ class MetricsCorrelator:
             self._telemetry_cache = []
             return self._telemetry_cache
 
-        cache: List[Dict[str, Any]] = []
+        cache: list[dict[str, Any]] = []
         try:
-            with open(self.stream_path, "r") as f:
+            with open(self.stream_path) as f:
                 for line in f:
                     if not line.strip():
                         continue
@@ -42,7 +42,7 @@ class MetricsCorrelator:
         self._telemetry_cache = cache
         return self._telemetry_cache
 
-    def get_context_for_anomaly(self, anomaly_timestamp_ms: int, window_ms: int = 30000) -> Dict[str, Any]:
+    def get_context_for_anomaly(self, anomaly_timestamp_ms: int, window_ms: int = 30000) -> dict[str, Any]:
         """
         Given the time of an anomaly, returns the host metrics within ± window_ms.
         """
@@ -50,7 +50,7 @@ class MetricsCorrelator:
         if not cache:
             return {"status": "no_telemetry_available"}
 
-        context: Dict[str, Any] = {
+        context: dict[str, Any] = {
             "status": "pending",
             "window_ms": window_ms,
             "pre_anomaly_cpu": None,
@@ -61,11 +61,11 @@ class MetricsCorrelator:
             "network_errors": 0.0,
             "telemetry_points_analyzed": 0,
         }
-        
+
         lower_bound = anomaly_timestamp_ms - window_ms
         upper_bound = anomaly_timestamp_ms + window_ms
-        
-        last_cpu_before_anomaly: Optional[float] = None
+
+        last_cpu_before_anomaly: float | None = None
         try:
             for data in cache:
                 ts = data.get("timestamp", 0)
@@ -111,5 +111,5 @@ class MetricsCorrelator:
             context["status"] = "correlated"
         else:
             context["status"] = "no_data_in_window"
-            
+
         return context

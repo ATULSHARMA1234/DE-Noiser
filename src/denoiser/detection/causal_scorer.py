@@ -10,10 +10,11 @@ directionality analysis.
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
+from datetime import UTC
+from typing import Any
+
 import numpy as np
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, List, Dict, Tuple
 
 from denoiser.clustering.models import Cluster
 from denoiser.ingestion.models import LogRecord
@@ -57,7 +58,7 @@ class CausalScorer:
         self.window_size_ms = window_size_ms
         self.lambda_decay = lambda_decay
 
-    def analyze(self, clusters: List[Cluster], template_to_records: Dict[str, List[LogRecord]]) -> List[CausalLink]:
+    def analyze(self, clusters: list[Cluster], template_to_records: dict[str, list[LogRecord]]) -> list[CausalLink]:
         """Analyze temporal co-occurrences between clusters and construct a causal graph.
 
         Parameters
@@ -78,10 +79,10 @@ class CausalScorer:
 
         # 1. Flatten all log events into a structured timeline of events
         # We need: timestamp (ms), cluster_id, and service (source_label)
-        timeline: List[Dict[str, Any]] = []
+        timeline: list[dict[str, Any]] = []
 
         for c in clusters:
-            # We skip the noise cluster (-1) in strict causal correlation, 
+            # We skip the noise cluster (-1) in strict causal correlation,
             # or we can include it. Enterprise standard: keep only valid clusters (>=0)
             # because noise clusters contain unstructured unrelated logs.
             if c.cluster_id < 0:
@@ -95,10 +96,10 @@ class CausalScorer:
 
                     # Get service name from metadata, fallback to filename stem
                     service = record.metadata.get("source_label", "unknown")
-                    
+
                     # Convert datetime to epoch milliseconds in UTC
-                    ts_ms = int(record.timestamp.replace(tzinfo=timezone.utc).timestamp() * 1000)
-                    
+                    ts_ms = int(record.timestamp.replace(tzinfo=UTC).timestamp() * 1000)
+
                     timeline.append({
                         "timestamp": ts_ms,
                         "cluster_id": c.cluster_id,
@@ -117,10 +118,10 @@ class CausalScorer:
         # O(N * K) where N is number of events, K is average events in 500ms window
         # We accumulate interactions between pairs of clusters
         # Key: (cluster_A, cluster_B) -> List[delay_ms (ts_B - ts_A)]
-        interactions: Dict[Tuple[int, int], List[float]] = {}
-        
+        interactions: dict[tuple[int, int], list[float]] = {}
+
         # We also need mappings to retrieve templates/services later
-        cluster_info: Dict[int, Tuple[str, str]] = {}
+        cluster_info: dict[int, tuple[str, str]] = {}
         for c in clusters:
             if c.cluster_id >= 0:
                 # Find service name
@@ -155,18 +156,18 @@ class CausalScorer:
                 if cid_a != cid_b and svc_a != svc_b:
                     # Maintain alphabetical/deterministic ordering of cluster pair key
                     pair = (cid_a, cid_b) if cid_a < cid_b else (cid_b, cid_a)
-                    
+
                     # Store signed delay relative to order: ts_b - ts_a is always positive,
                     # so we record direction: if pair is (cid_a, cid_b), delay is (ts_b - ts_a).
                     # If pair is (cid_b, cid_a), delay is -(ts_b - ts_a).
                     signed_delay = delay if cid_a < cid_b else -delay
-                    
+
                     if pair not in interactions:
                         interactions[pair] = []
                     interactions[pair].append(signed_delay)
 
         # 4. Statistical Scoring and Causal Inference
-        causal_links: List[CausalLink] = []
+        causal_links: list[CausalLink] = []
 
         for (cid_1, cid_2), delays in interactions.items():
             occurrences = len(delays)
@@ -200,7 +201,7 @@ class CausalScorer:
                 continue
 
             avg_delay = float(np.mean(directional_delays))
-            
+
             # Proximity score based on exponential decay
             # Smaller delays = higher scores
             proximity_score = math.exp(-self.lambda_decay * avg_delay)

@@ -8,8 +8,7 @@ timestamp formats into UTC epoch milliseconds.
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone, timedelta
-from typing import Any
+from datetime import UTC, datetime, timedelta, timezone
 
 from denoiser.logging import get_logger
 
@@ -111,7 +110,7 @@ class TimestampExtractor:
                 ms_val = self._frac_to_ms(frac_str)
 
                 tz_str = iso_match.group(8)
-                tz = timezone.utc
+                tz = UTC
                 if tz_str and tz_str != "Z":
                     tz_str = tz_str.replace(":", "")  # normalizes +05:30 to +0530
                     sign = 1 if tz_str[0] == "+" else -1
@@ -136,10 +135,10 @@ class TimestampExtractor:
                 second = int(syslog_match.group(5))
 
                 # Default to current year in UTC
-                now = datetime.now(timezone.utc)
+                now = datetime.now(UTC)
                 year = now.year
 
-                dt = datetime(year, month, day, hour, minute, second, tzinfo=timezone.utc)
+                dt = datetime(year, month, day, hour, minute, second, tzinfo=UTC)
                 if dt > now + timedelta(days=7):
                     # Future date, likely from last year
                     dt = dt.replace(year=year - 1)

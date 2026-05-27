@@ -4,7 +4,7 @@ Kubernetes integration for fetching pod logs.
 
 from __future__ import annotations
 
-from typing import Iterator
+from collections.abc import Iterator
 
 from kubernetes import client, config
 
@@ -43,9 +43,9 @@ class KubernetesReader:
             A record for each log line.
         """
         logger.info(f"Fetching logs from Kubernetes pod {namespace}/{pod_name}...")
-        
+
         try:
-            # We fetch the logs as a single string. For massive logs, stream=True is better, 
+            # We fetch the logs as a single string. For massive logs, stream=True is better,
             # but for this MVP, standard read is highly reliable.
             pod_logs = self.api.read_namespaced_pod_log(
                 name=pod_name,
@@ -60,7 +60,7 @@ class KubernetesReader:
 
         source_name = f"k8s://{namespace}/{pod_name}"
         lines = pod_logs.splitlines()
-        
+
         for i, line in enumerate(lines, 1):
             line = line.strip()
             if not line:

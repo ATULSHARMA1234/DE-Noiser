@@ -1,7 +1,9 @@
-import os
 import json
+import os
 import time
-from typing import List, Dict, Any
+from datetime import UTC
+from typing import Any
+
 from denoiser.logging import get_logger
 
 logger = get_logger(__name__)
@@ -43,23 +45,23 @@ class ClickHouseStore:
             logger.error(f"Failed to connect to ClickHouse: {e}")
             self.client = None
 
-    def insert_logs(self, logs: List[Dict[str, Any]]):
+    def insert_logs(self, logs: list[dict[str, Any]]):
         """Dual-write logs to ClickHouse"""
         if not self.client:
             return False
-            
+
         try:
             # Flatten log dicts to tuples matching schema
             data = []
             for log in logs:
                 ts = log.get("timestamp", time.time())
                 # If timestamp is seconds, convert to datetime object
-                from datetime import datetime, timezone
+                from datetime import datetime
                 if isinstance(ts, (int, float)):
-                    dt = datetime.fromtimestamp(ts, timezone.utc)
+                    dt = datetime.fromtimestamp(ts, UTC)
                 else:
-                    dt = datetime.now(timezone.utc)
-                    
+                    dt = datetime.now(UTC)
+
                 data.append((
                     dt,
                     log.get("source", "unknown"),
@@ -67,7 +69,7 @@ class ClickHouseStore:
                     log.get("message", str(log)),
                     json.dumps(log)
                 ))
-                
+
             self.client.insert('semantic_logs', data, column_names=['timestamp', 'source', 'level', 'message', 'raw_json'])
             return True
         except Exception as e:

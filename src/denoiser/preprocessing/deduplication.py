@@ -48,11 +48,11 @@ class Deduplicator:
 
         if key not in self._grouped_records:
             self._unique_count += 1
-            
+
         # Optimization: only store first N records to save massive memory in 1M+ log tests
         if len(self._grouped_records[key]) < 100:
             self._grouped_records[key].append(record)
-            
+
         self._total_count += 1
         self._template_counts[key] += 1
 

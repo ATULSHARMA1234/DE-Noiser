@@ -11,16 +11,23 @@ Commands:
 
 from __future__ import annotations
 
+import os
 import sys
+import time
+from datetime import datetime
+
 import typer
 from rich.console import Console
 
 from denoiser.baselines.manager import BaselineManager
 from denoiser.clustering.hdbscan_clusterer import LogClusterer
-from denoiser.config import AnomalyLabel, AnalysisMode, OutputFormat, settings
+from denoiser.config import AnalysisMode, AnomalyLabel, OutputFormat, settings
 from denoiser.detection.scorer import AnomalyScorer
 from denoiser.embeddings.provider import LocalEmbeddingProvider
-from denoiser.exceptions import AnomalyThresholdExceeded, EXIT_CODE_SUCCESS, EXIT_CODE_ANOMALY_THRESHOLD
+from denoiser.exceptions import (
+    EXIT_CODE_SUCCESS,
+    AnomalyThresholdExceeded,
+)
 from denoiser.ingestion.reader import LogReader
 from denoiser.ingestion.stdin import StdinReader
 from denoiser.integrations.aws import CloudWatchReader
@@ -34,9 +41,6 @@ from denoiser.preprocessing.normalization import Normalizer
 from denoiser.preprocessing.redaction import Redactor
 from denoiser.reporting.formatters import Reporter
 from denoiser.storage.database import init_db, save_analysis
-import os
-import time
-from datetime import datetime
 
 # Initialize the persistent database
 init_db()
@@ -146,7 +150,7 @@ def analyze(
                 log_group, log_stream = path.split("/", 1)
             else:
                 log_group, log_stream = path, None
-            
+
             reader = CloudWatchReader()
             records_iter = reader.read(log_group, log_stream)
         except Exception as e:
@@ -160,7 +164,7 @@ def analyze(
     redactor = Redactor(enabled=redact)
     normalizer = Normalizer()
     deduper = Deduplicator()
-    
+
     BATCH_SIZE = 10000
     batch = []
 
@@ -175,7 +179,7 @@ def analyze(
                     r.normalized_text = normalized[i]
                     deduper.add(r)
                 batch = []
-        
+
         if batch:
             texts = [r.raw_text for r in batch]
             redacted = [redactor.redact(t) for t in texts]
@@ -210,14 +214,10 @@ def analyze(
             scorer = AnomalyScorer(bm)
             results = scorer.score_batch(unique_templates, vectors)
             anomalies = {res.template: res for res in results}
-            
+
             # Track highest severity for exit codes
             for res in results:
-                if max_severity is None:
-                    max_severity = res.label
-                elif res.label == AnomalyLabel.HIGH_RISK_ANOMALY:
-                    max_severity = res.label
-                elif res.label == AnomalyLabel.NEW_PATTERN and max_severity != AnomalyLabel.HIGH_RISK_ANOMALY:
+                if max_severity is None or res.label == AnomalyLabel.HIGH_RISK_ANOMALY or (res.label == AnomalyLabel.NEW_PATTERN and max_severity != AnomalyLabel.HIGH_RISK_ANOMALY):
                     max_severity = res.label
 
     # 7. Intelligence (Optional)
@@ -243,7 +243,7 @@ def analyze(
 
     # 10. Exit logic
     save_analysis(source, deduper.total_count, llm_payload or {}, clusters, anomalies)
-    
+
     if fail_on_anomaly and max_severity:
         fail_level = AnomalyLabel(fail_on_anomaly.lower())
         # Ordered severity check hack
@@ -264,7 +264,7 @@ def agent(
     [THE NERVOUS SYSTEM]
     Monitor a log file in real-time and push semantic insights to the dashboard.
     """
-    console.print(f"\n[bold cyan]⚡ Semantic Agent Activated[/bold cyan]")
+    console.print("\n[bold cyan]⚡ Semantic Agent Activated[/bold cyan]")
     console.print(f"[dim]Monitoring:[/dim] {path}")
     console.print(f"[dim]Interval:[/dim] {interval}s batches\n")
 
@@ -281,7 +281,7 @@ def agent(
                 # For the demo, we just trigger the full analyze logic on the file
                 analyze(source=path, intelligence=True, format="table")
                 last_size = current_size
-            
+
             time.sleep(interval)
     except KeyboardInterrupt:
         console.print("\n[bold yellow]Agent Deactivated.[/bold yellow]")
@@ -352,7 +352,7 @@ def inspect_baseline(
     try:
         meta = bm.get_metadata()
         table = bm.load()
-        
+
         labeled_count = table.search().where("label IS NOT NULL").to_list()
         ack_count = table.search().where("is_acknowledged = true").to_list()
 
@@ -381,7 +381,7 @@ def explain(
 ) -> None:
     """Show detailed context for a specific cluster from a baseline."""
     console.print(f"[bold yellow]▶ Explaining cluster[/bold yellow] {cluster} [dim]from {baseline}[/dim]")
-    
+
     try:
         cluster_id = int(cluster)
     except ValueError:
@@ -393,23 +393,23 @@ def explain(
         table = bm.load()
         # Query the exact cluster
         results = table.search().where(f"cluster_id = {cluster_id}").to_list()
-        
+
         if not results:
             console.print(f"[yellow]Cluster {cluster_id} not found in baseline.[/yellow]")
             return
-            
+
         record = results[0]
         console.print(f"\n[bold cyan]Cluster {cluster_id} Metadata:[/bold cyan]")
         console.print(f"  [dim]Label:[/dim] [bold green]{record.get('label') or 'None'}[/bold green]")
         console.print(f"  [dim]Status:[/dim] {'✅ Acknowledged' if record.get('is_acknowledged') else '⚠️ Unacknowledged'}")
         console.print(f"  [dim]Size (Raw Logs):[/dim] {record.get('size', 'N/A')}")
-        
-        console.print(f"\n[bold]Representative Template (Normalized):[/bold]")
+
+        console.print("\n[bold]Representative Template (Normalized):[/bold]")
         console.print(f"  {record.get('representative_template', 'N/A')}")
-        
-        console.print(f"\n[bold]Representative Raw Log:[/bold]")
+
+        console.print("\n[bold]Representative Raw Log:[/bold]")
         console.print(f"  {record.get('representative_raw', 'N/A')}\n")
-        
+
     except Exception as e:
         console.print(f"[bold red]Error explaining cluster:[/bold red] {e}")
 
