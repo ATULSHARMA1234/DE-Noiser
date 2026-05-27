@@ -7,8 +7,31 @@ const protocol = typeof window !== 'undefined' && window.location.protocol === '
 export const API_BASE = isDev ? 'http://127.0.0.1:8000' : '/api';
 export const WS_BASE = isDev ? 'ws://127.0.0.1:8000' : `${protocol}://${typeof window !== 'undefined' ? window.location.host : 'localhost'}`;
 
-export async function apiFetch(path: string, options?: RequestInit) {
-  const res = await fetch(`${API_BASE}${path}`, options);
+export async function apiFetch(path: string, options: RequestInit = {}) {
+  const headers = new Headers(options.headers || {});
+  
+  if (typeof window !== 'undefined') {
+    const token = localStorage.getItem('token');
+    if (token && !headers.has('Authorization')) {
+      headers.set('Authorization', `Bearer ${token}`);
+    }
+  }
+
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers,
+  });
+
+  if (res.status === 401) {
+    if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      window.location.href = '/login';
+    }
+    const err = await res.json().catch(() => ({ detail: 'Session expired. Please log in again.' }));
+    throw new Error(err.detail || 'Unauthorized');
+  }
+
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(err.detail || 'API request failed');
@@ -16,24 +39,26 @@ export async function apiFetch(path: string, options?: RequestInit) {
   return res.json();
 }
 
-export async function apiPost(path: string, body: any) {
+export async function apiPost(path: string, body: any, options: RequestInit = {}) {
   return apiFetch(path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
     body: JSON.stringify(body),
+    ...options,
   });
 }
 
-export async function apiPut(path: string, body: any) {
+export async function apiPut(path: string, body: any, options: RequestInit = {}) {
   return apiFetch(path, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
     body: JSON.stringify(body),
+    ...options,
   });
 }
 
-export async function apiDelete(path: string) {
-  return apiFetch(path, { method: 'DELETE' });
+export async function apiDelete(path: string, options: RequestInit = {}) {
+  return apiFetch(path, { method: 'DELETE', ...options });
 }
 
 export async function runAnalysis(body: any) {

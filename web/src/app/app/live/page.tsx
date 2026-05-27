@@ -39,7 +39,9 @@ export default function LivePulsePage() {
       return;
     }
 
-    const ws = new WebSocket(`${WS_BASE}/stream`);
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+    const url = token ? `${WS_BASE}/stream?token=${encodeURIComponent(token)}` : `${WS_BASE}/stream`;
+    const ws = new WebSocket(url);
     wsRef.current = ws;
     
     ws.onopen = () => {
