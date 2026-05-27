@@ -5,6 +5,8 @@ import { useAuth } from '@/context/AuthContext';
 import { apiFetch, apiPost, apiDelete } from '@/lib/api';
 import { Users, UserPlus, Trash2, Shield, ShieldCheck, ShieldAlert, Loader2, Sparkles, X } from 'lucide-react';
 
+import { useToast } from '@/context/ToastContext';
+
 type ManagedUser = {
   id: number;
   email: string;
@@ -13,6 +15,7 @@ type ManagedUser = {
 
 export default function UserDirectoryPage() {
   const { user: currentUser } = useAuth();
+  const { toast } = useToast();
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -51,6 +54,7 @@ export default function UserDirectoryPage() {
       setRole('VIEWER');
       setShowAddModal(false);
       await fetchUsers();
+      toast.success('New operator provisioned successfully.');
     } catch (e: any) {
       setError(e.message || 'Failed to provision user.');
     } finally {
@@ -63,8 +67,9 @@ export default function UserDirectoryPage() {
     try {
       await apiDelete(`/users/${userId}`);
       await fetchUsers();
+      toast.success('Operator deleted successfully.');
     } catch (e: any) {
-      alert(`Delete failed: ${e.message}`);
+      toast.error(`Delete failed: ${e.message}`);
     }
   };
 

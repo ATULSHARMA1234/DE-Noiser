@@ -3,8 +3,10 @@
 import React, { useState, useEffect } from 'react';
 import { ShieldAlert, Database, Clock, CheckCircle2, X, Zap, AlertTriangle, Trash2 } from 'lucide-react';
 import { apiFetch, apiPut, apiDelete } from '@/lib/api';
+import { useToast } from '@/context/ToastContext';
 
 export default function IncidentMemoryPage() {
+  const { toast } = useToast();
   const [incidents, setIncidents] = useState<any[]>([]);
   const [selectedIncident, setSelectedIncident] = useState<any>(null);
   const [domainFilter, setDomainFilter] = useState('All');
@@ -25,8 +27,9 @@ export default function IncidentMemoryPage() {
       if (selectedIncident?.id === id) {
         setSelectedIncident((prev: any) => ({...prev, status: resolve ? 'RESOLVED' : 'OPEN' }));
       }
+      toast.success(resolve ? 'Incident marked as resolved.' : 'Incident reopened.');
     } catch (e: any) {
-      alert(`Failed: ${e.message}`);
+      toast.error(`Failed to resolve: ${e.message}`);
     }
   };
 
@@ -36,8 +39,9 @@ export default function IncidentMemoryPage() {
       await apiDelete(`/incidents/${id}`);
       fetchIncidents();
       if (selectedIncident?.id === id) setSelectedIncident(null);
+      toast.success('Incident deleted successfully.');
     } catch (e: any) {
-      alert(`Failed: ${e.message}`);
+      toast.error(`Delete failed: ${e.message}`);
     }
   };
 

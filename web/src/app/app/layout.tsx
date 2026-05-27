@@ -7,10 +7,12 @@ import { LayoutGrid, Terminal, ShieldAlert, History, Database, Settings, Search,
 import { apiFetch, runAnalysis } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/context/ThemeContext';
+import { useToast } from '@/context/ToastContext';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, loading, logout, hasRole } = useAuth();
   const { theme, toggleTheme } = useTheme();
+  const { toast } = useToast();
   const pathname = usePathname();
   const router = useRouter();
   const [showRunModal, setShowRunModal] = useState(false);
@@ -119,7 +121,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       // Force refresh
       window.location.reload();
     } catch (e: any) {
-      alert(`Analysis failed: ${e.message}`);
+      toast.error(`Analysis failed: ${e.message}`);
     } finally {
       setIsRunning(false);
     }
