@@ -37,6 +37,10 @@ def test_auth_login_success(db_session: Session):
         email = "analyst@semanticos.io"
         password = "analystpassword"
         
+        # Clean up any existing user to ensure test runs successfully
+        db_session.query(User).filter(User.email == email).delete()
+        db_session.commit()
+        
         user = User(
             email=email,
             hashed_password=get_password_hash(password),

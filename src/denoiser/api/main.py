@@ -136,6 +136,43 @@ def get_me(current_user: User = Depends(get_current_user)):
     return current_user
 
 
+@app.get("/users", response_model=List[UserResponse])
+def list_users(db: Session = Depends(get_db), current_user: User = Depends(require_role(["ADMIN"]))):
+    return db.query(User).all()
+
+
+@app.post("/users", response_model=UserResponse, status_code=201)
+def create_user(payload: UserCreate, db: Session = Depends(get_db), current_user: User = Depends(require_role(["ADMIN"]))):
+    exists = db.query(User).filter(User.email == payload.email).first()
+    if exists:
+        raise HTTPException(status_code=400, detail="User with this email already exists")
+    
+    from denoiser.api.auth import get_password_hash
+    user = User(
+        email=payload.email,
+        hashed_password=get_password_hash(payload.password),
+        role=payload.role
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@app.delete("/users/{user_id}")
+def delete_user(user_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_role(["ADMIN"]))):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if user.email == current_user.email:
+        raise HTTPException(status_code=400, detail="Cannot delete currently logged in admin user")
+        
+    db.delete(user)
+    db.commit()
+    return {"status": "deleted", "id": user_id}
+
+
 # ─── HEALTH ───────────────────────────────────────────────────────────────────
 
 @app.get("/health")
@@ -145,7 +182,7 @@ def health_check():
 
 # ─── TELEMETRY — Live-ish host vitals (Task 16) ──────────────────────────────
 @app.get("/vitals")
-def get_vitals(limit: int = 20):
+def get_vitals(limit: int = 20, current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
     """
     Returns the latest host telemetry points for dashboard sparkline charts.
     Backed by `data/metrics_stream.jsonl` written by `MetricsCollector` (Task 14).
@@ -184,7 +221,7 @@ def get_vitals(limit: int = 20):
 
 
 @app.get("/metrics/current")
-def get_metrics_current(limit: int = 20):
+def get_metrics_current(limit: int = 20, current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
     """
     Alias for /vitals — returns latest host telemetry for dashboard sparklines.
     Compatible with Phase 3 telemetry integration (Task 16).
@@ -193,7 +230,7 @@ def get_metrics_current(limit: int = 20):
 
 
 @app.get("/metrics/stream")
-def get_metrics_stream(limit: int = 100):
+def get_metrics_stream(limit: int = 100, current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
     """Return raw metrics stream entries for historical analysis."""
     try:
         if not metrics_agent.stream_path.exists():
@@ -212,7 +249,7 @@ def get_metrics_stream(limit: int = 100):
 # ─── SOURCES — Dynamic file discovery + upload ───────────────────────────────
 
 @app.get("/sources")
-def list_sources():
+def list_sources(current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
     """List all log files in the data/ directory."""
     sources = []
     EXCLUDED = {"settings.json"}
@@ -236,7 +273,7 @@ def list_sources():
 
 
 @app.post("/sources/upload")
-async def upload_source(file: UploadFile = File(...)):
+async def upload_source(file: UploadFile = File(...), current_user: User = Depends(require_role(["ANALYST", "ADMIN"]))):
     """Upload a log file to the data/ directory for analysis."""
     dest = DATA_DIR / file.filename
     content = await file.read()
@@ -252,7 +289,7 @@ async def upload_source(file: UploadFile = File(...)):
 
 
 @app.delete("/sources/{filename}")
-def delete_source(filename: str):
+def delete_source(filename: str, current_user: User = Depends(require_role(["ADMIN"]))):
     """Delete a log file from the data/ directory."""
     if ".." in filename or "/" in filename:
         raise HTTPException(status_code=400, detail="Invalid filename")
@@ -268,7 +305,33 @@ def delete_source(filename: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/ingest")
+from fastapi.security import APIKeyHeader
+from denoiser.api.auth import oauth2_scheme
+
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+def verify_ingest_auth(
+    api_key: Optional[str] = Depends(api_key_header),
+    token: Optional[str] = Depends(oauth2_scheme),
+    db: Session = Depends(get_db)
+):
+    """Allow ingest if X-API-Key header matches static config, or if a valid JWT is present."""
+    static_key = os.getenv("INGEST_API_KEY", "semanticos-ingest-key-123")
+    if api_key and api_key == static_key:
+        return
+    
+    if token:
+        try:
+            get_current_user(token, db)
+            return
+        except Exception:
+            pass
+            
+    raise HTTPException(status_code=401, detail="Invalid API Key or JWT token")
+
+
+@app.post("/ingest", dependencies=[Depends(verify_ingest_auth)])
 async def ingest_logs(payload: IngestPayload):
     """
     Standard HTTP ingestion endpoint.
@@ -318,7 +381,7 @@ async def ingest_logs(payload: IngestPayload):
 # ─── CONNECTORS — Kubernetes, AWS, and Docker ───────────────────────────────
 
 @app.get("/connectors/k8s/pods")
-def list_k8s_pods():
+def list_k8s_pods(current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
     """Discover K8s namespaces and pods. Falls back to mock if K8s is not available."""
     try:
         from kubernetes import client, config
@@ -350,7 +413,7 @@ def list_k8s_pods():
 
 
 @app.post("/connectors/k8s/fetch")
-async def fetch_k8s_logs(namespace: str = Form(...), pod_name: str = Form(...)):
+async def fetch_k8s_logs(namespace: str = Form(...), pod_name: str = Form(...), current_user: User = Depends(require_role(["ANALYST", "ADMIN"]))):
     """Fetch logs from K8s pod and save as a dynamic log source."""
     filename = f"k8s_{namespace}_{pod_name}.log"
     dest = DATA_DIR / filename
@@ -388,7 +451,7 @@ async def fetch_k8s_logs(namespace: str = Form(...), pod_name: str = Form(...)):
 
 
 @app.get("/connectors/aws/groups")
-def list_aws_groups():
+def list_aws_groups(current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
     """Discover AWS CloudWatch log groups. Falls back to mock if AWS is not available."""
     try:
         import boto3
@@ -417,7 +480,7 @@ def list_aws_groups():
 
 
 @app.post("/connectors/aws/fetch")
-async def fetch_aws_logs(log_group: str = Form(...), log_stream: Optional[str] = Form(None)):
+async def fetch_aws_logs(log_group: str = Form(...), log_stream: Optional[str] = Form(None), current_user: User = Depends(require_role(["ANALYST", "ADMIN"]))):
     """Fetch logs from AWS CloudWatch and save as a dynamic log source."""
     safe_name = log_group.replace("/", "_").strip("_")
     filename = f"aws_{safe_name}.log"
@@ -455,7 +518,7 @@ async def fetch_aws_logs(log_group: str = Form(...), log_stream: Optional[str] =
 
 
 @app.get("/connectors/docker/containers")
-def list_docker_containers():
+def list_docker_containers(current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
     """Discover running Docker containers on the host."""
     try:
         import docker
@@ -484,7 +547,7 @@ def list_docker_containers():
 
 
 @app.post("/connectors/docker/fetch")
-async def fetch_docker_logs(container_name: str = Form(...)):
+async def fetch_docker_logs(container_name: str = Form(...), current_user: User = Depends(require_role(["ANALYST", "ADMIN"]))):
     """Fetch logs from a Docker container and save as a dynamic log source."""
     filename = f"docker_{container_name}.log"
     dest = DATA_DIR / filename
@@ -546,12 +609,12 @@ def _estimate_lines(path: Path, size_bytes: int) -> int:
 # ─── SETTINGS — Persistent configuration ─────────────────────────────────────
 
 @app.get("/settings")
-def get_settings():
+def get_settings(current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
     return _load_settings()
 
 
 @app.put("/settings")
-def update_settings(new_settings: SettingsUpdate):
+def update_settings(new_settings: SettingsUpdate, current_user: User = Depends(require_role(["ADMIN"]))):
     current = _load_settings()
     updates = new_settings.model_dump(exclude_unset=True)
     current.update(updates)
@@ -562,8 +625,15 @@ def update_settings(new_settings: SettingsUpdate):
 # ─── WEBSOCKET — Real-time log streaming ─────────────────────────────────────
 
 @app.websocket("/stream")
-async def websocket_endpoint(websocket: WebSocket):
+async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = None, db: Session = Depends(get_db)):
     await websocket.accept()
+    
+    if token:
+        try:
+            get_current_user(token, db)
+        except Exception:
+            await websocket.close(code=4001, reason="Invalid token")
+            return
     
     # Task 45: Redis Pub/Sub for WebSockets
     pubsub = redis_client.pubsub()
@@ -621,7 +691,7 @@ async def websocket_endpoint(websocket: WebSocket):
 # ─── ANALYZE — Core analysis engine ──────────────────────────────────────────
 
 @app.post("/analyze")
-async def run_analysis(request: AnalysisRequest):
+async def run_analysis(request: AnalysisRequest, current_user: User = Depends(require_role(["ANALYST", "ADMIN"]))):
     """
     Submit analysis to the Phase 4 Celery queue.
 
@@ -657,7 +727,7 @@ async def run_analysis(request: AnalysisRequest):
 
 
 @app.get("/tasks/{task_id}")
-def get_task_status(task_id: str):
+def get_task_status(task_id: str, current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
     """Return Celery task state and the final analysis payload when complete."""
     from celery.result import AsyncResult
 
@@ -679,13 +749,13 @@ def get_task_status(task_id: str):
 # ─── INCIDENTS — CRUD + drill-down ───────────────────────────────────────────
 
 @app.get("/incidents")
-def get_incidents(db: Session = Depends(get_db)):
+def get_incidents(db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
     incidents = db.query(Incident).order_by(Incident.created_at.desc()).all()
     return [_incident_to_dict(inc) for inc in incidents]
 
 
 @app.get("/incidents/{incident_id}")
-def get_incident_detail(incident_id: int, db: Session = Depends(get_db)):
+def get_incident_detail(incident_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
     inc = db.query(Incident).filter(Incident.id == incident_id).first()
     if not inc:
         raise HTTPException(status_code=404, detail="Incident not found")
@@ -693,7 +763,7 @@ def get_incident_detail(incident_id: int, db: Session = Depends(get_db)):
 
 
 @app.put("/incidents/{incident_id}/resolve")
-def resolve_incident(incident_id: int, body: ResolveRequest, db: Session = Depends(get_db)):
+def resolve_incident(incident_id: int, body: ResolveRequest, db: Session = Depends(get_db), current_user: User = Depends(require_role(["ANALYST", "ADMIN"]))):
     inc = db.query(Incident).filter(Incident.id == incident_id).first()
     if not inc:
         raise HTTPException(status_code=404, detail="Incident not found")
@@ -708,7 +778,7 @@ def resolve_incident(incident_id: int, body: ResolveRequest, db: Session = Depen
 
 
 @app.delete("/incidents/{incident_id}")
-def delete_incident(incident_id: int, db: Session = Depends(get_db)):
+def delete_incident(incident_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_role(["ADMIN"]))):
     inc = db.query(Incident).filter(Incident.id == incident_id).first()
     if not inc:
         raise HTTPException(status_code=404, detail="Incident not found")
@@ -738,13 +808,13 @@ def _incident_to_dict(inc: Incident) -> dict:
 # ─── RUNS — History ──────────────────────────────────────────────────────────
 
 @app.get("/runs")
-def get_runs(db: Session = Depends(get_db)):
+def get_runs(db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
     runs = db.query(AnalysisRun).order_by(AnalysisRun.created_at.desc()).all()
     return [_run_to_dict(r) for r in runs]
 
 
 @app.get("/runs/compare")
-def compare_runs(run_a: str, run_b: str, db: Session = Depends(get_db)):
+def compare_runs(run_a: str, run_b: str, db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
     """Compare two analysis runs and return a DriftReport."""
     db_run_a = db.query(AnalysisRun).filter(AnalysisRun.id == run_a).first()
     db_run_b = db.query(AnalysisRun).filter(AnalysisRun.id == run_b).first()
@@ -765,7 +835,7 @@ def compare_runs(run_a: str, run_b: str, db: Session = Depends(get_db)):
 
 
 @app.get("/runs/{run_id}")
-def get_run_detail(run_id: str, db: Session = Depends(get_db)):
+def get_run_detail(run_id: str, db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
     run = db.query(AnalysisRun).filter(AnalysisRun.id == run_id).first()
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -773,7 +843,7 @@ def get_run_detail(run_id: str, db: Session = Depends(get_db)):
 
 
 @app.delete("/runs/{run_id}")
-def delete_run(run_id: str, db: Session = Depends(get_db)):
+def delete_run(run_id: str, db: Session = Depends(get_db), current_user: User = Depends(require_role(["ADMIN"]))):
     run = db.query(AnalysisRun).filter(AnalysisRun.id == run_id).first()
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -819,13 +889,13 @@ class WebhookUpdateRequest(BaseModel):
 
 
 @app.get("/webhooks")
-def list_webhooks():
+def list_webhooks(current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
     """List all registered alert destinations."""
     return alert_router.list_destinations()
 
 
 @app.post("/webhooks", status_code=201)
-def create_webhook(body: WebhookCreateRequest):
+def create_webhook(body: WebhookCreateRequest, current_user: User = Depends(require_role(["ADMIN"]))):
     """Register a new alert destination."""
     try:
         channel = ChannelType(body.channel_type)
@@ -847,7 +917,7 @@ def create_webhook(body: WebhookCreateRequest):
 
 
 @app.put("/webhooks/{webhook_id}")
-def update_webhook(webhook_id: str, body: WebhookUpdateRequest):
+def update_webhook(webhook_id: str, body: WebhookUpdateRequest, current_user: User = Depends(require_role(["ADMIN"]))):
     """Update an existing webhook configuration."""
     cfg = alert_router.get_destination(webhook_id)
     if not cfg:
@@ -864,7 +934,7 @@ def update_webhook(webhook_id: str, body: WebhookUpdateRequest):
 
 
 @app.delete("/webhooks/{webhook_id}")
-def delete_webhook(webhook_id: str):
+def delete_webhook(webhook_id: str, current_user: User = Depends(require_role(["ADMIN"]))):
     """Remove an alert destination."""
     removed = alert_router.unregister(webhook_id)
     if not removed:
@@ -873,7 +943,7 @@ def delete_webhook(webhook_id: str):
 
 
 @app.post("/webhooks/{webhook_id}/test")
-async def test_webhook(webhook_id: str):
+async def test_webhook(webhook_id: str, current_user: User = Depends(require_role(["ADMIN"]))):
     """Fire a synthetic P1 test alert to a specific destination."""
     cfg = alert_router.get_destination(webhook_id)
     if not cfg:
@@ -905,6 +975,6 @@ async def test_webhook(webhook_id: str):
 
 
 @app.get("/webhooks/log")
-def get_delivery_log(limit: int = 50):
+def get_delivery_log(limit: int = 50, current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
     """Return recent alert delivery audit records."""
     return alert_router.get_delivery_log(limit=limit)
