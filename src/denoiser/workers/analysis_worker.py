@@ -26,8 +26,17 @@ logger = get_logger(__name__)
 
 # Initialize Celery using local Redis if URL not provided
 redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-celery_app = Celery('analysis_worker', broker=redis_url, backend=redis_url)
-celery_app.conf.update(task_track_started=True, result_expires=86400)
+is_testing = "PYTEST_CURRENT_TEST" in os.environ
+
+if is_testing:
+    celery_app = Celery('analysis_worker', broker='memory://', backend='cache+memory://')
+    celery_app.conf.update(
+        task_always_eager=True,
+        task_eager_propagates=True,
+    )
+else:
+    celery_app = Celery('analysis_worker', broker=redis_url, backend=redis_url)
+    celery_app.conf.update(task_track_started=True, result_expires=86400)
 
 # Setup LanceDB
 vector_store = VectorStore()

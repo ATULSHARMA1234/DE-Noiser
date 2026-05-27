@@ -1,6 +1,11 @@
-/** Centralized API configuration for SemanticOS */
-export const API_BASE = 'http://127.0.0.1:8000';
-export const WS_BASE = 'ws://127.0.0.1:8000';
+/** Centralized API configuration for SemanticOS
+ *  - In Docker (served via Nginx on port 80): use relative URLs, Nginx proxies /api/* → backend
+ *  - In local dev (Next.js on port 3000): hit backend directly on port 8000
+ */
+const isDev = typeof window !== 'undefined' && window.location.port === '3000';
+const protocol = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss' : 'ws';
+export const API_BASE = isDev ? 'http://127.0.0.1:8000' : '/api';
+export const WS_BASE = isDev ? 'ws://127.0.0.1:8000' : `${protocol}://${typeof window !== 'undefined' ? window.location.host : 'localhost'}`;
 
 export async function apiFetch(path: string, options?: RequestInit) {
   const res = await fetch(`${API_BASE}${path}`, options);
