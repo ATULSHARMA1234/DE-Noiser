@@ -3,10 +3,12 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { LayoutGrid, Terminal, ShieldAlert, History, Database, Settings, Search, Play, Cpu, X, FileText, Loader2, Network } from 'lucide-react';
+import { LayoutGrid, Terminal, ShieldAlert, History, Database, Settings, Search, Play, Cpu, X, FileText, Loader2, Network, Users } from 'lucide-react';
 import { apiFetch, runAnalysis } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
+  const { user, loading, logout, hasRole } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
   const [showRunModal, setShowRunModal] = useState(false);
@@ -15,6 +17,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [isRunning, setIsRunning] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Dynamically append User Directory if user is ADMIN
   const navItems = [
     { name: 'Command Center', path: '/app', icon: LayoutGrid },
     { name: 'Live Pulse', path: '/app/live', icon: Terminal },
@@ -24,6 +27,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     { name: 'Sources', path: '/app/sources', icon: Database },
     { name: 'Settings', path: '/app/settings', icon: Settings },
   ];
+
+  if (user?.role === 'ADMIN') {
+    navItems.push({ name: 'User Directory', path: '/app/users', icon: Users });
+  }
 
   const fetchSources = async () => {
     try {
@@ -53,6 +60,22 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       setIsRunning(false);
     }
   };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen w-full flex items-center justify-center bg-[#070709] overflow-hidden select-none">
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[300px] h-[300px] rounded-full bg-fuchsia-500/10 blur-[100px] pointer-events-none"></div>
+        <div className="flex flex-col items-center gap-4 z-10">
+          <Cpu size={40} className="text-fuchsia-500 animate-spin duration-3000" />
+          <div className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Booting Neural Core...</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return null;
+  }
 
   return (
     <div className="flex h-screen bg-[#0a0a0c] text-white font-sans overflow-hidden">
@@ -136,8 +159,17 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               >
                 <Play size={14} fill="currentColor" /> Run Analysis
               </button>
-              <div className="w-8 h-8 rounded-full bg-zinc-800 text-zinc-300 text-xs font-bold flex items-center justify-center">
-                SR
+              <div className="flex items-center gap-3 bg-white/[0.02] border border-white/10 px-3 py-1.5 rounded-full">
+                <div className="flex flex-col text-right hidden md:flex">
+                  <span className="text-[10px] font-bold text-white max-w-[120px] truncate">{user.email}</span>
+                  <span className="text-[9px] font-semibold text-fuchsia-400 tracking-wider uppercase">{user.role}</span>
+                </div>
+                <button 
+                  onClick={logout} 
+                  className="bg-zinc-800 hover:bg-red-950/40 hover:text-red-400 text-zinc-300 text-[10px] px-2.5 py-1 rounded-full cursor-pointer transition-all border border-white/5 hover:border-red-500/20 font-bold uppercase tracking-wider"
+                >
+                  Logout
+                </button>
               </div>
            </div>
         </header>
