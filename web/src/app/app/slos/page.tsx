@@ -116,14 +116,14 @@ export default function SLOsPage() {
         {loading ? (
           // Shimmer loading
           [...Array(3)].map((_, i) => (
-            <div key={i} className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-6 animate-pulse">
+            <div key={i} className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-6">
               <div className="flex justify-between mb-4">
-                <div className="h-6 bg-[var(--border)] rounded w-1/2"></div>
-                <div className="h-6 bg-[var(--border)] rounded w-16"></div>
+                <div className="shimmer-bg h-6 rounded w-1/2"></div>
+                <div className="shimmer-bg h-6 rounded w-16"></div>
               </div>
               <div className="space-y-3 mt-8">
-                <div className="h-4 bg-[var(--border)] rounded w-full"></div>
-                <div className="h-4 bg-[var(--border)] rounded w-3/4"></div>
+                <div className="shimmer-bg h-4 rounded w-full"></div>
+                <div className="shimmer-bg h-4 rounded w-3/4"></div>
               </div>
             </div>
           ))

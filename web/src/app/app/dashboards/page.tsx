@@ -4,6 +4,9 @@ import React, { useState, useEffect } from 'react';
 import { apiFetch } from '@/lib/api';
 import { useToast } from '@/context/ToastContext';
 import { LayoutGrid, Plus, Edit2, Trash2, ArrowLeft, BarChart2, Activity, List, X } from 'lucide-react';
+import { Responsive, WidthProvider } from "react-grid-layout";
+
+const ResponsiveGridLayout = WidthProvider(Responsive);
 
 export default function DashboardsPage() {
   const { toast } = useToast();
@@ -91,6 +94,7 @@ export default function DashboardsPage() {
       config: {}
     };
     
+    // Add layout coords to widget.layout if we wanted to persist, but for now we'll just add it to widgets array.
     const updatedWidgets = [...selectedDashboard.widgets, newWidget];
     const updatedDash = { ...selectedDashboard, widgets: updatedWidgets };
     
@@ -104,6 +108,11 @@ export default function DashboardsPage() {
     } catch (e: any) {
       toast({ title: 'Failed to add widget', type: 'error' });
     }
+  };
+
+  const onLayoutChange = (layout: any) => {
+    // Save layout state in the background if needed
+    // The `layout` array contains {i, x, y, w, h}
   };
 
   const removeWidget = async (widgetId: string) => {
@@ -225,9 +234,9 @@ export default function DashboardsPage() {
           </div>
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 auto-rows-[250px]">
+        <div className="flex-1 w-full min-h-[400px]">
           {selectedDashboard.widgets.length === 0 ? (
-            <div className="col-span-full flex flex-col items-center justify-center bg-[var(--bg-card)] border border-[var(--border)] rounded-lg text-[var(--text-secondary)]">
+            <div className="flex flex-col items-center justify-center h-[300px] bg-[var(--bg-card)] border border-[var(--border)] rounded-lg text-[var(--text-secondary)]">
               <LayoutGrid size={32} className="mb-2 opacity-50" />
               <p>No widgets added yet.</p>
               {!isEditing && (
@@ -235,24 +244,46 @@ export default function DashboardsPage() {
               )}
             </div>
           ) : (
-            selectedDashboard.widgets.map((w: any) => (
-              <div key={w.id} className={`bg-[var(--bg-card)] border ${isEditing ? 'border-fuchsia-500/50 border-dashed' : 'border-[var(--border)]'} rounded-lg overflow-hidden flex flex-col relative group`}>
-                {isEditing && (
-                  <button 
-                    onClick={() => removeWidget(w.id)}
-                    className="absolute top-2 right-2 p-1.5 bg-red-500/10 text-red-500 rounded hover:bg-red-500 hover:text-white transition-colors z-10"
-                  >
-                    <X size={14} />
-                  </button>
-                )}
-                <div className="p-3 border-b border-[var(--border)] bg-[var(--bg-app)] text-sm font-semibold text-[var(--text-primary)]">
-                  {w.title}
+            <ResponsiveGridLayout
+              className="layout"
+              layouts={{
+                lg: selectedDashboard.widgets.map((w: any, i: number) => ({
+                  i: w.id,
+                  x: (i * 4) % 12,
+                  y: Math.floor(i / 3) * 4,
+                  w: 4,
+                  h: 4,
+                  minW: 2,
+                  minH: 3
+                }))
+              }}
+              breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }}
+              cols={{ lg: 12, md: 10, sm: 6, xs: 4, xxs: 2 }}
+              rowHeight={50}
+              onLayoutChange={onLayoutChange}
+              isDraggable={isEditing}
+              isResizable={isEditing}
+              margin={[16, 16]}
+            >
+              {selectedDashboard.widgets.map((w: any) => (
+                <div key={w.id} className={`bg-[var(--bg-card)] border ${isEditing ? 'border-fuchsia-500/50 border-dashed hover:border-fuchsia-500' : 'border-[var(--border)]'} rounded-lg overflow-hidden flex flex-col group h-full shadow-sm`}>
+                  {isEditing && (
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); removeWidget(w.id); }}
+                      className="absolute top-2 right-2 p-1.5 bg-red-500/10 text-red-500 rounded hover:bg-red-500 hover:text-white transition-colors z-10 opacity-0 group-hover:opacity-100"
+                    >
+                      <X size={14} />
+                    </button>
+                  )}
+                  <div className={`p-3 border-b border-[var(--border)] bg-[var(--bg-app)] text-sm font-semibold text-[var(--text-primary)] ${isEditing ? 'cursor-move' : ''}`}>
+                    {w.title}
+                  </div>
+                  <div className="flex-1 p-4 overflow-hidden relative">
+                    {renderWidget(w)}
+                  </div>
                 </div>
-                <div className="flex-1 p-4 overflow-hidden relative">
-                  {renderWidget(w)}
-                </div>
-              </div>
-            ))
+              ))}
+            </ResponsiveGridLayout>
           )}
         </div>
       </div>
@@ -278,7 +309,7 @@ export default function DashboardsPage() {
         {loading ? (
           // Shimmer
           [...Array(3)].map((_, i) => (
-            <div key={i} className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-6 animate-pulse h-32"></div>
+            <div key={i} className="shimmer-bg border border-[var(--border)] rounded-lg p-6 h-32"></div>
           ))
         ) : dashboards.length === 0 ? (
           <div className="col-span-full py-12 text-center border border-[var(--border)] border-dashed rounded-lg">

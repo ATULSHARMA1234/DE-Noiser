@@ -33,6 +33,7 @@ services:
       - DATABASE_URL=postgresql://postgres:postgres@db:5432/semanticos
       - REDIS_URL=redis://redis:6379/0
       - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_PASSWORD=password
       - MINIO_ENDPOINT=minio:9000
     depends_on:
       db:
@@ -91,6 +92,12 @@ services:
   clickhouse:
     image: clickhouse/clickhouse-server:latest
     container_name: semanticos-clickhouse
+    environment:
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=password
+      - CLICKHOUSE_DB=default
+    ports:
+      - "8123:8123"
     volumes:
       - clickhouse_data:/var/lib/clickhouse
     healthcheck:

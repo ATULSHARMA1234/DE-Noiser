@@ -136,6 +136,7 @@ class ServiceLevelObjective(Base):
     __tablename__ = "slos"
 
     id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, index=True, nullable=True)
     name = Column(String, nullable=False)
     service = Column(String, index=True, nullable=False)
     sli_type = Column(String, nullable=False)  # availability, latency

@@ -9,6 +9,7 @@ def process_otlp_traces(db: Session, payload: dict):
     OTLP JSON format: https://opentelemetry.io/docs/specs/otlp/#json-protobuf-encoding
     """
     resource_spans = payload.get("resourceSpans", [])
+    ch_traces = []
     
     for rs in resource_spans:
         resource = rs.get("resource", {})
@@ -91,4 +92,25 @@ def process_otlp_traces(db: Session, payload: dict):
                 )
                 db.add(db_span)
                 
+                # Prepare for ClickHouse
+                ch_traces.append((
+                    trace_id or "",
+                    span_id or "",
+                    parent_span_id or "",
+                    service_name or "",
+                    name or "",
+                    start_time,
+                    end_time,
+                    duration_ms,
+                    status_code,
+                    json.dumps(span_attributes),
+                    json.dumps(events)
+                ))
+                
     db.commit()
+    
+    # Dual write to ClickHouse
+    if ch_traces:
+        from denoiser.storage.clickhouse_store import ClickHouseStore
+        ch_store = ClickHouseStore()
+        ch_store.insert_traces(ch_traces)

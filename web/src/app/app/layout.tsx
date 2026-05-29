@@ -6,13 +6,13 @@ import { usePathname, useRouter } from 'next/navigation';
 import { LayoutGrid, Terminal, ShieldAlert, History, Database, Settings, Search, Play, Cpu, X, FileText, Loader2, Network, Users, Bell, Sun, Moon, Menu, Activity, Zap, Plug } from 'lucide-react';
 import { apiFetch, runAnalysis } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
-import { useTheme } from '@/context/ThemeContext';
+import { useTheme } from 'next-themes';
 import { useToast } from '@/context/ToastContext';
 import { OnboardingWizard } from '@/components/OnboardingWizard';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, loading, logout, hasRole } = useAuth();
-  const { theme, toggleTheme } = useTheme();
+  const { theme, setTheme } = useTheme();
   const { toast } = useToast();
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const pathname = usePathname();
@@ -98,7 +98,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }
 
   commandPaletteItems.push(
-    { name: 'Toggle Light/Dark Theme', action: () => { toggleTheme(); setShowCommandPalette(false); }, icon: Sun },
+    { name: 'Toggle Light/Dark Theme', action: () => { setTheme(theme === 'dark' ? 'light' : 'dark'); setShowCommandPalette(false); }, icon: Sun },
     { name: 'Trigger New Analysis Modal', action: () => { fetchSources(); setShowRunModal(true); setShowCommandPalette(false); }, icon: Play },
     { name: 'Sign Out / Log Out', action: () => { logout(); setShowCommandPalette(false); }, icon: X }
   );
@@ -262,7 +262,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 <Play size={14} fill="currentColor" /> Run Analysis
               </button>
               <button
-                 onClick={toggleTheme}
+                 onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
                  className="p-2 rounded-lg bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-hover)] border border-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer transition-all flex items-center justify-center h-9 w-9"
                  title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
                >

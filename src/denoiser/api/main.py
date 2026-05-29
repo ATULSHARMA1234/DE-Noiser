@@ -53,7 +53,7 @@ from denoiser.integrations.alert_router import (
     alert_router,
 )
 from denoiser.storage.clickhouse_store import ClickHouseStore
-from denoiser.storage.db import AnalysisRun, Incident, User, get_db, init_db
+from denoiser.storage.db import AnalysisRun, Incident, User, ServiceLevelObjective, SLODataPoint, get_db, init_db
 from denoiser.telemetry.ebpf_collector import EBPFCollector
 from denoiser.telemetry.metrics_collector import MetricsCollector
 
@@ -414,6 +414,82 @@ async def ingest_logs(payload: IngestPayload):
     except Exception as e:
         logger.exception("Ingest failed")
         raise HTTPException(status_code=400, detail=f"Invalid payload: {e!s}")
+
+
+# ─── SLO / SLI ENDPOINTS ──────────────────────────────────────────────────────────
+
+class SLOCreate(BaseModel):
+    name: str
+    service: str
+    sli_type: str
+    target_percentage: float
+    window_days: int = 30
+
+@app.get("/slos")
+def list_slos(db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
+    slos = db.query(ServiceLevelObjective).filter(ServiceLevelObjective.tenant_id == current_user.tenant_id).all()
+    return [{"id": s.id, "name": s.name, "service": s.service, "sli_type": s.sli_type, "target_percentage": s.target_percentage, "window_days": s.window_days} for s in slos]
+
+@app.post("/slos")
+def create_slo(slo: SLOCreate, db: Session = Depends(get_db), current_user: User = Depends(require_role(["ADMIN"]))):
+    db_slo = ServiceLevelObjective(**slo.dict(), tenant_id=current_user.tenant_id)
+    db.add(db_slo)
+    db.commit()
+    db.refresh(db_slo)
+    return {"id": db_slo.id, "name": db_slo.name}
+
+@app.delete("/slos/{slo_id}")
+def delete_slo(slo_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_role(["ADMIN"]))):
+    slo = db.query(ServiceLevelObjective).filter(ServiceLevelObjective.id == slo_id, ServiceLevelObjective.tenant_id == current_user.tenant_id).first()
+    if slo:
+        db.delete(slo)
+        db.commit()
+    return {"status": "deleted"}
+
+@app.get("/slos/{slo_id}/status")
+def get_slo_status(slo_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
+    slo = db.query(ServiceLevelObjective).filter(ServiceLevelObjective.id == slo_id, ServiceLevelObjective.tenant_id == current_user.tenant_id).first()
+    if not slo:
+        raise HTTPException(status_code=404, detail="SLO not found")
+        
+    points = db.query(SLODataPoint).filter(SLODataPoint.slo_id == slo.id).order_by(SLODataPoint.timestamp.desc()).limit(20).all()
+    points.reverse()
+    
+    current_val = points[-1].value if points else 100.0
+    status_label = "HEALTHY"
+    if current_val < slo.target_percentage:
+        status_label = "BREACHED"
+    elif current_val < slo.target_percentage + 0.1:
+        status_label = "WARNING"
+        
+    # Dummy error budget calc
+    error_budget_total = 1000
+    error_budget_remaining = int(error_budget_total * (current_val / 100.0))
+    burn_rate = 1.0 if status_label == "HEALTHY" else (5.0 if status_label == "WARNING" else 20.0)
+    
+    return {
+        "status": status_label,
+        "current_value": current_val,
+        "error_budget_remaining": error_budget_remaining,
+        "error_budget_total": error_budget_total,
+        "burn_rate": burn_rate,
+        "data_points": [{"timestamp": p.timestamp.isoformat(), "value": p.value} for p in points]
+    }
+
+
+class LogQuery(BaseModel):
+    query: str
+    limit: int = 100
+
+@app.post("/v1/logs/query")
+def query_logs_api(payload: LogQuery, current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
+    """Execute a Log Query Language (LQL) search against the unified ClickHouse log stream."""
+    try:
+        results = clickhouse_store.query_logs(payload.query, limit=payload.limit)
+        return {"status": "success", "count": len(results), "results": results}
+    except Exception as e:
+        logger.error(f"LQL Query failed: {e}")
+        raise HTTPException(status_code=500, detail="Query execution failed")
 
 
 # ─── CONNECTORS — Kubernetes, AWS, and Docker ───────────────────────────────
@@ -845,17 +921,18 @@ def _incident_to_dict(inc: Incident) -> dict:
 
 # ─── RUNS — History ──────────────────────────────────────────────────────────
 
-@app.get("/runs")
-def get_runs(db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
-    runs = db.query(AnalysisRun).order_by(AnalysisRun.created_at.desc()).all()
+@app.get("/analysis/runs")
+def list_analysis_runs(db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
+    """List recent analysis runs."""
+    runs = db.query(AnalysisRun).filter(AnalysisRun.tenant_id == current_user.tenant_id).order_by(AnalysisRun.created_at.desc()).all()
     return [_run_to_dict(r) for r in runs]
 
 
-@app.get("/runs/compare")
+@app.get("/analysis/compare")
 def compare_runs(run_a: str, run_b: str, db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
-    """Compare two analysis runs and return a DriftReport."""
-    db_run_a = db.query(AnalysisRun).filter(AnalysisRun.id == run_a).first()
-    db_run_b = db.query(AnalysisRun).filter(AnalysisRun.id == run_b).first()
+    """Compare two analysis runs."""
+    db_run_a = db.query(AnalysisRun).filter(AnalysisRun.id == run_a, AnalysisRun.tenant_id == current_user.tenant_id).first()
+    db_run_b = db.query(AnalysisRun).filter(AnalysisRun.id == run_b, AnalysisRun.tenant_id == current_user.tenant_id).first()
 
     if not db_run_a or not db_run_b:
         raise HTTPException(status_code=404, detail="One or both runs not found")
@@ -894,9 +971,9 @@ def compare_runs(run_a: str, run_b: str, db: Session = Depends(get_db), current_
     return report.to_dict()
 
 
-@app.get("/runs/{run_id}")
-def get_run_detail(run_id: str, db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
-    run = db.query(AnalysisRun).filter(AnalysisRun.id == run_id).first()
+@app.get("/analysis/runs/{run_id}")
+def get_run_details(run_id: str, db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
+    run = db.query(AnalysisRun).filter(AnalysisRun.id == run_id, AnalysisRun.tenant_id == current_user.tenant_id).first()
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
     return _run_to_dict(run)
@@ -904,7 +981,7 @@ def get_run_detail(run_id: str, db: Session = Depends(get_db), current_user: Use
 
 @app.delete("/runs/{run_id}")
 def delete_run(run_id: str, db: Session = Depends(get_db), current_user: User = Depends(require_role(["ADMIN"]))):
-    run = db.query(AnalysisRun).filter(AnalysisRun.id == run_id).first()
+    run = db.query(AnalysisRun).filter(AnalysisRun.id == run_id, AnalysisRun.tenant_id == current_user.tenant_id).first()
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
     db.delete(run)
@@ -1038,3 +1115,33 @@ async def test_webhook(webhook_id: str, current_user: User = Depends(require_rol
 def get_delivery_log(limit: int = 50, current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
     """Return recent alert delivery audit records."""
     return alert_router.get_delivery_log(limit=limit)
+
+
+# ─── ALERT TRIGGERS — Automated Runbooks ────────────────────────────────────
+
+@app.post("/alerts/trigger")
+def trigger_alert(alert: AlertPayload, db: Session = Depends(get_db)):
+    """
+    Receives an alert and triggers RunbookExecution if it's P0.
+    In a real system, this could be triggered by internal analysis or external webhooks.
+    """
+    if alert.priority == "P0":
+        from denoiser.automation.engine import process_incident
+        
+        # Check if an incident already exists for this run or create one
+        incident = db.query(Incident).filter(Incident.analysis_run_id == alert.run_id).first()
+        if not incident:
+            incident = Incident(
+                title=f"[P0] {alert.cluster_summary}",
+                severity="P0",
+                status="OPEN",
+                analysis_run_id=alert.run_id,
+                summary=alert.intelligence.get("incident_summary", alert.cluster_summary) if alert.intelligence else alert.cluster_summary,
+            )
+            db.add(incident)
+            db.commit()
+            db.refresh(incident)
+            
+        process_incident(db, incident)
+        
+    return {"status": "success", "alert_fingerprint": alert.fingerprint}

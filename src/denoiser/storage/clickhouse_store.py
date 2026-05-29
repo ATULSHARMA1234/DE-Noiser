@@ -29,7 +29,7 @@ class ClickHouseStore:
                 password=self.password,
                 database=self.database
             )
-            # Ensure table exists
+            # Ensure tables exist
             self.client.command("""
                 CREATE TABLE IF NOT EXISTS semantic_logs (
                     timestamp DateTime64(3, 'UTC'),
@@ -40,6 +40,24 @@ class ClickHouseStore:
                 ) ENGINE = MergeTree()
                 ORDER BY (source, timestamp)
             """)
+            
+            self.client.command("""
+                CREATE TABLE IF NOT EXISTS semantic_traces (
+                    trace_id String,
+                    span_id String,
+                    parent_span_id String,
+                    service_name String,
+                    operation_name String,
+                    start_time DateTime64(3, 'UTC'),
+                    end_time DateTime64(3, 'UTC'),
+                    duration_ms Float64,
+                    status_code String,
+                    attributes String,
+                    events String
+                ) ENGINE = MergeTree()
+                ORDER BY (service_name, start_time)
+            """)
+            
             logger.info(f"Connected to ClickHouse at {self.host}:{self.port}")
         except Exception as e:
             logger.error(f"Failed to connect to ClickHouse: {e}")
@@ -75,3 +93,59 @@ class ClickHouseStore:
         except Exception as e:
             logger.error(f"Failed to insert into ClickHouse: {e}")
             return False
+
+    def insert_traces(self, traces_data: list[tuple]):
+        """Insert processed OTLP spans into ClickHouse"""
+        if not self.client:
+            return False
+            
+        try:
+            self.client.insert('semantic_traces', traces_data, column_names=[
+                'trace_id', 'span_id', 'parent_span_id', 'service_name', 
+                'operation_name', 'start_time', 'end_time', 'duration_ms', 
+                'status_code', 'attributes', 'events'
+            ])
+            return True
+        except Exception as e:
+            logger.error(f"Failed to insert traces into ClickHouse: {e}")
+            return False
+
+    def query_logs(self, query_string: str = "", limit: int = 100):
+        """Execute a parsed Log Query Language (LQL) search against ClickHouse."""
+        if not self.client:
+            return []
+            
+        where_clauses = []
+        parameters = {}
+        
+        if query_string:
+            tokens = query_string.split(" AND ")
+            for i, token in enumerate(tokens):
+                if ":" in token:
+                    key, val = token.split(":", 1)
+                    key = key.strip()
+                    val = val.strip()
+                    if key in ["source", "level"]:
+                        where_clauses.append(f"{key} = {{val_{i}:String}}")
+                        parameters[f"val_{i}"] = val
+                    else:
+                        # JSON extraction for custom attributes
+                        where_clauses.append(f"JSONExtractString(raw_json, '{key}') = {{val_{i}:String}}")
+                        parameters[f"val_{i}"] = val
+                else:
+                    # Free text search in message
+                    where_clauses.append(f"message ILIKE {{val_{i}:String}}")
+                    parameters[f"val_{i}"] = f"%{token.strip()}%"
+                    
+        sql = "SELECT * FROM semantic_logs"
+        if where_clauses:
+            sql += " WHERE " + " AND ".join(where_clauses)
+            
+        sql += f" ORDER BY timestamp DESC LIMIT {limit}"
+        
+        try:
+            result = self.client.query(sql, parameters=parameters)
+            return [dict(zip(result.column_names, row)) for row in result.result_rows]
+        except Exception as e:
+            logger.error(f"Failed to query ClickHouse: {e}")
+            return []

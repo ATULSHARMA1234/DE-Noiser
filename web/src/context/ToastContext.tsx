@@ -11,12 +11,21 @@ type Toast = {
   message: string;
 };
 
+type ToastOptions = {
+  title?: string;
+  description?: string;
+  type?: ToastType;
+};
+
+interface ToastFunction {
+  (options: ToastOptions): void;
+  success: (message: string) => void;
+  error: (message: string) => void;
+  info: (message: string) => void;
+}
+
 type ToastContextType = {
-  toast: {
-    success: (message: string) => void;
-    error: (message: string) => void;
-    info: (message: string) => void;
-  };
+  toast: ToastFunction;
 };
 
 const ToastContext = createContext<ToastContextType | undefined>(undefined);
@@ -38,11 +47,18 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     }, 4000);
   }, [removeToast]);
 
-  const toast = React.useMemo(() => ({
-    success: (msg: string) => addToast('success', msg),
-    error: (msg: string) => addToast('error', msg),
-    info: (msg: string) => addToast('info', msg),
-  }), [addToast]);
+  const toastFn = useCallback((options: ToastOptions) => {
+    const msg = options.description ? `${options.title}: ${options.description}` : (options.title || '');
+    addToast(options.type || 'info', msg);
+  }, [addToast]);
+
+  const toast = React.useMemo(() => {
+    const fn = toastFn as ToastFunction;
+    fn.success = (msg: string) => addToast('success', msg);
+    fn.error = (msg: string) => addToast('error', msg);
+    fn.info = (msg: string) => addToast('info', msg);
+    return fn;
+  }, [toastFn, addToast]);
 
   return (
     <ToastContext.Provider value={{ toast }}>

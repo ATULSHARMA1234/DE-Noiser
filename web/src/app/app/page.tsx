@@ -34,6 +34,9 @@ export default function CommandCenter() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchResults, setSearchResults] = useState<any[] | null>(null);
   const [sources, setSources] = useState<any[]>([]);
   const [selectedSource, setSelectedSource] = useState('');
   const [elapsedTime, setElapsedTime] = useState(0);
@@ -114,6 +117,26 @@ export default function CommandCenter() {
       setError(err.message || 'Connection failed. Is the Python backend running on port 8000?');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!searchQuery.trim()) {
+      setSearchResults(null);
+      return;
+    }
+    setSearchLoading(true);
+    try {
+      const res = await apiFetch('/logs/query', {
+        method: 'POST',
+        body: JSON.stringify({ query: searchQuery, limit: 100 })
+      });
+      setSearchResults(res.results || []);
+    } catch (err: any) {
+      console.error('LQL Search failed', err);
+    } finally {
+      setSearchLoading(false);
     }
   };
 
@@ -231,6 +254,60 @@ export default function CommandCenter() {
             <><RefreshCw size={14} /> Analyze</>
           )}
         </button>
+      </div>
+
+      {/* Log Query Language (LQL) Search */}
+      <div className="bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-xl p-4 shadow-sm">
+        <form onSubmit={handleSearch} className="relative">
+          <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search logs with LQL (e.g., service:payment AND level:ERROR)..."
+            className="w-full bg-[var(--bg-inset)] border border-[var(--border)] rounded-lg py-2.5 pl-11 pr-10 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-fuchsia-500 transition-colors"
+          />
+          {searchLoading && (
+            <Loader2 size={14} className="absolute right-4 top-1/2 -translate-y-1/2 text-fuchsia-500 animate-spin" />
+          )}
+        </form>
+        {searchResults && (
+          <div className="mt-4 pt-4 border-t border-[var(--border-subtle)] overflow-x-auto">
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-xs font-semibold text-[var(--text-primary)]">LQL Results ({searchResults.length})</span>
+              <button onClick={() => setSearchResults(null)} className="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)]">Clear</button>
+            </div>
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="border-b border-[var(--border)]">
+                  <th className="py-2 text-[var(--text-muted)] font-medium">Timestamp</th>
+                  <th className="py-2 text-[var(--text-muted)] font-medium">Level</th>
+                  <th className="py-2 text-[var(--text-muted)] font-medium">Message</th>
+                </tr>
+              </thead>
+              <tbody>
+                {searchResults.length === 0 ? (
+                  <tr>
+                    <td colSpan={3} className="py-4 text-center text-[var(--text-muted)] italic">No logs found matching this query.</td>
+                  </tr>
+                ) : (
+                  searchResults.slice(0, 10).map((log, i) => (
+                    <tr key={i} className="border-b border-[var(--border-subtle)] hover:bg-[var(--bg-surface)]">
+                      <td className="py-2 pr-4 text-[var(--text-dimmed)] whitespace-nowrap">{new Date(log.timestamp).toLocaleTimeString()}</td>
+                      <td className="py-2 pr-4">
+                        <span className={`px-1.5 py-0.5 rounded-sm text-[10px] font-bold ${log.level === 'ERROR' ? 'bg-red-500/10 text-red-500' : 'bg-blue-500/10 text-blue-500'}`}>{log.level || 'INFO'}</span>
+                      </td>
+                      <td className="py-2 text-[var(--text-primary)] break-all font-mono opacity-80">{log.message}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+            {searchResults.length > 10 && (
+              <p className="text-[10px] text-[var(--text-muted)] mt-2 text-center">Showing first 10 of {searchResults.length} results. Use specific filters to narrow down.</p>
+            )}
+          </div>
+        )}
       </div>
 
       {/* System Vitals Panel */}
