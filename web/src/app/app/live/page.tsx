@@ -52,7 +52,7 @@ export default function LivePulsePage() {
     
     ws.onmessage = (event) => {
       const log: LogEntry = JSON.parse(event.data);
-      log.levelColor = LEVEL_COLORS[log.level] || 'text-zinc-400';
+      log.levelColor = LEVEL_COLORS[log.level] || 'text-[var(--text-muted)]';
       setTotalReceived(prev => prev + 1);
       setLogs(prev => [...prev, log].slice(-500)); // Keep last 500 logs
     };
@@ -98,9 +98,9 @@ export default function LivePulsePage() {
     <div className="max-w-[1600px] mx-auto pb-10 flex flex-col h-full">
       
       {/* Header */}
-      <div className="flex items-center justify-between mb-6 border-b border-white/5 pb-4 shrink-0">
+      <div className="flex items-center justify-between mb-6 border-b border-[var(--border-subtle)] pb-4 shrink-0">
         <div className="flex items-center gap-4">
-          <h1 className="text-lg font-bold text-white flex items-center gap-2">
+          <h1 className="text-lg font-bold text-[var(--text-primary)] flex items-center gap-2">
             <TerminalSquare size={20} className="text-fuchsia-500" />
             &gt;_ Live Pulse Stream
           </h1>
@@ -113,7 +113,7 @@ export default function LivePulsePage() {
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> STREAMING
             </span>
           )}
-          <span className="text-[10px] text-zinc-500 font-mono">{totalReceived} events received</span>
+          <span className="text-[10px] text-[var(--text-muted)] font-mono">{totalReceived} events received</span>
         </div>
         
         <div className="flex items-center gap-4 text-xs font-medium">
@@ -123,13 +123,13 @@ export default function LivePulsePage() {
               <button
                 key={level}
                 onClick={() => setLevelFilter(level)}
-                className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer ${
+                className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer border-none ${
                   levelFilter === level
                     ? level === 'ERROR' ? 'bg-red-500/20 text-red-400'
                       : level === 'WARN' ? 'bg-yellow-500/20 text-yellow-400'
                       : level === 'ANOMALY' ? 'bg-fuchsia-500/20 text-fuchsia-400'
                       : 'bg-blue-500/20 text-blue-400'
-                    : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/5'
+                    : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-surface-hover)] bg-transparent'
                 }`}
               >
                 {level}
@@ -141,13 +141,13 @@ export default function LivePulsePage() {
           <select
             value={serviceFilter}
             onChange={(e) => setServiceFilter(e.target.value)}
-            className="bg-[#141416] border border-white/10 text-zinc-300 text-xs rounded px-2 py-1 outline-none cursor-pointer"
+            className="bg-[var(--bg-modal)] border border-[var(--border)] text-[var(--text-input)] text-xs rounded px-2 py-1 outline-none cursor-pointer"
           >
             <option value="">All Services</option>
             {services.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
 
-          <label className="flex items-center gap-2 text-zinc-400 cursor-pointer">
+          <label className="flex items-center gap-2 text-[var(--text-secondary)] cursor-pointer">
             <input 
               type="checkbox" 
               checked={autoScroll} 
@@ -159,21 +159,21 @@ export default function LivePulsePage() {
 
           <button 
             onClick={exportLogs}
-            className="flex items-center gap-1.5 text-zinc-400 hover:text-white transition-colors cursor-pointer"
+            className="flex items-center gap-1.5 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors cursor-pointer bg-transparent border-none"
           >
             <Download size={14} /> Export
           </button>
 
           <button 
             onClick={clearLogs}
-            className="flex items-center gap-1.5 text-zinc-400 hover:text-red-400 transition-colors cursor-pointer"
+            className="flex items-center gap-1.5 text-[var(--text-secondary)] hover:text-red-400 transition-colors cursor-pointer bg-transparent border-none"
           >
             <Trash2 size={14} /> Clear
           </button>
 
           <button 
             onClick={() => setIsPaused(!isPaused)}
-            className="flex items-center gap-1.5 bg-white/5 hover:bg-white/10 text-white px-3 py-1.5 rounded-md transition-colors border border-white/5 cursor-pointer"
+            className="flex items-center gap-1.5 bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-hover)] text-[var(--text-primary)] px-3 py-1.5 rounded-md transition-colors border border-[var(--border-subtle)] cursor-pointer"
           >
             {isPaused ? <><Play size={14} /> Resume</> : <><Pause size={14} /> Pause</>}
           </button>
@@ -183,10 +183,10 @@ export default function LivePulsePage() {
       {/* Terminal View */}
       <div 
         ref={scrollRef}
-        className="font-mono text-xs w-full flex-1 overflow-y-auto bg-[#0c0c0e] rounded-xl border border-white/5 p-2"
+        className="font-mono text-xs w-full flex-1 overflow-y-auto bg-[var(--bg-inset)] rounded-xl border border-[var(--border-subtle)] p-2"
       >
         {filteredLogs.length === 0 ? (
-          <div className="flex items-center justify-center h-full text-zinc-500">
+          <div className="flex items-center justify-center h-full text-[var(--text-muted)]">
             {isPaused ? 'Stream paused. Click Resume to continue.' : 'Waiting for log events...'}
           </div>
         ) : (
@@ -194,15 +194,15 @@ export default function LivePulsePage() {
             <div 
               key={i} 
               className={`flex items-start gap-6 py-1.5 px-4 rounded-sm ${
-                log.highlight ? 'bg-fuchsia-500/5 border-l-2 border-fuchsia-500' : 'hover:bg-white/[0.02]'
+                log.highlight ? 'bg-fuchsia-500/10 border-l-2 border-fuchsia-500' : 'hover:bg-[var(--bg-surface-hover)]'
               }`}
             >
-              <span className="text-zinc-700 w-10 shrink-0 text-right">{log.id}</span>
+              <span className="text-[var(--text-dimmed)] w-10 shrink-0 text-right font-mono">{log.id}</span>
               <span className={`font-bold text-[10px] w-16 shrink-0 ${log.levelColor}`}>
                 {log.level}
               </span>
-              <span className="text-zinc-500 w-28 shrink-0 truncate">{log.service}</span>
-              <span className={`${log.highlight ? 'text-fuchsia-300 font-medium' : log.level === 'WARN' ? 'text-yellow-200/80' : 'text-zinc-300'}`}>
+              <span className="text-[var(--text-secondary)] w-28 shrink-0 truncate">{log.service}</span>
+              <span className={`${log.highlight ? 'text-fuchsia-500 font-medium' : log.level === 'WARN' ? 'text-yellow-500/80' : 'text-[var(--text-input)]'}`}>
                 {log.message}
               </span>
             </div>
@@ -213,3 +213,4 @@ export default function LivePulsePage() {
     </div>
   );
 }
+

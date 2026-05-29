@@ -1,0 +1,5 @@
+1715934500000	[INFO]	INIT	Container runtime: fargate-2.0
+1715934502000	[INFO]	START	Request ID: req-8219-cba0
+1715934505000	[WARN]	LATENCY	DynamoDB batch_write took 450ms (threshold 100ms)
+1715934508000	[ERROR]	SNS	Failed to publish event to topic: arn:aws:sns:us-east-1:123:notifications
+1715934510000	[INFO]	END	Duration: 520ms, Memory Used: 128MB

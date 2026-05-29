@@ -393,21 +393,21 @@ export default function ServiceTopology() {
       {/* Topology Header Controls */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl font-bold text-white flex items-center gap-2">
+          <h1 className="text-xl font-bold text-[var(--text-primary)] flex items-center gap-2">
             <Network className="text-fuchsia-500" size={24} /> Service Causal Topology
           </h1>
-          <p className="text-xs text-zinc-500 mt-1">
+          <p className="text-xs text-[var(--text-muted)] mt-1">
             Real-time visual dependency graph displaying neural co-occurrences and time-decay causality propagation.
           </p>
         </div>
 
         {/* Source selector */}
-        <div className="flex items-center gap-3 bg-[#121214] border border-white/5 rounded-xl px-4 py-2">
-          <FileText size={16} className="text-zinc-500 shrink-0" />
+        <div className="flex items-center gap-3 bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-xl px-4 py-2">
+          <FileText size={16} className="text-[var(--text-muted)] shrink-0" />
           <select 
             value={selectedSource}
             onChange={(e) => setSelectedSource(e.target.value)}
-            className="bg-[#141416] border border-white/10 text-zinc-300 text-xs rounded-lg px-4 py-2 outline-none w-52 appearance-none cursor-pointer"
+            className="bg-[var(--bg-modal)] border border-[var(--border)] text-[var(--text-input)] text-xs rounded-lg px-4 py-2 outline-none w-52 appearance-none cursor-pointer"
           >
             {sources.map((src) => (
               <option key={src.path} value={src.path}>
@@ -433,21 +433,21 @@ export default function ServiceTopology() {
       <div className="grid grid-cols-3 gap-6">
         
         {/* GRAPH VIEWPORT PANEL */}
-        <div className="col-span-2 bg-[#121214] border border-white/5 rounded-2xl overflow-hidden shadow-2xl flex flex-col h-[580px] relative select-none">
+        <div className="col-span-2 bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-2xl overflow-hidden shadow-2xl flex flex-col h-[580px] relative select-none">
           
           {/* Controls Overlay */}
-          <div className="absolute top-4 left-4 z-20 flex items-center gap-2 bg-[#18181b]/80 backdrop-blur-md border border-white/10 px-3 py-2 rounded-xl">
-            <button onClick={() => handleZoom(1.2)} title="Zoom In" className="w-8 h-8 rounded-lg hover:bg-white/10 text-zinc-300 flex items-center justify-center border-none cursor-pointer transition-colors">
+          <div className="absolute top-4 left-4 z-20 flex items-center gap-2 bg-[var(--bg-input)]/80 backdrop-blur-md border border-[var(--border)] px-3 py-2 rounded-xl">
+            <button onClick={() => handleZoom(1.2)} title="Zoom In" className="w-8 h-8 rounded-lg hover:bg-[var(--bg-card-hover)] text-[var(--text-input)] flex items-center justify-center border-none cursor-pointer transition-colors">
               <Maximize2 size={15} />
             </button>
-            <button onClick={() => handleZoom(0.8)} title="Zoom Out" className="w-8 h-8 rounded-lg hover:bg-white/10 text-zinc-300 flex items-center justify-center border-none cursor-pointer transition-colors">
+            <button onClick={() => handleZoom(0.8)} title="Zoom Out" className="w-8 h-8 rounded-lg hover:bg-[var(--bg-card-hover)] text-[var(--text-input)] flex items-center justify-center border-none cursor-pointer transition-colors">
               <Minimize2 size={15} />
             </button>
-            <button onClick={resetView} title="Reset Canvas" className="w-8 h-8 rounded-lg hover:bg-white/10 text-zinc-300 flex items-center justify-center border-none cursor-pointer transition-colors">
+            <button onClick={resetView} title="Reset Canvas" className="w-8 h-8 rounded-lg hover:bg-[var(--bg-card-hover)] text-[var(--text-input)] flex items-center justify-center border-none cursor-pointer transition-colors">
               <Activity size={15} />
             </button>
-            <div className="h-4 w-[1px] bg-white/10 mx-1"></div>
-            <label className="flex items-center gap-2 text-[10px] font-bold text-zinc-400 cursor-pointer">
+            <div className="h-4 w-[1px] bg-[var(--border)] mx-1"></div>
+            <label className="flex items-center gap-2 text-[10px] font-bold text-[var(--text-secondary)] cursor-pointer">
               <input 
                 type="checkbox" 
                 checked={enablePhysics} 
@@ -458,8 +458,8 @@ export default function ServiceTopology() {
             </label>
           </div>
 
-          <div className="absolute top-4 right-4 z-20 bg-[#18181b]/80 backdrop-blur-md border border-white/10 px-4 py-2 rounded-xl flex items-center gap-3">
-            <span className="text-[10px] font-bold text-zinc-400">MIN CONFIDENCE:</span>
+          <div className="absolute top-4 right-4 z-20 bg-[var(--bg-input)]/80 backdrop-blur-md border border-[var(--border)] px-4 py-2 rounded-xl flex items-center gap-3">
+            <span className="text-[10px] font-bold text-[var(--text-secondary)]">MIN CONFIDENCE:</span>
             <input 
               type="range" 
               min="0.1" 
@@ -467,14 +467,14 @@ export default function ServiceTopology() {
               step="0.05" 
               value={minConfidence} 
               onChange={(e) => setMinConfidence(parseFloat(e.target.value))}
-              className="accent-fuchsia-500 w-24 h-1 bg-zinc-700 rounded-lg cursor-pointer"
+              className="accent-fuchsia-500 w-24 h-1 bg-[var(--bg-track)] rounded-lg cursor-pointer"
             />
             <span className="text-xs font-mono font-bold text-fuchsia-400 w-8">{minConfidence.toFixed(2)}</span>
           </div>
 
           {/* SVG Canvas */}
           <div 
-            className="flex-1 w-full h-full cursor-grab active:cursor-grabbing overflow-hidden bg-black/30"
+            className="flex-1 w-full h-full cursor-grab active:cursor-grabbing overflow-hidden bg-black/5"
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
@@ -537,7 +537,7 @@ export default function ServiceTopology() {
                       {/* Displayed Directed Line */}
                       <path 
                         d={`M ${srcNode.x} ${srcNode.y} L ${targetX} ${targetY}`}
-                        stroke={isSelected ? '#d946ef' : 'rgba(255,255,255,0.15)'}
+                        stroke={isSelected ? 'var(--primary)' : 'var(--border)'}
                         strokeWidth={isSelected ? 3.5 : 2}
                         strokeDasharray={isSelected ? '6,4' : link.confidence > 0.8 ? '4,4' : 'none'}
                         className="transition-all duration-300"
@@ -555,12 +555,12 @@ export default function ServiceTopology() {
                           markerHeight="6" 
                           orient="auto-start-reverse"
                         >
-                          <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill={isSelected ? '#d946ef' : 'rgba(255,255,255,0.3)'} />
+                          <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill={isSelected ? 'var(--primary)' : 'var(--text-muted)'} />
                         </marker>
                       </defs>
 
                       {/* Moving Glowing Causal Event Packet (Flowing speed based on confidence) */}
-                      <circle r="4" fill="#d946ef" filter="url(#glow)">
+                      <circle r="4" fill="var(--primary)" filter="url(#glow)">
                         <animateMotion 
                           path={`M ${srcNode.x} ${srcNode.y} L ${targetX} ${targetY}`} 
                           dur={`${Math.max(1, 4 - link.confidence * 3)}s`} 
@@ -576,12 +576,12 @@ export default function ServiceTopology() {
                           width="56" 
                           height="18" 
                           rx="4" 
-                          fill="#18181b" 
-                          stroke={isSelected ? '#d946ef' : 'rgba(255,255,255,0.1)'} 
+                          fill="var(--bg-input)" 
+                          stroke={isSelected ? 'var(--primary)' : 'var(--border-subtle)'} 
                           strokeWidth="1"
                         />
                         <text 
-                          fill={isSelected ? '#d946ef' : '#71717a'} 
+                          fill={isSelected ? 'var(--primary)' : 'var(--text-muted)'} 
                           fontSize="9" 
                           fontWeight="bold" 
                           fontFamily="monospace"
@@ -617,7 +617,7 @@ export default function ServiceTopology() {
                         <circle 
                           r={node.size + 10} 
                           fill="none" 
-                          stroke={isSelected ? '#d946ef' : '#3b82f6'} 
+                          stroke={isSelected ? 'var(--primary)' : '#3b82f6'} 
                           strokeWidth="2" 
                           strokeDasharray="4,4"
                           className="animate-spin"
@@ -628,7 +628,7 @@ export default function ServiceTopology() {
                       {/* Node Glowing Circle */}
                       <circle 
                         r={node.size} 
-                        fill="#121214" 
+                        fill="var(--bg-card)" 
                         stroke={node.color} 
                         strokeWidth={isSelected ? 4 : 2}
                         filter={isSelected ? 'url(#glow)' : ''}
@@ -647,7 +647,7 @@ export default function ServiceTopology() {
 
                       {/* Service Initials Label */}
                       <text 
-                        fill="#ffffff" 
+                        fill="var(--text-primary)" 
                         fontSize="10" 
                         fontWeight="bold" 
                         fontFamily="sans-serif"
@@ -659,13 +659,13 @@ export default function ServiceTopology() {
 
                       {/* Service Full Text Header (displays below node) */}
                       <text 
-                        fill="#a1a1aa" 
+                        fill="var(--text-secondary)" 
                         fontSize="11" 
                         fontWeight="600" 
                         fontFamily="sans-serif"
                         textAnchor="middle" 
                         y={node.size + 18}
-                        className="bg-black/80 px-2 py-0.5 rounded pointer-events-none select-none"
+                        className="pointer-events-none select-none"
                       >
                         {node.label}
                       </text>
@@ -678,12 +678,12 @@ export default function ServiceTopology() {
           </div>
 
           {/* Graph Legend overlay */}
-          <div className="absolute bottom-4 left-4 bg-[#18181b]/80 backdrop-blur-md border border-white/5 px-4 py-3 rounded-xl space-y-1.5 text-[10px] text-zinc-500 font-bold z-20">
+          <div className="absolute bottom-4 left-4 bg-[var(--bg-input)]/80 backdrop-blur-md border border-[var(--border-subtle)] px-4 py-3 rounded-xl space-y-1.5 text-[10px] text-[var(--text-muted)] font-bold z-20">
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-blue-500" /> Gateway & Routing
             </div>
             <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-d946ef bg-fuchsia-500" /> Business logic & Payments
+              <span className="w-2.5 h-2.5 rounded-full bg-fuchsia-500" /> Business logic & Payments
             </div>
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" /> Security & Auth
@@ -691,14 +691,14 @@ export default function ServiceTopology() {
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-red-500" /> Database & Storage
             </div>
-            <div className="flex items-center gap-2 mt-1 pt-1 border-t border-white/5">
-              <span className="text-zinc-500 border border-zinc-500/30 px-1 rounded font-mono font-normal">50ms</span> Avg Delay Label
+            <div className="flex items-center gap-2 mt-1 pt-1 border-t border-[var(--border-subtle)]">
+              <span className="text-[var(--text-muted)] border border-[var(--border)] px-1 rounded font-mono font-normal">50ms</span> Avg Delay Label
             </div>
           </div>
         </div>
 
         {/* SIDEBAR DETAILED INSPECTION DRAWER */}
-        <div className="col-span-1 bg-[#121214] border border-white/5 rounded-2xl p-6 h-[580px] flex flex-col shadow-2xl overflow-y-auto">
+        <div className="col-span-1 bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-2xl p-6 h-[580px] flex flex-col shadow-2xl overflow-y-auto">
           
           {/* Handle Error State */}
           {error && (
@@ -706,7 +706,7 @@ export default function ServiceTopology() {
               <AlertTriangle size={16} className="shrink-0 mt-0.5" />
               <div>
                 <p className="font-bold">Correlation Notice</p>
-                <p className="mt-1 leading-relaxed text-zinc-400">{error}</p>
+                <p className="mt-1 leading-relaxed text-[var(--text-secondary)]">{error}</p>
               </div>
             </div>
           )}
@@ -719,7 +719,7 @@ export default function ServiceTopology() {
                   <span className="text-[10px] font-bold tracking-widest text-fuchsia-400 bg-fuchsia-500/10 border border-fuchsia-500/20 px-2.5 py-1 rounded-sm uppercase">
                     Causal Link Inspected
                   </span>
-                  <h2 className="text-base font-bold text-white mt-3 flex items-center gap-2">
+                  <h2 className="text-base font-bold text-[var(--text-primary)] mt-3 flex items-center gap-2">
                     {selectedLink.source} <ArrowRight size={14} className="text-fuchsia-500" /> {selectedLink.target}
                   </h2>
                 </div>
@@ -727,25 +727,25 @@ export default function ServiceTopology() {
 
               {/* Statistics grid */}
               <div className="grid grid-cols-3 gap-3">
-                <div className="bg-[#18181b] border border-white/5 rounded-lg p-3 text-center">
-                  <p className="text-[9px] font-bold text-zinc-500 uppercase">Confidence</p>
+                <div className="bg-[var(--bg-input)] border border-[var(--border-subtle)] rounded-lg p-3 text-center">
+                  <p className="text-[9px] font-bold text-[var(--text-muted)] uppercase">Confidence</p>
                   <p className="text-lg font-bold text-fuchsia-400 mt-1">{(selectedLink.confidence * 100).toFixed(0)}%</p>
                 </div>
-                <div className="bg-[#18181b] border border-white/5 rounded-lg p-3 text-center">
-                  <p className="text-[9px] font-bold text-zinc-500 uppercase">Avg Delay</p>
-                  <p className="text-lg font-bold text-white mt-1 flex items-center justify-center gap-1">
-                    <Clock size={12} className="text-zinc-500" /> {selectedLink.avgDelayMs.toFixed(1)}<span className="text-[10px] text-zinc-500 font-normal">ms</span>
+                <div className="bg-[var(--bg-input)] border border-[var(--border-subtle)] rounded-lg p-3 text-center">
+                  <p className="text-[9px] font-bold text-[var(--text-muted)] uppercase">Avg Delay</p>
+                  <p className="text-lg font-bold text-[var(--text-primary)] mt-1 flex items-center justify-center gap-1">
+                    <Clock size={12} className="text-[var(--text-muted)]" /> {selectedLink.avgDelayMs.toFixed(1)}<span className="text-[10px] text-[var(--text-muted)] font-normal">ms</span>
                   </p>
                 </div>
-                <div className="bg-[#18181b] border border-white/5 rounded-lg p-3 text-center">
-                  <p className="text-[9px] font-bold text-zinc-500 uppercase">Co-occurrences</p>
-                  <p className="text-lg font-bold text-zinc-300 mt-1">{selectedLink.occurrences}</p>
+                <div className="bg-[var(--bg-input)] border border-[var(--border-subtle)] rounded-lg p-3 text-center">
+                  <p className="text-[9px] font-bold text-[var(--text-muted)] uppercase">Co-occurrences</p>
+                  <p className="text-lg font-bold text-[var(--text-input)] mt-1">{selectedLink.occurrences}</p>
                 </div>
               </div>
 
               {/* LLM Plain-English Causal Narrative */}
               {selectedLink.narrative && (
-                <div className="bg-fuchsia-500/5 border border-fuchsia-500/10 rounded-xl p-4 text-xs leading-relaxed text-zinc-300">
+                <div className="bg-fuchsia-500/5 border border-fuchsia-500/10 rounded-xl p-4 text-xs leading-relaxed text-[var(--text-secondary)]">
                   <p className="text-[10px] font-bold text-fuchsia-400 uppercase tracking-widest mb-1.5 flex items-center gap-1.5">
                     <Zap size={10} className="text-fuchsia-500 animate-pulse" /> AI Causal Narration
                   </p>
@@ -755,33 +755,33 @@ export default function ServiceTopology() {
 
               {/* Forensics Split Terminals */}
               <div className="space-y-3 flex-1 flex flex-col min-h-0">
-                <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Co-occurring Log Templates</p>
+                <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest">Co-occurring Log Templates</p>
                 
                 {/* Source service template */}
-                <div className="flex-1 bg-black/50 border border-white/5 rounded-lg p-4 font-mono text-[10px] overflow-y-auto flex flex-col relative">
+                <div className="flex-1 bg-black/5 dark:bg-black/50 border border-[var(--border-subtle)] rounded-lg p-4 font-mono text-[10px] overflow-y-auto flex flex-col relative">
                   <span className="absolute top-2 right-2 text-[8px] font-bold px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
                     {selectedLink.source} (CAUSE)
                   </span>
-                  <div className="text-zinc-500 mt-2 font-bold select-none">{'// Log Pattern:'}</div>
-                  <div className="text-zinc-300 leading-relaxed mt-1">{selectedLink.sourceTemplate}</div>
+                  <div className="text-[var(--text-muted)] mt-2 font-bold select-none">{'// Log Pattern:'}</div>
+                  <div className="text-[var(--text-input)] leading-relaxed mt-1">{selectedLink.sourceTemplate}</div>
                 </div>
 
                 {/* Delay Indicator separator */}
                 <div className="flex items-center justify-center gap-3">
-                  <div className="h-[1px] bg-white/5 flex-1"></div>
+                  <div className="h-[1px] bg-[var(--border-subtle)] flex-1"></div>
                   <span className="text-[9px] font-bold text-fuchsia-400 font-mono bg-fuchsia-500/10 px-2 py-0.5 rounded-full border border-fuchsia-500/20 flex items-center gap-1 animate-pulse">
                     + {selectedLink.avgDelayMs.toFixed(1)}ms delay propagation
                   </span>
-                  <div className="h-[1px] bg-white/5 flex-1"></div>
+                  <div className="h-[1px] bg-[var(--border-subtle)] flex-1"></div>
                 </div>
 
                 {/* Target service template */}
-                <div className="flex-1 bg-black/50 border border-white/5 rounded-lg p-4 font-mono text-[10px] overflow-y-auto flex flex-col relative">
-                  <span className="absolute top-2 right-2 text-[8px] font-bold px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">
+                <div className="flex-1 bg-black/5 dark:bg-black/50 border border-[var(--border-subtle)] rounded-lg p-4 font-mono text-[10px] overflow-y-auto flex flex-col relative">
+                  <span className="absolute top-2 right-2 text-[8px] font-bold px-1.5 py-0.5 rounded bg-zinc-200 dark:bg-zinc-800 text-[var(--text-muted)] border border-[var(--border-subtle)]">
                     {selectedLink.target} (EFFECT)
                   </span>
-                  <div className="text-zinc-500 mt-2 font-bold select-none">{'// Log Pattern:'}</div>
-                  <div className="text-zinc-300 leading-relaxed mt-1">{selectedLink.targetTemplate}</div>
+                  <div className="text-[var(--text-muted)] mt-2 font-bold select-none">{'// Log Pattern:'}</div>
+                  <div className="text-[var(--text-input)] leading-relaxed mt-1">{selectedLink.targetTemplate}</div>
                 </div>
               </div>
             </div>
@@ -794,7 +794,7 @@ export default function ServiceTopology() {
                 <span className="text-[10px] font-bold tracking-widest text-blue-400 bg-blue-500/10 border border-blue-500/20 px-2.5 py-1 rounded-sm uppercase">
                   Service Node Inspected
                 </span>
-                <h2 className="text-lg font-bold text-white mt-3 flex items-center gap-2">
+                <h2 className="text-lg font-bold text-[var(--text-primary)] mt-3 flex items-center gap-2">
                   <span className="w-3 h-3 rounded-full" style={{ backgroundColor: selectedNode.color }} />
                   {selectedNode.label}
                 </h2>
@@ -802,13 +802,13 @@ export default function ServiceTopology() {
 
               {/* Node statistics */}
               <div className="grid grid-cols-2 gap-3">
-                <div className="bg-[#18181b] border border-white/5 rounded-lg p-4 text-center">
-                  <p className="text-[9px] font-bold text-zinc-500 uppercase">Causal Incidents</p>
-                  <p className="text-2xl font-bold text-white mt-1">{selectedNode.clusterCount}</p>
+                <div className="bg-[var(--bg-input)] border border-[var(--border-subtle)] rounded-lg p-4 text-center">
+                  <p className="text-[9px] font-bold text-[var(--text-muted)] uppercase">Causal Incidents</p>
+                  <p className="text-2xl font-bold text-[var(--text-primary)] mt-1">{selectedNode.clusterCount}</p>
                 </div>
-                <div className="bg-[#18181b] border border-white/5 rounded-lg p-4 text-center">
-                  <p className="text-[9px] font-bold text-zinc-500 uppercase">Network Role</p>
-                  <p className="text-xs font-bold text-zinc-400 mt-2 truncate" style={{ color: selectedNode.color }}>
+                <div className="bg-[var(--bg-input)] border border-[var(--border-subtle)] rounded-lg p-4 text-center">
+                  <p className="text-[9px] font-bold text-[var(--text-muted)] uppercase">Network Role</p>
+                  <p className="text-xs font-bold text-[var(--text-secondary)] mt-2 truncate" style={{ color: selectedNode.color }}>
                     {selectedNode.color === '#ef4444' ? 'Database/Storage' :
                      selectedNode.color === '#10b981' ? 'Auth/Security' :
                      selectedNode.color === '#d946ef' ? 'Transaction/Core' : 'Inbound Gateway'}
@@ -818,7 +818,7 @@ export default function ServiceTopology() {
 
               {/* Node active dependencies list */}
               <div className="space-y-3 flex-1 overflow-y-auto">
-                <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Active Causal Links</p>
+                <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest">Active Causal Links</p>
                 <div className="space-y-2">
                   {links.filter(l => l.source === selectedNode.id || l.target === selectedNode.id).map(link => {
                     const isSource = link.source === selectedNode.id;
@@ -828,7 +828,7 @@ export default function ServiceTopology() {
                       <div 
                         key={link.id}
                         onClick={() => setSelectedLink(link)}
-                        className="bg-[#18181b] hover:bg-white/5 border border-white/5 rounded-xl p-3.5 flex items-center justify-between cursor-pointer transition-colors"
+                        className="bg-[var(--bg-input)] hover:bg-[var(--bg-card-hover)] border border-[var(--border-subtle)] rounded-xl p-3.5 flex items-center justify-between cursor-pointer transition-colors"
                       >
                         <div className="flex items-center gap-2">
                           <span className={`text-[9px] font-bold px-2 py-0.5 rounded ${
@@ -836,11 +836,11 @@ export default function ServiceTopology() {
                           }`}>
                             {isSource ? 'OUTBOUND' : 'INBOUND'}
                           </span>
-                          <span className="text-xs font-medium text-white truncate max-w-[120px]">{counterpart}</span>
+                          <span className="text-xs font-medium text-[var(--text-primary)] truncate max-w-[120px]">{counterpart}</span>
                         </div>
                         <div className="text-right">
                           <span className="text-xs font-bold text-fuchsia-400">{(link.confidence * 100).toFixed(0)}%</span>
-                          <p className="text-[9px] text-zinc-500">{link.avgDelayMs.toFixed(0)}ms latency</p>
+                          <p className="text-[9px] text-[var(--text-muted)]">{link.avgDelayMs.toFixed(0)}ms latency</p>
                         </div>
                       </div>
                     );
@@ -853,10 +853,10 @@ export default function ServiceTopology() {
           {/* ════ DEFAULT IDLE VIEW ════ */}
           {!selectedLink && !selectedNode && (
             <div className="flex-1 flex flex-col items-center justify-center text-center p-6 space-y-4">
-              <Network className="text-zinc-600 animate-pulse" size={48} />
+              <Network className="text-[var(--text-dimmed)] animate-pulse" size={48} />
               <div>
-                <h3 className="text-sm font-bold text-white">Select a Link or Node</h3>
-                <p className="text-xs text-zinc-500 mt-1 max-w-[200px] mx-auto leading-relaxed">
+                <h3 className="text-sm font-bold text-[var(--text-primary)]">Select a Link or Node</h3>
+                <p className="text-xs text-[var(--text-muted)] mt-1 max-w-[200px] mx-auto leading-relaxed">
                   Click on an edge to inspect co-occurring templates side-by-side, or click a node to see its internal service statistics.
                 </p>
               </div>

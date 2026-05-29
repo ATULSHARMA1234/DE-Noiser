@@ -1,0 +1,151 @@
+2026-11-29T00:12:06.000Z WARN [api-gateway] Rate limit applied client_ip=192.168.1.20 requests=1500/min limit=1000/min
+2026-11-29T00:02:32.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=4387 duration=67ms
+2026-11-29T00:12:36.000Z WARN [api-gateway] Rate limit applied client_ip=192.168.1.215 requests=1500/min limit=1000/min
+2026-11-29T00:02:12.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=2678 duration=67ms
+2026-11-29T00:12:30.000Z WARN [api-gateway] Rate limit applied client_ip=192.168.1.167 requests=1500/min limit=1000/min
+2026-11-29T00:01:17.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=8786 duration=67ms
+2026-11-29T00:02:02.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=4375 duration=67ms
+2026-11-29T00:05:08.000Z INFO [api-gateway] GET /api/v2/checkout 200 OK duration=1200ms
+2026-11-29T00:01:52.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=5978 duration=67ms
+2026-11-29T00:02:47.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=7518 duration=67ms
+2026-11-29T00:06:53.000Z INFO [api-gateway] GET /api/v2/checkout 200 OK duration=1200ms
+2026-11-29T00:10:49.000Z ERROR [api-gateway] auth-service unavailable returning 503 to downstream affected_requests=12847
+2026-11-29T00:01:12.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=4334 duration=67ms
+2026-11-29T00:17:10.000Z INFO [api-gateway] Health check passed all_services=healthy
+2026-11-29T00:05:03.000Z INFO [api-gateway] GET /api/v2/checkout 200 OK duration=1200ms
+2026-11-29T00:16:46.000Z INFO [api-gateway] Health check passed all_services=healthy
+2026-11-29T00:00:12.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=8936 duration=67ms
+2026-11-29T00:00:57.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=3528 duration=67ms
+2026-11-29T00:00:32.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=9196 duration=67ms
+2026-11-29T00:07:18.000Z INFO [api-gateway] GET /api/v2/checkout 200 OK duration=1200ms
+2026-11-29T00:06:08.000Z INFO [api-gateway] GET /api/v2/checkout 200 OK duration=1200ms
+2026-11-29T00:05:53.000Z INFO [api-gateway] GET /api/v2/checkout 200 OK duration=1200ms
+2026-11-29T00:16:50.000Z INFO [api-gateway] Health check passed all_services=healthy
+2026-11-29T00:00:37.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=8929 duration=67ms
+2026-11-29T00:02:07.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=2804 duration=67ms
+2026-11-29T00:03:12.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=8349 duration=67ms
+2026-11-29T00:02:42.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=8180 duration=67ms
+2026-11-29T00:04:02.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=2928 duration=67ms
+2026-11-29T00:00:27.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=8280 duration=67ms
+2026-11-29T00:06:38.000Z INFO [api-gateway] GET /api/v2/checkout 200 OK duration=1200ms
+2026-11-29T00:10:05.000Z ERROR [api-gateway] auth-service unavailable returning 503 to downstream affected_requests=12847
+2026-11-29T00:12:21.000Z WARN [api-gateway] Rate limit applied client_ip=192.168.1.141 requests=1500/min limit=1000/min
+2026-11-29T00:06:18.000Z INFO [api-gateway] GET /api/v2/checkout 200 OK duration=1200ms
+2026-11-29T00:03:47.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=5574 duration=67ms
+2026-11-29T00:10:19.000Z ERROR [api-gateway] auth-service unavailable returning 503 to downstream affected_requests=12847
+2026-11-29T00:17:04.000Z INFO [api-gateway] Health check passed all_services=healthy
+2026-11-29T00:02:00.000Z INFO [api-gateway] Request processed successfully req_id=97841 latency=45ms
+2026-11-29T00:10:31.000Z ERROR [api-gateway] auth-service unavailable returning 503 to downstream affected_requests=12847
+2026-11-29T00:01:22.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=1292 duration=67ms
+2026-11-29T00:16:52.000Z INFO [api-gateway] Health check passed all_services=healthy
+2026-11-29T00:02:27.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=526 duration=67ms
+2026-11-29T00:04:07.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=4890 duration=67ms
+2026-11-29T00:10:35.000Z ERROR [api-gateway] auth-service unavailable returning 503 to downstream affected_requests=12847
+2026-11-29T00:10:13.000Z ERROR [api-gateway] auth-service unavailable returning 503 to downstream affected_requests=12847
+2026-11-29T00:02:52.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=2288 duration=67ms
+2026-11-29T00:00:07.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=2287 duration=67ms
+2026-11-29T00:11:51.000Z WARN [api-gateway] Rate limit applied client_ip=192.168.1.72 requests=1500/min limit=1000/min
+2026-11-29T00:03:22.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=2622 duration=67ms
+2026-11-29T00:06:58.000Z INFO [api-gateway] GET /api/v2/checkout 200 OK duration=1200ms
+2026-11-29T00:07:28.000Z INFO [api-gateway] GET /api/v2/checkout 200 OK duration=1200ms
+2026-11-29T00:10:21.000Z ERROR [api-gateway] auth-service unavailable returning 503 to downstream affected_requests=12847
+2026-11-29T00:16:42.000Z INFO [api-gateway] Health check passed all_services=healthy
+2026-11-29T00:10:43.000Z ERROR [api-gateway] auth-service unavailable returning 503 to downstream affected_requests=12847
+2026-11-29T00:17:14.000Z INFO [api-gateway] Health check passed all_services=healthy
+2026-11-29T00:16:44.000Z INFO [api-gateway] Health check passed all_services=healthy
+2026-11-29T00:12:27.000Z WARN [api-gateway] Rate limit applied client_ip=192.168.1.13 requests=1500/min limit=1000/min
+2026-11-29T00:10:03.000Z ERROR [api-gateway] auth-service unavailable returning 503 to downstream affected_requests=12847
+2026-11-29T00:10:17.000Z ERROR [api-gateway] auth-service unavailable returning 503 to downstream affected_requests=12847
+2026-11-29T00:05:43.000Z INFO [api-gateway] GET /api/v2/checkout 200 OK duration=1200ms
+2026-11-29T00:06:28.000Z INFO [api-gateway] GET /api/v2/checkout 200 OK duration=1200ms
+2026-11-29T00:10:11.000Z ERROR [api-gateway] auth-service unavailable returning 503 to downstream affected_requests=12847
+2026-11-29T00:05:48.000Z INFO [api-gateway] GET /api/v2/checkout 200 OK duration=1200ms
+2026-11-29T00:05:33.000Z INFO [api-gateway] GET /api/v2/checkout 200 OK duration=1200ms
+2026-11-29T00:00:35.000Z INFO [api-gateway] Request processed successfully req_id=95181 latency=45ms
+2026-11-29T00:01:42.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=3815 duration=67ms
+2026-11-29T00:01:32.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=1140 duration=67ms
+2026-11-29T00:02:22.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=5314 duration=67ms
+2026-11-29T00:11:48.000Z WARN [api-gateway] Rate limit applied client_ip=192.168.1.47 requests=1500/min limit=1000/min
+2026-11-29T00:16:40.000Z INFO [api-gateway] Health check passed all_services=healthy
+2026-11-29T00:01:47.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=4555 duration=67ms
+2026-11-29T00:00:25.000Z INFO [api-gateway] Request processed successfully req_id=40495 latency=45ms
+2026-11-29T00:03:57.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=54 duration=67ms
+2026-11-29T00:10:47.000Z ERROR [api-gateway] auth-service unavailable returning 503 to downstream affected_requests=12847
+2026-11-29T00:10:15.000Z ERROR [api-gateway] auth-service unavailable returning 503 to downstream affected_requests=12847
+2026-11-29T00:10:37.000Z ERROR [api-gateway] auth-service unavailable returning 503 to downstream affected_requests=12847
+2026-11-29T00:16:54.000Z INFO [api-gateway] Health check passed all_services=healthy
+2026-11-29T00:00:22.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=1536 duration=67ms
+2026-11-29T00:07:03.000Z INFO [api-gateway] GET /api/v2/checkout 200 OK duration=1200ms
+2026-11-29T00:00:17.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=6913 duration=67ms
+2026-11-29T00:12:33.000Z WARN [api-gateway] Rate limit applied client_ip=192.168.1.139 requests=1500/min limit=1000/min
+2026-11-29T00:00:52.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=5575 duration=67ms
+2026-11-29T00:11:57.000Z WARN [api-gateway] Rate limit applied client_ip=192.168.1.64 requests=1500/min limit=1000/min
+2026-11-29T00:05:23.000Z INFO [api-gateway] GET /api/v2/checkout 200 OK duration=1200ms
+2026-11-29T00:11:42.000Z WARN [api-gateway] Rate limit applied client_ip=192.168.1.36 requests=1500/min limit=1000/min
+2026-11-29T00:03:52.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=7124 duration=67ms
+2026-11-29T00:06:33.000Z INFO [api-gateway] GET /api/v2/checkout 200 OK duration=1200ms
+2026-11-29T00:10:41.000Z ERROR [api-gateway] auth-service unavailable returning 503 to downstream affected_requests=12847
+2026-11-29T00:10:29.000Z ERROR [api-gateway] auth-service unavailable returning 503 to downstream affected_requests=12847
+2026-11-29T00:17:12.000Z INFO [api-gateway] Health check passed all_services=healthy
+2026-11-29T00:10:27.000Z ERROR [api-gateway] auth-service unavailable returning 503 to downstream affected_requests=12847
+2026-11-29T00:10:45.000Z ERROR [api-gateway] auth-service unavailable returning 503 to downstream affected_requests=12847
+2026-11-29T00:12:00.000Z WARN [api-gateway] Rate limit applied client_ip=192.168.1.224 requests=1500/min limit=1000/min
+2026-11-29T00:06:48.000Z INFO [api-gateway] GET /api/v2/checkout 200 OK duration=1200ms
+2026-11-29T00:07:23.000Z INFO [api-gateway] GET /api/v2/checkout 200 OK duration=1200ms
+2026-11-29T00:03:07.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=5931 duration=67ms
+2026-11-29T00:06:23.000Z INFO [api-gateway] GET /api/v2/checkout 200 OK duration=1200ms
+2026-11-29T00:10:09.000Z ERROR [api-gateway] auth-service unavailable returning 503 to downstream affected_requests=12847
+2026-11-29T00:17:08.000Z INFO [api-gateway] Health check passed all_services=healthy
+2026-11-29T00:03:27.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=1041 duration=67ms
+2026-11-29T00:07:08.000Z INFO [api-gateway] GET /api/v2/checkout 200 OK duration=1200ms
+2026-11-29T00:01:02.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=1520 duration=67ms
+2026-11-29T00:12:09.000Z WARN [api-gateway] Rate limit applied client_ip=192.168.1.114 requests=1500/min limit=1000/min
+2026-11-29T00:12:24.000Z WARN [api-gateway] Rate limit applied client_ip=192.168.1.26 requests=1500/min limit=1000/min
+2026-11-29T00:05:28.000Z INFO [api-gateway] GET /api/v2/checkout 200 OK duration=1200ms
+2026-11-29T00:03:32.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=9764 duration=67ms
+2026-11-29T00:06:03.000Z INFO [api-gateway] GET /api/v2/checkout 200 OK duration=1200ms
+2026-11-29T00:10:39.000Z ERROR [api-gateway] auth-service unavailable returning 503 to downstream affected_requests=12847
+2026-11-29T00:00:02.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=4507 duration=67ms
+2026-11-29T00:12:15.000Z WARN [api-gateway] Rate limit applied client_ip=192.168.1.221 requests=1500/min limit=1000/min
+2026-11-29T00:00:47.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=107 duration=67ms
+2026-11-29T00:05:58.000Z INFO [api-gateway] GET /api/v2/checkout 200 OK duration=1200ms
+2026-11-29T00:06:43.000Z INFO [api-gateway] GET /api/v2/checkout 200 OK duration=1200ms
+2026-11-29T00:00:42.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=7360 duration=67ms
+2026-11-29T00:05:38.000Z INFO [api-gateway] GET /api/v2/checkout 200 OK duration=1200ms
+2026-11-29T00:17:18.000Z INFO [api-gateway] Health check passed all_services=healthy
+2026-11-29T00:16:56.000Z INFO [api-gateway] Health check passed all_services=healthy
+2026-11-29T00:17:16.000Z INFO [api-gateway] Health check passed all_services=healthy
+2026-11-29T00:02:55.000Z INFO [api-gateway] Request processed successfully req_id=83579 latency=45ms
+2026-11-29T00:17:02.000Z INFO [api-gateway] Health check passed all_services=healthy
+2026-11-29T00:03:37.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=4120 duration=67ms
+2026-11-29T00:11:45.000Z WARN [api-gateway] Rate limit applied client_ip=192.168.1.109 requests=1500/min limit=1000/min
+2026-11-29T00:03:10.000Z INFO [api-gateway] Request processed successfully req_id=28131 latency=45ms
+2026-11-29T00:11:54.000Z WARN [api-gateway] Rate limit applied client_ip=192.168.1.119 requests=1500/min limit=1000/min
+2026-11-29T00:10:01.000Z ERROR [api-gateway] auth-service unavailable returning 503 to downstream affected_requests=12847
+2026-11-29T00:10:07.000Z ERROR [api-gateway] auth-service unavailable returning 503 to downstream affected_requests=12847
+2026-11-29T00:05:18.000Z INFO [api-gateway] GET /api/v2/checkout 200 OK duration=1200ms
+2026-11-29T00:03:42.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=1877 duration=67ms
+2026-11-29T00:00:05.000Z INFO [api-gateway] Request processed successfully req_id=39256 latency=45ms
+2026-11-29T00:02:37.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=9293 duration=67ms
+2026-11-29T00:01:27.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=5926 duration=67ms
+2026-11-29T00:07:13.000Z INFO [api-gateway] GET /api/v2/checkout 200 OK duration=1200ms
+2026-11-29T00:10:33.000Z ERROR [api-gateway] auth-service unavailable returning 503 to downstream affected_requests=12847
+2026-11-29T00:12:39.000Z WARN [api-gateway] Rate limit applied client_ip=192.168.1.4 requests=1500/min limit=1000/min
+2026-11-29T00:03:02.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=7020 duration=67ms
+2026-11-29T00:03:17.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=772 duration=67ms
+2026-11-29T00:02:57.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=8831 duration=67ms
+2026-11-29T00:17:06.000Z INFO [api-gateway] Health check passed all_services=healthy
+2026-11-29T00:16:48.000Z INFO [api-gateway] Health check passed all_services=healthy
+2026-11-29T00:06:13.000Z INFO [api-gateway] GET /api/v2/checkout 200 OK duration=1200ms
+2026-11-29T00:01:07.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=5882 duration=67ms
+2026-11-29T00:12:12.000Z WARN [api-gateway] Rate limit applied client_ip=192.168.1.207 requests=1500/min limit=1000/min
+2026-11-29T00:12:03.000Z WARN [api-gateway] Rate limit applied client_ip=192.168.1.237 requests=1500/min limit=1000/min
+2026-11-29T00:01:57.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=5821 duration=67ms
+2026-11-29T00:02:17.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=4423 duration=67ms
+2026-11-29T00:16:58.000Z INFO [api-gateway] Health check passed all_services=healthy
+2026-11-29T00:05:13.000Z INFO [api-gateway] GET /api/v2/checkout 200 OK duration=1200ms
+2026-11-29T00:12:18.000Z WARN [api-gateway] Rate limit applied client_ip=192.168.1.220 requests=1500/min limit=1000/min
+2026-11-29T00:01:37.000Z INFO [api-gateway] GET /api/v2/products 200 OK user_id=3734 duration=67ms
+2026-11-29T00:17:00.000Z INFO [api-gateway] Health check passed all_services=healthy
+2026-11-29T00:10:23.000Z ERROR [api-gateway] auth-service unavailable returning 503 to downstream affected_requests=12847
+2026-11-29T00:10:25.000Z ERROR [api-gateway] auth-service unavailable returning 503 to downstream affected_requests=12847

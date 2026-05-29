@@ -1,0 +1,5 @@
+2026-05-17T17:15:00Z [INFO] [auth-service-7f98c6] Starting bootstrap process...
+2026-05-17T17:15:02Z [INFO] [auth-service-7f98c6] Loaded active configuration schema version 4.2.1
+2026-05-17T17:15:05Z [WARNING] [auth-service-7f98c6] Slow connection detected to database replication secondary
+2026-05-17T17:15:07Z [ERROR] [auth-service-7f98c6] Timeout accessing authentication microservice endpoint /verify
+2026-05-17T17:15:10Z [FATAL] [auth-service-7f98c6] Process terminated unexpectedly: OutOfMemoryException (OOMKilled)

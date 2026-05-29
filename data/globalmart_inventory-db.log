@@ -1,0 +1,74 @@
+2026-11-29T00:07:06.000Z WARN [inventory-db] Slow query detected query_time=2.3s table=inventory_items rows_examined=4500000
+2026-11-29T00:09:07.000Z ERROR [inventory-db] Deadlock detected transaction_id=TX-2588 table=order_reservations waiting_for=TX-8062
+2026-11-29T00:05:06.000Z WARN [inventory-db] Slow query detected query_time=2.3s table=inventory_items rows_examined=4500000
+2026-11-29T00:08:10.000Z ERROR [inventory-db] Deadlock detected transaction_id=TX-9645 table=order_reservations waiting_for=TX-7932
+2026-11-29T00:06:16.000Z WARN [inventory-db] Slow query detected query_time=2.3s table=inventory_items rows_examined=4500000
+2026-11-29T00:08:19.000Z ERROR [inventory-db] Deadlock detected transaction_id=TX-7537 table=order_reservations waiting_for=TX-7118
+2026-11-29T00:08:28.000Z ERROR [inventory-db] Deadlock detected transaction_id=TX-4681 table=order_reservations waiting_for=TX-2049
+2026-11-29T00:05:56.000Z WARN [inventory-db] Slow query detected query_time=2.3s table=inventory_items rows_examined=4500000
+2026-11-29T00:05:31.000Z WARN [inventory-db] Slow query detected query_time=2.3s table=inventory_items rows_examined=4500000
+2026-11-29T00:07:52.000Z ERROR [inventory-db] Deadlock detected transaction_id=TX-1949 table=order_reservations waiting_for=TX-4946
+2026-11-29T00:05:51.000Z WARN [inventory-db] Slow query detected query_time=2.3s table=inventory_items rows_examined=4500000
+2026-11-29T00:09:22.000Z ERROR [inventory-db] Deadlock detected transaction_id=TX-2790 table=order_reservations waiting_for=TX-5073
+2026-11-29T00:05:46.000Z WARN [inventory-db] Slow query detected query_time=2.3s table=inventory_items rows_examined=4500000
+2026-11-29T00:09:01.000Z ERROR [inventory-db] Deadlock detected transaction_id=TX-8749 table=order_reservations waiting_for=TX-7669
+2026-11-29T00:08:25.000Z ERROR [inventory-db] Deadlock detected transaction_id=TX-2982 table=order_reservations waiting_for=TX-5061
+2026-11-29T00:00:50.000Z INFO [inventory-db] Request processed successfully req_id=65392 latency=45ms
+2026-11-29T00:08:31.000Z ERROR [inventory-db] Deadlock detected transaction_id=TX-6539 table=order_reservations waiting_for=TX-1344
+2026-11-29T00:08:46.000Z ERROR [inventory-db] Deadlock detected transaction_id=TX-2160 table=order_reservations waiting_for=TX-9423
+2026-11-29T00:06:41.000Z WARN [inventory-db] Slow query detected query_time=2.3s table=inventory_items rows_examined=4500000
+2026-11-29T00:08:16.000Z ERROR [inventory-db] Deadlock detected transaction_id=TX-4295 table=order_reservations waiting_for=TX-6107
+2026-11-29T00:07:21.000Z WARN [inventory-db] Slow query detected query_time=2.3s table=inventory_items rows_examined=4500000
+2026-11-29T00:07:40.000Z ERROR [inventory-db] Deadlock detected transaction_id=TX-1009 table=order_reservations waiting_for=TX-6310
+2026-11-29T00:09:25.000Z ERROR [inventory-db] Deadlock detected transaction_id=TX-4139 table=order_reservations waiting_for=TX-4116
+2026-11-29T00:08:43.000Z ERROR [inventory-db] Deadlock detected transaction_id=TX-2104 table=order_reservations waiting_for=TX-1514
+2026-11-29T00:08:49.000Z ERROR [inventory-db] Deadlock detected transaction_id=TX-4899 table=order_reservations waiting_for=TX-5562
+2026-11-29T00:08:52.000Z ERROR [inventory-db] Deadlock detected transaction_id=TX-8953 table=order_reservations waiting_for=TX-4510
+2026-11-29T00:07:01.000Z WARN [inventory-db] Slow query detected query_time=2.3s table=inventory_items rows_examined=4500000
+2026-11-29T00:06:46.000Z WARN [inventory-db] Slow query detected query_time=2.3s table=inventory_items rows_examined=4500000
+2026-11-29T00:07:16.000Z WARN [inventory-db] Slow query detected query_time=2.3s table=inventory_items rows_examined=4500000
+2026-11-29T00:07:49.000Z ERROR [inventory-db] Deadlock detected transaction_id=TX-6038 table=order_reservations waiting_for=TX-4923
+2026-11-29T00:05:36.000Z WARN [inventory-db] Slow query detected query_time=2.3s table=inventory_items rows_examined=4500000
+2026-11-29T00:09:19.000Z ERROR [inventory-db] Deadlock detected transaction_id=TX-7596 table=order_reservations waiting_for=TX-6559
+2026-11-29T00:05:21.000Z WARN [inventory-db] Slow query detected query_time=2.3s table=inventory_items rows_examined=4500000
+2026-11-29T00:06:26.000Z WARN [inventory-db] Slow query detected query_time=2.3s table=inventory_items rows_examined=4500000
+2026-11-29T00:06:51.000Z WARN [inventory-db] Slow query detected query_time=2.3s table=inventory_items rows_examined=4500000
+2026-11-29T00:06:11.000Z WARN [inventory-db] Slow query detected query_time=2.3s table=inventory_items rows_examined=4500000
+2026-11-29T00:08:22.000Z ERROR [inventory-db] Deadlock detected transaction_id=TX-9479 table=order_reservations waiting_for=TX-8397
+2026-11-29T00:08:55.000Z ERROR [inventory-db] Deadlock detected transaction_id=TX-9834 table=order_reservations waiting_for=TX-3167
+2026-11-29T00:09:28.000Z ERROR [inventory-db] Deadlock detected transaction_id=TX-9786 table=order_reservations waiting_for=TX-8350
+2026-11-29T00:06:31.000Z WARN [inventory-db] Slow query detected query_time=2.3s table=inventory_items rows_examined=4500000
+2026-11-29T00:06:01.000Z WARN [inventory-db] Slow query detected query_time=2.3s table=inventory_items rows_examined=4500000
+2026-11-29T00:07:34.000Z ERROR [inventory-db] Deadlock detected transaction_id=TX-7126 table=order_reservations waiting_for=TX-3646
+2026-11-29T00:05:26.000Z WARN [inventory-db] Slow query detected query_time=2.3s table=inventory_items rows_examined=4500000
+2026-11-29T00:03:55.000Z INFO [inventory-db] Request processed successfully req_id=69470 latency=45ms
+2026-11-29T00:07:37.000Z ERROR [inventory-db] Deadlock detected transaction_id=TX-9837 table=order_reservations waiting_for=TX-9689
+2026-11-29T00:08:01.000Z ERROR [inventory-db] Deadlock detected transaction_id=TX-9727 table=order_reservations waiting_for=TX-3060
+2026-11-29T00:07:55.000Z ERROR [inventory-db] Deadlock detected transaction_id=TX-2290 table=order_reservations waiting_for=TX-2403
+2026-11-29T00:06:56.000Z WARN [inventory-db] Slow query detected query_time=2.3s table=inventory_items rows_examined=4500000
+2026-11-29T00:06:06.000Z WARN [inventory-db] Slow query detected query_time=2.3s table=inventory_items rows_examined=4500000
+2026-11-29T00:08:04.000Z ERROR [inventory-db] Deadlock detected transaction_id=TX-3103 table=order_reservations waiting_for=TX-8787
+2026-11-29T00:08:13.000Z ERROR [inventory-db] Deadlock detected transaction_id=TX-4470 table=order_reservations waiting_for=TX-9835
+2026-11-29T00:09:13.000Z ERROR [inventory-db] Deadlock detected transaction_id=TX-8651 table=order_reservations waiting_for=TX-1887
+2026-11-29T00:09:10.000Z ERROR [inventory-db] Deadlock detected transaction_id=TX-7939 table=order_reservations waiting_for=TX-7735
+2026-11-29T00:08:34.000Z ERROR [inventory-db] Deadlock detected transaction_id=TX-4770 table=order_reservations waiting_for=TX-4608
+2026-11-29T00:06:36.000Z WARN [inventory-db] Slow query detected query_time=2.3s table=inventory_items rows_examined=4500000
+2026-11-29T00:08:58.000Z ERROR [inventory-db] Deadlock detected transaction_id=TX-8744 table=order_reservations waiting_for=TX-4981
+2026-11-29T00:05:16.000Z WARN [inventory-db] Slow query detected query_time=2.3s table=inventory_items rows_examined=4500000
+2026-11-29T00:05:41.000Z WARN [inventory-db] Slow query detected query_time=2.3s table=inventory_items rows_examined=4500000
+2026-11-29T00:08:37.000Z ERROR [inventory-db] Deadlock detected transaction_id=TX-1117 table=order_reservations waiting_for=TX-2163
+2026-11-29T00:07:11.000Z WARN [inventory-db] Slow query detected query_time=2.3s table=inventory_items rows_examined=4500000
+2026-11-29T00:08:40.000Z ERROR [inventory-db] Deadlock detected transaction_id=TX-1964 table=order_reservations waiting_for=TX-4750
+2026-11-29T00:05:01.000Z WARN [inventory-db] Slow query detected query_time=2.3s table=inventory_items rows_examined=4500000
+2026-11-29T00:06:21.000Z WARN [inventory-db] Slow query detected query_time=2.3s table=inventory_items rows_examined=4500000
+2026-11-29T00:07:43.000Z ERROR [inventory-db] Deadlock detected transaction_id=TX-9005 table=order_reservations waiting_for=TX-1319
+2026-11-29T00:05:11.000Z WARN [inventory-db] Slow query detected query_time=2.3s table=inventory_items rows_examined=4500000
+2026-11-29T00:07:58.000Z ERROR [inventory-db] Deadlock detected transaction_id=TX-8962 table=order_reservations waiting_for=TX-2133
+2026-11-29T00:02:50.000Z INFO [inventory-db] Request processed successfully req_id=44718 latency=45ms
+2026-11-29T00:07:26.000Z WARN [inventory-db] Slow query detected query_time=2.3s table=inventory_items rows_examined=4500000
+2026-11-29T00:01:55.000Z INFO [inventory-db] Request processed successfully req_id=58520 latency=45ms
+2026-11-29T00:08:07.000Z ERROR [inventory-db] Deadlock detected transaction_id=TX-3705 table=order_reservations waiting_for=TX-5342
+2026-11-29T00:07:46.000Z ERROR [inventory-db] Deadlock detected transaction_id=TX-2832 table=order_reservations waiting_for=TX-6947
+2026-11-29T00:07:31.000Z ERROR [inventory-db] Deadlock detected transaction_id=TX-9317 table=order_reservations waiting_for=TX-4258
+2026-11-29T00:09:04.000Z ERROR [inventory-db] Deadlock detected transaction_id=TX-4119 table=order_reservations waiting_for=TX-2545
+2026-11-29T00:09:16.000Z ERROR [inventory-db] Deadlock detected transaction_id=TX-2612 table=order_reservations waiting_for=TX-1993

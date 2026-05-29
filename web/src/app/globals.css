@@ -1,88 +1,90 @@
 @import "tailwindcss";
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   SemanticOS Design Tokens — Dark/Light Theme System
+   
+   These CSS variables map 1:1 to the hex values used across all components.
+   Components reference them via Tailwind arbitrary values: bg-[var(--bg-app)]
+   ═══════════════════════════════════════════════════════════════════════════ */
+
 :root {
-  /* Default Dark Mode variables (Premium Observability look) */
-  --background-hex: #08080c;
-  --foreground-hex: #f4f4f7;
-  
-  --bg-app: #08080c;
-  --bg-sidebar: #0b0b0f;
-  --bg-header: #08080c;
-  --bg-card: rgba(255, 255, 255, 0.02);
-  --bg-card-hover: rgba(255, 255, 255, 0.04);
-  --bg-modal: #111115;
-  --bg-input: rgba(255, 255, 255, 0.02);
-  
-  --border-color: rgba(255, 255, 255, 0.06);
-  --border-color-hover: rgba(255, 255, 255, 0.12);
-  
-  --text-primary: #f4f4f7;
-  --text-secondary: #a1a1aa;
-  --text-muted: #71717a;
-  
-  --primary: #d946ef; /* Fuchsia */
+  /* ── Backgrounds ─────────────────────────────────────────────────────── */
+  --bg-app: #0a0a0c;          /* Main app background, sidebar, header */
+  --bg-card: #121214;         /* Card surfaces, table containers */
+  --bg-modal: #141416;        /* Modals, elevated surfaces, selects */
+  --bg-inset: #0c0c0e;        /* Inset areas, detail panels, code blocks */
+  --bg-elevated: #0f0f13;     /* Command palette, popovers */
+  --bg-card-hover: #161618;   /* Card hover states */
+  --bg-track: #1a1a1c;        /* Progress bar tracks */
+  --bg-input: #18181b;        /* Input backgrounds (zinc-900) */
+  --bg-surface: rgba(255, 255, 255, 0.02);  /* Subtle surface */
+  --bg-surface-hover: rgba(255, 255, 255, 0.05); /* Surface hover */
+
+  /* ── Text ─────────────────────────────────────────────────────────── */
+  --text-primary: #ffffff;
+  --text-secondary: #a1a1aa;   /* zinc-400 */
+  --text-muted: #71717a;       /* zinc-500 */
+  --text-dimmed: #52525b;      /* zinc-600 */
+  --text-input: #d4d4d8;       /* zinc-300 */
+
+  /* ── Borders ───────────────────────────────────────────────────────── */
+  --border-subtle: rgba(255, 255, 255, 0.05);   /* border-white/5 */
+  --border: rgba(255, 255, 255, 0.10);           /* border-white/10 */
+  --border-hover: rgba(255, 255, 255, 0.15);
+
+  /* ── Brand ─────────────────────────────────────────────────────────── */
+  --primary: #d946ef;
   --primary-hover: #e879f9;
   --primary-glow: rgba(217, 70, 239, 0.15);
-  
-  --accent: #8b5cf6; /* Violet */
+  --accent: #8b5cf6;
+
+  /* ── Status ────────────────────────────────────────────────────────── */
+  --status-active-bg: rgba(190, 18, 60, 0.25);   /* red incident bg */
 }
 
-/* Light Mode variables (Clean Commercial SaaS look) */
+/* ── Light Mode ──────────────────────────────────────────────────────────── */
 .light {
-  --background-hex: #f8fafc;
-  --foreground-hex: #0f172a;
-  
   --bg-app: #f8fafc;
-  --bg-sidebar: #ffffff;
-  --bg-header: #f8fafc;
   --bg-card: #ffffff;
-  --bg-card-hover: #f1f5f9;
   --bg-modal: #ffffff;
-  --bg-input: #ffffff;
-  
-  --border-color: #e2e8f0;
-  --border-color-hover: #cbd5e1;
-  
+  --bg-inset: #f1f5f9;
+  --bg-elevated: #ffffff;
+  --bg-card-hover: #f1f5f9;
+  --bg-track: #e2e8f0;
+  --bg-input: #f1f5f9;
+  --bg-surface: rgba(0, 0, 0, 0.02);
+  --bg-surface-hover: rgba(0, 0, 0, 0.04);
+
   --text-primary: #0f172a;
   --text-secondary: #475569;
   --text-muted: #64748b;
-  
+  --text-dimmed: #94a3b8;
+  --text-input: #334155;
+
+  --border-subtle: #e2e8f0;
+  --border: #cbd5e1;
+  --border-hover: #94a3b8;
+
   --primary: #c026d3;
-  --primary-hover: #d946ef;
+  --primary-hover: #a21caf;
   --primary-glow: rgba(192, 38, 211, 0.1);
-  
   --accent: #7c3aed;
+
+  --status-active-bg: rgba(254, 202, 202, 0.5);
 }
 
+/* ── Base ─────────────────────────────────────────────────────────────────── */
 body {
   color: var(--text-primary);
   background: var(--bg-app);
   font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
-  transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease;
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
-/* Unified Theme-aware UI Component utility overrides */
-.bg-app-theme { background-color: var(--bg-app); }
-.bg-sidebar-theme { background-color: var(--bg-sidebar); }
-.bg-header-theme { background-color: var(--bg-header); }
-.bg-card-theme { background-color: var(--bg-card); }
-.bg-modal-theme { background-color: var(--bg-modal); }
-
-.border-theme { border-color: var(--border-color); }
-.border-theme-hover:hover { border-color: var(--border-color-hover); }
-
-.text-primary-theme { color: var(--text-primary); }
-.text-secondary-theme { color: var(--text-secondary); }
-.text-muted-theme { color: var(--text-muted); }
-
-/* Shimmer Loading Animation Keyframes */
+/* ── Shimmer Loading Animation ───────────────────────────────────────────── */
 @keyframes shimmer {
-  0% {
-    background-position: -200% 0;
-  }
-  100% {
-    background-position: 200% 0;
-  }
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
 }
 
 .shimmer-bg {
@@ -93,4 +95,14 @@ body {
   );
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite linear;
+}
+
+/* ── Smooth Theme Transitions ────────────────────────────────────────────── */
+*, *::before, *::after {
+  transition: background-color 0.3s ease, border-color 0.3s ease, color 0.15s ease;
+}
+
+/* Disable transitions on animated elements to prevent conflicts */
+.animate-spin, .animate-pulse, [class*="animate-in"] {
+  transition: none !important;
 }

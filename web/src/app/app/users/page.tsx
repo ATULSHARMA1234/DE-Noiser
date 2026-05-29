@@ -77,8 +77,8 @@ export default function UserDirectoryPage() {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
         <ShieldAlert size={48} className="text-red-500 mb-4 animate-bounce" />
-        <h2 className="text-xl font-bold text-white">Access Restricted</h2>
-        <p className="text-sm text-zinc-500 mt-2 max-w-md">
+        <h2 className="text-xl font-bold text-[var(--text-primary)]">Access Restricted</h2>
+        <p className="text-sm text-[var(--text-muted)] mt-2 max-w-md">
           Only users with the <code className="text-fuchsia-400">ADMIN</code> role can access the User Provisioning directory.
         </p>
       </div>
@@ -89,17 +89,17 @@ export default function UserDirectoryPage() {
     <div className="max-w-[1600px] mx-auto pb-10">
       
       {/* Header Panel */}
-      <div className="flex items-center justify-between mb-8 border-b border-white/5 pb-5">
+      <div className="flex items-center justify-between mb-8 border-b border-[var(--border-subtle)] pb-5">
         <div>
           <div className="flex items-center gap-2 text-fuchsia-400 text-xs font-bold tracking-widest uppercase mb-1">
             <Sparkles size={12} />
             Platform Control
           </div>
-          <h1 className="text-xl font-bold text-white flex items-center gap-2">
+          <h1 className="text-xl font-bold text-[var(--text-primary)] flex items-center gap-2">
             <Users size={22} className="text-fuchsia-500" />
             User Provisioning Directory
           </h1>
-          <p className="text-xs text-zinc-500 mt-1">Manage platform credentials, roles, and administrative scopes</p>
+          <p className="text-xs text-[var(--text-muted)] mt-1">Manage platform credentials, roles, and administrative scopes</p>
         </div>
 
         <button
@@ -117,13 +117,13 @@ export default function UserDirectoryPage() {
       {isLoading ? (
         <div className="flex flex-col items-center justify-center py-20 gap-3">
           <Loader2 size={32} className="animate-spin text-fuchsia-500" />
-          <p className="text-xs text-zinc-500">Retrieving security contexts...</p>
+          <p className="text-xs text-[var(--text-muted)]">Retrieving security contexts...</p>
         </div>
       ) : users.length === 0 ? (
-        <div className="border border-dashed border-white/10 rounded-2xl p-16 text-center">
-          <Users size={40} className="text-zinc-600 mx-auto mb-4" />
-          <p className="text-sm text-zinc-400 font-medium">No operators provisioned</p>
-          <p className="text-xs text-zinc-600 mt-1">Create platform accounts to delegate VIEWER or ANALYST privileges.</p>
+        <div className="border border-dashed border-[var(--border)] rounded-2xl p-16 text-center">
+          <Users size={40} className="text-[var(--text-dimmed)] mx-auto mb-4" />
+          <p className="text-sm text-[var(--text-secondary)] font-medium">No operators provisioned</p>
+          <p className="text-xs text-[var(--text-dimmed)] mt-1">Create platform accounts to delegate VIEWER or ANALYST privileges.</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -133,7 +133,7 @@ export default function UserDirectoryPage() {
             return (
               <div 
                 key={u.id}
-                className="bg-white/[0.02] border border-white/5 hover:border-white/10 rounded-2xl p-5 relative overflow-hidden transition-all duration-300 flex flex-col justify-between"
+                className="bg-[var(--bg-surface)] border border-[var(--border-subtle)] hover:border-[var(--border)] rounded-2xl p-5 relative overflow-hidden transition-all duration-300 flex flex-col justify-between"
               >
                 {/* Visual glow indicator */}
                 <div className={`absolute top-0 left-0 w-full h-[3px] bg-gradient-to-r ${
@@ -144,7 +144,7 @@ export default function UserDirectoryPage() {
 
                 <div>
                   <div className="flex items-start justify-between mb-4">
-                    <div className="w-10 h-10 rounded-xl bg-white/[0.04] border border-white/5 flex items-center justify-center">
+                    <div className="w-10 h-10 rounded-xl bg-[var(--bg-surface-hover)] border border-[var(--border-subtle)] flex items-center justify-center">
                       {u.role === 'ADMIN' ? <ShieldCheck size={20} className="text-fuchsia-400" /> :
                        u.role === 'ANALYST' ? <Shield size={20} className="text-cyan-400" /> :
                        <Users size={20} className="text-zinc-400" />}
@@ -152,7 +152,7 @@ export default function UserDirectoryPage() {
 
                     <div className="flex items-center gap-1.5">
                       {isSelf && (
-                        <span className="text-[9px] font-bold tracking-wider bg-white/5 border border-white/10 px-2 py-0.5 rounded text-zinc-400 uppercase">
+                        <span className="text-[9px] font-bold tracking-wider bg-[var(--bg-surface-hover)] border border-[var(--border)] px-2 py-0.5 rounded text-[var(--text-secondary)] uppercase">
                           You
                         </span>
                       )}
@@ -166,15 +166,15 @@ export default function UserDirectoryPage() {
                     </div>
                   </div>
 
-                  <p className="text-sm font-bold text-white truncate mb-1">{u.email}</p>
-                  <p className="text-[10px] text-zinc-500 font-mono">Operator context ID: #{u.id}</p>
+                  <p className="text-sm font-bold text-[var(--text-primary)] truncate mb-1">{u.email}</p>
+                  <p className="text-[10px] text-[var(--text-muted)] font-mono">Operator context ID: #{u.id}</p>
                 </div>
 
-                <div className="mt-6 pt-4 border-t border-white/5 flex justify-end">
+                <div className="mt-6 pt-4 border-t border-[var(--border-subtle)] flex justify-end">
                   <button
                     onClick={() => handleDeleteUser(u.id)}
                     disabled={isSelf}
-                    className="p-2 rounded-lg text-zinc-500 hover:text-red-400 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-red-500/5 transition-colors cursor-pointer border-none"
+                    className="p-2 rounded-lg text-[var(--text-muted)] hover:text-red-500 dark:hover:text-red-400 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-red-500/5 transition-colors cursor-pointer border-none"
                     title={isSelf ? "Cannot delete your own account" : "Delete operator context"}
                   >
                     <Trash2 size={16} />
@@ -189,18 +189,18 @@ export default function UserDirectoryPage() {
       {/* ═══ ADD USER MODAL ═══ */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black/75 backdrop-blur-md z-[100] flex items-center justify-center p-4">
-          <div className="bg-[#121214] border border-white/10 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl relative">
+          <div className="bg-[var(--bg-modal)] border border-[var(--border)] rounded-2xl w-full max-w-md overflow-hidden shadow-2xl relative">
             <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-fuchsia-500 to-transparent"></div>
             
             {/* Modal Header */}
-            <div className="flex items-center justify-between px-6 py-5 border-b border-white/5">
+            <div className="flex items-center justify-between px-6 py-5 border-b border-[var(--border-subtle)]">
               <div>
-                <h2 className="text-base font-bold text-white">Provision Operator</h2>
-                <p className="text-xs text-zinc-500 mt-0.5">Register a new secure credential identity</p>
+                <h2 className="text-base font-bold text-[var(--text-primary)]">Provision Operator</h2>
+                <p className="text-xs text-[var(--text-muted)] mt-0.5">Register a new secure credential identity</p>
               </div>
               <button 
                 onClick={() => setShowAddModal(false)}
-                className="text-zinc-500 hover:text-white transition-colors cursor-pointer border-none bg-transparent"
+                className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors cursor-pointer border-none bg-transparent"
               >
                 <X size={18} />
               </button>
@@ -217,35 +217,35 @@ export default function UserDirectoryPage() {
                 )}
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Operator Email</label>
+                  <label className="text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wide">Operator Email</label>
                   <input
                     type="email"
                     required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="analyst.name@semanticos.io"
-                    className="w-full h-10 bg-white/[0.02] border border-white/10 rounded-xl px-3.5 text-xs text-white placeholder-zinc-600 outline-none focus:border-fuchsia-500/40 focus:bg-white/[0.04]"
+                    className="w-full h-10 bg-[var(--bg-surface)] border border-[var(--border)] rounded-xl px-3.5 text-xs text-[var(--text-primary)] placeholder-[var(--text-dimmed)] outline-none focus:border-fuchsia-500/40 focus:bg-[var(--bg-surface-hover)]"
                   />
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Secure Password</label>
+                  <label className="text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wide">Secure Password</label>
                   <input
                     type="password"
                     required
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••••••"
-                    className="w-full h-10 bg-white/[0.02] border border-white/10 rounded-xl px-3.5 text-xs text-white placeholder-zinc-600 outline-none focus:border-fuchsia-500/40 focus:bg-white/[0.04]"
+                    className="w-full h-10 bg-[var(--bg-surface)] border border-[var(--border)] rounded-xl px-3.5 text-xs text-[var(--text-primary)] placeholder-[var(--text-dimmed)] outline-none focus:border-fuchsia-500/40 focus:bg-[var(--bg-surface-hover)]"
                   />
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Platform Privilege Role</label>
+                  <label className="text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wide">Platform Privilege Role</label>
                   <select
                     value={role}
                     onChange={(e) => setRole(e.target.value)}
-                    className="w-full h-10 bg-[#141416] border border-white/10 rounded-xl px-3 text-xs text-zinc-300 outline-none focus:border-fuchsia-500/40"
+                    className="w-full h-10 bg-[var(--bg-modal)] border border-[var(--border)] rounded-xl px-3 text-xs text-[var(--text-input)] outline-none focus:border-fuchsia-500/40"
                   >
                     <option value="VIEWER">VIEWER (Audits, viewing runs & alerts)</option>
                     <option value="ANALYST">ANALYST (Submit analyses, resolve incidents)</option>
@@ -255,11 +255,11 @@ export default function UserDirectoryPage() {
               </div>
 
               {/* Modal Footer */}
-              <div className="px-6 py-4 border-t border-white/5 flex items-center justify-between">
+              <div className="px-6 py-4 border-t border-[var(--border-subtle)] flex items-center justify-between">
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
-                  className="text-xs text-zinc-400 hover:text-white transition-colors cursor-pointer border-none bg-transparent"
+                  className="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors cursor-pointer border-none bg-transparent"
                 >
                   Cancel
                 </button>
@@ -281,7 +281,6 @@ export default function UserDirectoryPage() {
           </div>
         </div>
       )}
-
     </div>
   );
 }

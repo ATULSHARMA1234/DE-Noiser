@@ -2,6 +2,8 @@
 
 import React, { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { useToast } from "@/context/ToastContext";
+import { Bell, Clock } from "lucide-react";
 
 interface AlertLog {
   id: number;
@@ -16,15 +18,17 @@ interface AlertLog {
 }
 
 export default function AlertsHistoryPage() {
+  const { toast } = useToast();
   const [logs, setLogs] = useState<AlertLog[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetchLogs = async () => {
+    setLoading(true);
     try {
       const res = await apiFetch("/alerts?limit=100");
       setLogs(res.data);
     } catch (err: any) {
-      alert(err.message || "Failed to fetch alert logs");
+      toast.error(err.message || "Failed to fetch alert logs");
     } finally {
       setLoading(false);
     }
@@ -35,71 +39,83 @@ export default function AlertsHistoryPage() {
   }, []);
 
   return (
-    <div className="p-8">
-      <h1 className="text-3xl font-bold mb-6 text-white">Alert History</h1>
-      <p className="text-gray-400 mb-8">Chronological log of every sent notification.</p>
+    <div className="max-w-[1600px] mx-auto pb-10">
+      {/* Header */}
+      <div className="mb-8">
+        <h1 className="text-xl font-bold text-[var(--text-primary)] mb-1">Alert History</h1>
+        <p className="text-xs text-[var(--text-muted)]">Chronological log of every sent notification. <span className="text-[var(--text-dimmed)]">{logs.length} total</span></p>
+      </div>
 
-      {loading ? (
-        <div className="animate-pulse space-y-4">
-          <div className="h-10 bg-white/5 rounded-md w-full"></div>
-          <div className="h-10 bg-white/5 rounded-md w-full"></div>
-        </div>
-      ) : (
-        <div className="bg-white/5 border border-white/10 rounded-lg overflow-x-auto">
-          <table className="min-w-full divide-y divide-white/10 text-sm">
-            <thead className="bg-white/5">
+      {/* Table */}
+      <div className="bg-[var(--bg-card)] border-none rounded-xl overflow-hidden shadow-sm">
+        <table className="w-full text-left text-xs">
+          <thead className="text-[10px] font-bold text-[var(--text-dimmed)] uppercase tracking-wider border-b border-transparent bg-transparent">
+            <tr>
+              <th className="p-5 font-medium">ID</th>
+              <th className="p-5 font-medium">Timestamp</th>
+              <th className="p-5 font-medium">Priority</th>
+              <th className="p-5 font-medium">Status</th>
+              <th className="p-5 font-medium">HTTP</th>
+              <th className="p-5 font-medium">Latency</th>
+              <th className="p-5 font-medium">Error</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-transparent">
+            {loading ? (
+              Array.from({ length: 5 }).map((_, idx) => (
+                <tr key={idx}>
+                  <td className="p-5"><div className="shimmer-bg h-4 w-10 rounded" /></td>
+                  <td className="p-5"><div className="shimmer-bg h-4 w-32 rounded" /></td>
+                  <td className="p-5"><div className="shimmer-bg h-6 w-12 rounded-full" /></td>
+                  <td className="p-5"><div className="shimmer-bg h-6 w-20 rounded-full" /></td>
+                  <td className="p-5"><div className="shimmer-bg h-4 w-12 rounded" /></td>
+                  <td className="p-5"><div className="shimmer-bg h-4 w-16 rounded" /></td>
+                  <td className="p-5"><div className="shimmer-bg h-4 w-28 rounded" /></td>
+                </tr>
+              ))
+            ) : logs.length === 0 ? (
               <tr>
-                <th className="px-6 py-3 text-left font-medium text-gray-300">ID</th>
-                <th className="px-6 py-3 text-left font-medium text-gray-300">Timestamp</th>
-                <th className="px-6 py-3 text-left font-medium text-gray-300">Priority</th>
-                <th className="px-6 py-3 text-left font-medium text-gray-300">Status</th>
-                <th className="px-6 py-3 text-left font-medium text-gray-300">HTTP Status</th>
-                <th className="px-6 py-3 text-left font-medium text-gray-300">Latency (ms)</th>
-                <th className="px-6 py-3 text-left font-medium text-gray-300">Error</th>
+                <td colSpan={7} className="p-8 text-center text-[var(--text-muted)]">
+                  No alerts sent yet. Configure alert channels in Settings to start receiving notifications.
+                </td>
               </tr>
-            </thead>
-            <tbody className="divide-y divide-white/5">
-              {logs.map((log) => (
-                <tr key={log.id} className="hover:bg-white/5">
-                  <td className="px-6 py-4 text-gray-400">{log.id}</td>
-                  <td className="px-6 py-4 text-gray-300">{new Date(log.timestamp).toLocaleString()}</td>
-                  <td className="px-6 py-4">
-                    <span className={`px-2 py-1 rounded text-xs font-mono ${
-                      log.priority === 'P0' ? 'bg-red-500/20 text-red-300' :
-                      log.priority === 'P1' ? 'bg-orange-500/20 text-orange-300' :
-                      log.priority === 'P2' ? 'bg-yellow-500/20 text-yellow-300' :
-                      'bg-blue-500/20 text-blue-300'
-                    }`}>
-                      {log.priority}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className={`px-2 py-1 rounded text-xs font-mono ${
-                      log.status === 'delivered' ? 'bg-green-500/20 text-green-300' :
-                      log.status === 'failed' ? 'bg-red-500/20 text-red-300' :
-                      'bg-gray-500/20 text-gray-300'
-                    }`}>
-                      {log.status}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-gray-400">{log.http_status || "N/A"}</td>
-                  <td className="px-6 py-4 text-gray-400">{log.latency_ms?.toFixed(1) || "N/A"}</td>
-                  <td className="px-6 py-4 text-gray-400 text-xs font-mono max-w-xs truncate" title={log.error || ""}>
-                    {log.error || "-"}
-                  </td>
-                </tr>
-              ))}
-              {logs.length === 0 && (
-                <tr>
-                  <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
-                    No alerts sent yet.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
+            ) : logs.map((log) => (
+              <tr key={log.id} className="hover:bg-[var(--bg-surface-hover)] transition-colors">
+                <td className="p-5 text-[var(--text-muted)] font-mono text-[10px]">{log.id}</td>
+                <td className="p-5">
+                  <div className="flex items-center gap-1.5 text-[var(--text-secondary)]">
+                    <Clock size={12} /> {new Date(log.timestamp).toLocaleString()}
+                  </div>
+                </td>
+                <td className="p-5">
+                  <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[9px] font-bold uppercase tracking-wider ${
+                    log.priority === 'P0' ? 'bg-red-500/15 text-red-400 border border-red-500/20' :
+                    log.priority === 'P1' ? 'bg-orange-500/15 text-orange-400 border border-orange-500/20' :
+                    log.priority === 'P2' ? 'bg-yellow-500/15 text-yellow-400 border border-yellow-500/20' :
+                    'bg-blue-500/15 text-blue-400 border border-blue-500/20'
+                  }`}>
+                    {log.priority}
+                  </span>
+                </td>
+                <td className="p-5">
+                  <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[9px] font-bold uppercase tracking-wider ${
+                    log.status === 'delivered' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
+                    log.status === 'failed' ? 'bg-red-500/10 text-red-400 border border-red-500/20' :
+                    'bg-[var(--bg-surface-hover)] text-[var(--text-muted)] border border-[var(--border-subtle)]'
+                  }`}>
+                    {log.status}
+                  </span>
+                </td>
+                <td className="p-5 text-[var(--text-secondary)]">{log.http_status || "—"}</td>
+                <td className="p-5 text-[var(--text-secondary)]">{log.latency_ms?.toFixed(1) || "—"}<span className="text-[var(--text-dimmed)] ml-0.5">ms</span></td>
+                <td className="p-5 text-[var(--text-muted)] text-[10px] font-mono max-w-xs truncate" title={log.error || ""}>
+                  {log.error || "—"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

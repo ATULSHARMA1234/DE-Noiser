@@ -1,0 +1,5 @@
+node-api-1 | 2026-05-17 17:15:00 [info]: Express app listening on port 3000
+node-api-1 | 2026-05-17 17:15:02 [info]: Connected to PostgreSQL database at postgres-db:5432
+node-api-1 | 2026-05-17 17:15:04 [warn]: Redis cache connection missed for key 'user:123'
+node-api-1 | 2026-05-17 17:15:06 [error]: uncaughtException: Cannot read properties of undefined (reading 'email')
+node-api-1 | 2026-05-17 17:15:07 [info]: Process exited with code 1

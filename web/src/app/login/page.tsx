@@ -34,14 +34,14 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="relative min-h-screen w-full flex items-center justify-center bg-[#070709] overflow-hidden px-4 select-none">
+    <div className="relative min-h-screen w-full flex items-center justify-center bg-[var(--bg-app)] overflow-hidden px-4 select-none">
       
       {/* Dynamic Background Glows */}
       <div className="absolute top-1/4 left-1/4 w-[400px] h-[400px] rounded-full bg-fuchsia-500/10 blur-[120px] pointer-events-none animate-pulse"></div>
       <div className="absolute bottom-1/4 right-1/4 w-[450px] h-[450px] rounded-full bg-violet-600/10 blur-[130px] pointer-events-none animate-pulse duration-5000"></div>
-
+ 
       {/* Main Glass Card container */}
-      <div className="w-full max-w-md bg-white/[0.02] border border-white/10 backdrop-blur-xl rounded-2xl shadow-2xl p-8 relative overflow-hidden transition-all duration-300 hover:border-white/15">
+      <div className="w-full max-w-md bg-[var(--bg-card)] border border-[var(--border)] backdrop-blur-xl rounded-2xl shadow-2xl p-8 relative overflow-hidden transition-all duration-300 hover:border-[var(--border-hover)]">
         
         {/* Subtle top glow line */}
         <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-fuchsia-500/50 to-transparent"></div>
@@ -52,12 +52,12 @@ export default function LoginPage() {
             <Cpu size={24} className="text-fuchsia-400" strokeWidth={2.5} />
           </div>
           
-          <div className="flex items-center gap-1.5 text-zinc-400 text-xs font-semibold tracking-widest uppercase mb-1">
+          <div className="flex items-center gap-1.5 text-[var(--text-secondary)] text-xs font-semibold tracking-widest uppercase mb-1">
             <Sparkles size={12} className="text-fuchsia-400" />
             Neural De-Noiser
           </div>
-          <h1 className="text-2xl font-bold tracking-tight text-white text-center">SemanticOS Platform</h1>
-          <p className="text-xs text-zinc-500 mt-1 text-center">Log ingestion, anomaly mapping & Drift Engine</p>
+          <h1 className="text-2xl font-bold tracking-tight text-[var(--text-primary)] text-center">SemanticOS Platform</h1>
+          <p className="text-xs text-[var(--text-muted)] mt-1 text-center">Log ingestion, anomaly mapping & Drift Engine</p>
         </div>
 
         {error && (
@@ -70,16 +70,16 @@ export default function LoginPage() {
         <form onSubmit={handleSubmit} className="space-y-5">
           {/* Email input field */}
           <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider block">Email Address</label>
+            <label className="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider block">Email Address</label>
             <div className="relative flex items-center">
-              <Mail size={16} className="absolute left-3.5 text-zinc-500 pointer-events-none" />
+              <Mail size={16} className="absolute left-3.5 text-[var(--text-muted)] pointer-events-none" />
               <input
                 type="email"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="operator@semanticos.io"
-                className="w-full h-11 bg-white/[0.03] border border-white/10 rounded-xl pl-11 pr-4 text-sm text-white placeholder-zinc-600 outline-none transition-all focus:border-fuchsia-500/40 focus:bg-white/[0.05] focus:ring-1 focus:ring-fuchsia-500/20"
+                className="w-full h-11 bg-[var(--bg-surface)] border border-[var(--border)] rounded-xl pl-11 pr-4 text-sm text-[var(--text-primary)] placeholder-[var(--text-dimmed)] outline-none transition-all focus:border-fuchsia-500/40 focus:bg-[var(--bg-surface-hover)] focus:ring-1 focus:ring-fuchsia-500/20"
               />
             </div>
           </div>
@@ -87,17 +87,17 @@ export default function LoginPage() {
           {/* Password input field */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider block">Password</label>
+              <label className="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider block">Password</label>
             </div>
             <div className="relative flex items-center">
-              <Lock size={16} className="absolute left-3.5 text-zinc-500 pointer-events-none" />
+              <Lock size={16} className="absolute left-3.5 text-[var(--text-muted)] pointer-events-none" />
               <input
                 type="password"
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••••••"
-                className="w-full h-11 bg-white/[0.03] border border-white/10 rounded-xl pl-11 pr-4 text-sm text-white placeholder-zinc-600 outline-none transition-all focus:border-fuchsia-500/40 focus:bg-white/[0.05] focus:ring-1 focus:ring-fuchsia-500/20"
+                className="w-full h-11 bg-[var(--bg-surface)] border border-[var(--border)] rounded-xl pl-11 pr-4 text-sm text-[var(--text-primary)] placeholder-[var(--text-dimmed)] outline-none transition-all focus:border-fuchsia-500/40 focus:bg-[var(--bg-surface-hover)] focus:ring-1 focus:ring-fuchsia-500/20"
               />
             </div>
           </div>
@@ -118,8 +118,8 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <div className="mt-8 text-center border-t border-white/5 pt-6">
-          <p className="text-[10px] text-zinc-500 font-mono tracking-wider uppercase">
+        <div className="mt-8 text-center border-t border-[var(--border-subtle)] pt-6">
+          <p className="text-[10px] text-[var(--text-muted)] font-mono tracking-wider uppercase">
             Protected by ECDSA JWT Session Engine
           </p>
         </div>

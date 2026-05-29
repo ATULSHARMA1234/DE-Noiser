@@ -1,11 +1,16 @@
 """
-HDBSCAN-based semantic clustering engine.
+Hybrid semantic clustering engine.
+
+Uses Agglomerative clustering (cosine distance) for small template sets where
+HDBSCAN struggles, and HDBSCAN for large-scale datasets where it excels.
 """
 
 from __future__ import annotations
 
 import hdbscan
 import numpy as np
+from sklearn.cluster import AgglomerativeClustering
+from sklearn.metrics.pairwise import cosine_distances
 
 from denoiser.clustering.models import Cluster
 from denoiser.config import settings
@@ -15,9 +20,25 @@ from denoiser.logging import get_logger
 
 logger = get_logger(__name__)
 
+# Templates below this count use Agglomerative; above use HDBSCAN.
+_AGGLOMERATIVE_THRESHOLD = 50
+
+# Cosine distance threshold for Agglomerative clustering.
+# 0.3 was empirically validated: groups "Request processed successfully"
+# across services while keeping "Connection timeout" separate from "OOMKilled".
+_COSINE_DISTANCE_THRESHOLD = 0.3
+
 
 class LogClusterer:
-    """Clusters normalized log templates using HDBSCAN."""
+    """Clusters normalized log templates using a hybrid strategy.
+
+    - **Small N (≤50 unique templates)**: Agglomerative clustering with
+      cosine distance.  Every template is assigned a real cluster — no noise
+      bucket — which is what SREs expect when they have a manageable number
+      of distinct log patterns.
+    - **Large N (>50)**: HDBSCAN with optional neural-sampling for datasets
+      exceeding 50 000 templates.
+    """
 
     def __init__(self) -> None:
         self.min_cluster_size = settings.min_cluster_size
@@ -41,112 +62,162 @@ class LogClusterer:
             The 2D array of embeddings.
         template_to_records : dict[str, list[LogRecord]]
             Mapping of template string back to the raw log records.
+        template_to_counts : dict[str, int]
+            Mapping of template string to total occurrence count.
 
         Returns
         -------
         list[Cluster]
-            A list of Cluster objects, including the noise cluster (-1) if present.
+            A list of Cluster objects, sorted by size descending.
         """
         if not unique_templates or len(unique_templates) != vectors.shape[0]:
             raise ClusteringError("Mismatch between templates and vectors.")
 
-        # If we have very few unique templates, HDBSCAN might fail or flag everything as noise.
-        # Adjust min_cluster_size dynamically if needed, or fallback gracefully.
         n_samples = vectors.shape[0]
         print(f"\n[NEURAL ENGINE] Analysis of {n_samples} unique semantic patterns starting...")
 
         if n_samples < 2:
-            logger.info("Single template detected. Bypassing HDBSCAN and returning single cluster.")
+            logger.info("Single template detected. Returning single cluster.")
             labels = np.array([0])
+        elif n_samples <= _AGGLOMERATIVE_THRESHOLD:
+            labels = self._agglomerative_cluster(vectors, n_samples)
         else:
-            actual_min_cluster_size = min(self.min_cluster_size, max(2, n_samples // 2))
-            if n_samples < 2:
-                actual_min_cluster_size = 2
+            labels = self._hdbscan_cluster(vectors, n_samples)
 
-            actual_min_samples = min(self.min_samples, max(1, n_samples - 1))
-            if n_samples <= 1:
-                actual_min_samples = 1
+        return self._build_clusters(
+            labels, unique_templates, vectors, template_to_records, template_to_counts
+        )
 
+    # ------------------------------------------------------------------
+    # Clustering strategies
+    # ------------------------------------------------------------------
+
+    def _agglomerative_cluster(self, vectors: np.ndarray, n_samples: int) -> np.ndarray:
+        """Agglomerative clustering with cosine distance for small datasets.
+
+        Every point is assigned to a real cluster (no noise bucket), which
+        produces far more granular and actionable groupings than HDBSCAN
+        when there are only a handful of unique templates.
+        """
+        logger.info(
+            "Using Agglomerative clustering (small dataset)",
+            extra={
+                "samples": n_samples,
+                "distance_threshold": _COSINE_DISTANCE_THRESHOLD,
+            },
+        )
+        try:
+            dist_matrix = cosine_distances(vectors)
+            clusterer = AgglomerativeClustering(
+                n_clusters=None,
+                metric="precomputed",
+                linkage="average",
+                distance_threshold=_COSINE_DISTANCE_THRESHOLD,
+            )
+            labels = clusterer.fit_predict(dist_matrix)
+            n_clusters = len(set(labels))
             logger.info(
-                "Running HDBSCAN",
-                extra={
-                    "samples": n_samples,
-                    "min_cluster_size": actual_min_cluster_size,
-                    "min_samples": actual_min_samples,
-                },
+                f"Agglomerative clustering produced {n_clusters} clusters "
+                f"from {n_samples} templates"
+            )
+            return labels
+        except Exception as e:
+            logger.warning(f"Agglomerative clustering failed, falling back to HDBSCAN: {e}")
+            return self._hdbscan_cluster(vectors, n_samples)
+
+    def _hdbscan_cluster(self, vectors: np.ndarray, n_samples: int) -> np.ndarray:
+        """HDBSCAN clustering for medium-to-large datasets."""
+        actual_min_cluster_size = min(self.min_cluster_size, max(2, n_samples // 2))
+        actual_min_samples = min(self.min_samples, max(1, n_samples - 1))
+
+        logger.info(
+            "Running HDBSCAN",
+            extra={
+                "samples": n_samples,
+                "min_cluster_size": actual_min_cluster_size,
+                "min_samples": actual_min_samples,
+            },
+        )
+
+        # --- NEURAL SAMPLING OPTIMIZATION ---
+        MAX_SAMPLES = 50000
+        if n_samples > MAX_SAMPLES:
+            logger.info(
+                f"Large dataset detected ({n_samples} templates). "
+                f"Using Neural Sampling (50k) for speed."
+            )
+            indices = np.random.choice(n_samples, MAX_SAMPLES, replace=False)
+            train_vectors = vectors[indices]
+
+            clusterer = hdbscan.HDBSCAN(
+                min_cluster_size=actual_min_cluster_size,
+                min_samples=actual_min_samples,
+                metric=self.metric,
+                prediction_data=True,
+                allow_single_cluster=True,
             )
 
-            # --- NEURAL SAMPLING OPTIMIZATION ---
-            MAX_SAMPLES = 50000
-            if n_samples > MAX_SAMPLES:
-                logger.info(f"Large dataset detected ({n_samples} templates). Using Neural Sampling (50k) for speed.")
-                # Pick a random sample for training the clusterer
-                indices = np.random.choice(n_samples, MAX_SAMPLES, replace=False)
-                train_vectors = vectors[indices]
+            try:
+                clusterer.fit(train_vectors)
+                labels, _strengths = hdbscan.prediction.approximate_predict(clusterer, vectors)
+                return labels
+            except Exception as e:
+                raise ClusteringError(f"Neural Sampling fit failed: {e}") from e
+        else:
+            clusterer = hdbscan.HDBSCAN(
+                min_cluster_size=actual_min_cluster_size,
+                min_samples=actual_min_samples,
+                metric=self.metric,
+                allow_single_cluster=True,
+            )
+            try:
+                return clusterer.fit_predict(vectors)
+            except Exception as e:
+                raise ClusteringError(f"HDBSCAN clustering failed: {e}") from e
 
-                clusterer = hdbscan.HDBSCAN(
-                    min_cluster_size=actual_min_cluster_size,
-                    min_samples=actual_min_samples,
-                    metric=self.metric,
-                    prediction_data=True, # Critical for assigning labels to non-sampled data
-                    allow_single_cluster=True,
-                )
+    # ------------------------------------------------------------------
+    # Cluster metadata extraction
+    # ------------------------------------------------------------------
 
-                try:
-                    clusterer.fit(train_vectors)
-                    # Assign labels to ALL vectors based on the sampled model
-                    labels, strengths = hdbscan.prediction.approximate_predict(clusterer, vectors)
-                except Exception as e:
-                    raise ClusteringError(f"Neural Sampling fit failed: {e}") from e
-            else:
-                # Standard path for smaller datasets
-                clusterer = hdbscan.HDBSCAN(
-                    min_cluster_size=actual_min_cluster_size,
-                    min_samples=actual_min_samples,
-                    metric=self.metric,
-                    allow_single_cluster=True,
-                )
-                try:
-                    labels = clusterer.fit_predict(vectors)
-                except Exception as e:
-                    raise ClusteringError(f"HDBSCAN clustering failed: {e}") from e
-
-        # Extract metadata
+    def _build_clusters(
+        self,
+        labels: np.ndarray,
+        unique_templates: list[str],
+        vectors: np.ndarray,
+        template_to_records: dict[str, list[LogRecord]],
+        template_to_counts: dict[str, int],
+    ) -> list[Cluster]:
+        """Convert raw labels into rich Cluster objects."""
         unique_labels = set(labels)
         clusters: list[Cluster] = []
 
         for cluster_id in unique_labels:
-            # Boolean mask for the current cluster
             mask = labels == cluster_id
-
-            # Subsets for this cluster
             cluster_vectors = vectors[mask]
             cluster_templates = [t for t, is_in in zip(unique_templates, mask) if is_in]
 
-            # Calculate centroid
+            # Centroid
             centroid = np.mean(cluster_vectors, axis=0)
 
-            # Find representative example (closest to centroid)
+            # Representative: closest to centroid
             if cluster_vectors.shape[0] == 1:
                 idx_closest = 0
             else:
-                # Euclidean distance to centroid
                 distances = np.linalg.norm(cluster_vectors - centroid, axis=1)
                 idx_closest = int(np.argmin(distances))
 
             representative_template = cluster_templates[idx_closest]
 
-            # Get source info for this representative template
+            # Source info from the first record of the representative template
             records = template_to_records.get(representative_template, [])
             representative_raw = records[0].raw_text if records else representative_template
             representative_source = records[0].source if records else "-"
             representative_line = records[0].line_number if records else 0
             representative_timestamp_ms = 0
             if records and records[0].timestamp:
-                # Store epoch milliseconds for fast metrics correlation.
                 representative_timestamp_ms = int(records[0].timestamp.timestamp() * 1000)
 
-            # Calculate total size (total raw log lines, using our new counter)
+            # Total raw log lines across all templates in this cluster
             total_size = sum(template_to_counts.get(t, 0) for t in cluster_templates)
 
             clusters.append(

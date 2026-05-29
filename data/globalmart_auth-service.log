@@ -1,0 +1,168 @@
+2026-11-29T00:14:38.000Z INFO [auth-service] Pod restarted attempt=2 status=CrashLoopBackoff restarts=26
+2026-11-29T00:10:28.000Z FATAL [auth-service] JVM crash detected OOMKilled signal=9 pod=auth-service-7f98c6 node=ip-10-0-1-42
+2026-11-29T00:14:50.000Z INFO [auth-service] Service healthy replicas=3/3 memory_usage=4.1GB uptime=120s
+2026-11-29T00:13:38.000Z INFO [auth-service] Pod restarted attempt=2 status=CrashLoopBackoff restarts=6
+2026-11-29T00:06:32.000Z WARN [auth-service] JWT validation cache miss rate=34% redis_conn_timeout=true
+2026-11-29T00:14:08.000Z INFO [auth-service] Pod restarted attempt=2 status=CrashLoopBackoff restarts=16
+2026-11-29T00:14:14.000Z INFO [auth-service] Pod restarted attempt=4 status=CrashLoopBackoff restarts=18
+2026-11-29T00:07:55.000Z ERROR [auth-service] Redis connection pool exhausted pool_size=100 waiting=847
+2026-11-29T00:14:38.000Z INFO [auth-service] Service healthy replicas=3/3 memory_usage=4.1GB uptime=120s
+2026-11-29T00:10:10.000Z FATAL [auth-service] OutOfMemoryError: Java heap space heap_used=7.9GB heap_max=8GB
+2026-11-29T00:08:01.000Z ERROR [auth-service] Redis connection pool exhausted pool_size=100 waiting=847
+2026-11-29T00:13:44.000Z INFO [auth-service] Pod restarted attempt=4 status=CrashLoopBackoff restarts=8
+2026-11-29T00:10:20.000Z FATAL [auth-service] JVM crash detected OOMKilled signal=9 pod=auth-service-7f98c6 node=ip-10-0-1-42
+2026-11-29T00:09:07.000Z ERROR [auth-service] Redis connection pool exhausted pool_size=100 waiting=847
+2026-11-29T00:06:27.000Z WARN [auth-service] JWT validation cache miss rate=34% redis_conn_timeout=true
+2026-11-29T00:10:28.000Z FATAL [auth-service] OutOfMemoryError: Java heap space heap_used=7.9GB heap_max=8GB
+2026-11-29T00:07:22.000Z WARN [auth-service] JWT validation cache miss rate=34% redis_conn_timeout=true
+2026-11-29T00:10:12.000Z FATAL [auth-service] JVM crash detected OOMKilled signal=9 pod=auth-service-7f98c6 node=ip-10-0-1-42
+2026-11-29T00:07:52.000Z ERROR [auth-service] Redis connection pool exhausted pool_size=100 waiting=847
+2026-11-29T00:10:44.000Z FATAL [auth-service] OutOfMemoryError: Java heap space heap_used=7.9GB heap_max=8GB
+2026-11-29T00:10:06.000Z FATAL [auth-service] JVM crash detected OOMKilled signal=9 pod=auth-service-7f98c6 node=ip-10-0-1-42
+2026-11-29T00:06:02.000Z WARN [auth-service] JWT validation cache miss rate=34% redis_conn_timeout=true
+2026-11-29T00:05:12.000Z WARN [auth-service] JWT validation cache miss rate=34% redis_conn_timeout=true
+2026-11-29T00:10:42.000Z FATAL [auth-service] OutOfMemoryError: Java heap space heap_used=7.9GB heap_max=8GB
+2026-11-29T00:10:14.000Z FATAL [auth-service] OutOfMemoryError: Java heap space heap_used=7.9GB heap_max=8GB
+2026-11-29T00:06:22.000Z WARN [auth-service] JWT validation cache miss rate=34% redis_conn_timeout=true
+2026-11-29T00:05:07.000Z WARN [auth-service] JWT validation cache miss rate=34% redis_conn_timeout=true
+2026-11-29T00:13:23.000Z INFO [auth-service] Pod restarted attempt=2 status=CrashLoopBackoff restarts=1
+2026-11-29T00:10:40.000Z FATAL [auth-service] JVM crash detected OOMKilled signal=9 pod=auth-service-7f98c6 node=ip-10-0-1-42
+2026-11-29T00:08:13.000Z ERROR [auth-service] Redis connection pool exhausted pool_size=100 waiting=847
+2026-11-29T00:14:41.000Z INFO [auth-service] Service healthy replicas=3/3 memory_usage=4.1GB uptime=120s
+2026-11-29T00:10:08.000Z FATAL [auth-service] OutOfMemoryError: Java heap space heap_used=7.9GB heap_max=8GB
+2026-11-29T00:10:36.000Z FATAL [auth-service] JVM crash detected OOMKilled signal=9 pod=auth-service-7f98c6 node=ip-10-0-1-42
+2026-11-29T00:01:45.000Z INFO [auth-service] Request processed successfully req_id=59823 latency=45ms
+2026-11-29T00:07:49.000Z ERROR [auth-service] Redis connection pool exhausted pool_size=100 waiting=847
+2026-11-29T00:05:17.000Z WARN [auth-service] JWT validation cache miss rate=34% redis_conn_timeout=true
+2026-11-29T00:14:47.000Z INFO [auth-service] Pod restarted attempt=5 status=CrashLoopBackoff restarts=29
+2026-11-29T00:14:29.000Z INFO [auth-service] Service healthy replicas=3/3 memory_usage=4.1GB uptime=120s
+2026-11-29T00:14:05.000Z INFO [auth-service] Pod restarted attempt=1 status=CrashLoopBackoff restarts=15
+2026-11-29T00:10:38.000Z FATAL [auth-service] JVM crash detected OOMKilled signal=9 pod=auth-service-7f98c6 node=ip-10-0-1-42
+2026-11-29T00:13:53.000Z INFO [auth-service] Pod restarted attempt=2 status=CrashLoopBackoff restarts=11
+2026-11-29T00:13:47.000Z INFO [auth-service] Pod restarted attempt=5 status=CrashLoopBackoff restarts=9
+2026-11-29T00:14:32.000Z INFO [auth-service] Service healthy replicas=3/3 memory_usage=4.1GB uptime=120s
+2026-11-29T00:07:37.000Z ERROR [auth-service] Redis connection pool exhausted pool_size=100 waiting=847
+2026-11-29T00:10:10.000Z FATAL [auth-service] JVM crash detected OOMKilled signal=9 pod=auth-service-7f98c6 node=ip-10-0-1-42
+2026-11-29T00:14:35.000Z INFO [auth-service] Pod restarted attempt=1 status=CrashLoopBackoff restarts=25
+2026-11-29T00:10:06.000Z FATAL [auth-service] OutOfMemoryError: Java heap space heap_used=7.9GB heap_max=8GB
+2026-11-29T00:07:12.000Z WARN [auth-service] JWT validation cache miss rate=34% redis_conn_timeout=true
+2026-11-29T00:14:20.000Z INFO [auth-service] Pod restarted attempt=1 status=CrashLoopBackoff restarts=20
+2026-11-29T00:10:00.000Z FATAL [auth-service] JVM crash detected OOMKilled signal=9 pod=auth-service-7f98c6 node=ip-10-0-1-42
+2026-11-29T00:10:38.000Z FATAL [auth-service] OutOfMemoryError: Java heap space heap_used=7.9GB heap_max=8GB
+2026-11-29T00:10:22.000Z FATAL [auth-service] OutOfMemoryError: Java heap space heap_used=7.9GB heap_max=8GB
+2026-11-29T00:10:30.000Z FATAL [auth-service] OutOfMemoryError: Java heap space heap_used=7.9GB heap_max=8GB
+2026-11-29T00:13:59.000Z INFO [auth-service] Pod restarted attempt=4 status=CrashLoopBackoff restarts=13
+2026-11-29T00:13:50.000Z INFO [auth-service] Pod restarted attempt=1 status=CrashLoopBackoff restarts=10
+2026-11-29T00:05:32.000Z WARN [auth-service] JWT validation cache miss rate=34% redis_conn_timeout=true
+2026-11-29T00:10:24.000Z FATAL [auth-service] JVM crash detected OOMKilled signal=9 pod=auth-service-7f98c6 node=ip-10-0-1-42
+2026-11-29T00:05:42.000Z WARN [auth-service] JWT validation cache miss rate=34% redis_conn_timeout=true
+2026-11-29T00:10:44.000Z FATAL [auth-service] JVM crash detected OOMKilled signal=9 pod=auth-service-7f98c6 node=ip-10-0-1-42
+2026-11-29T00:01:20.000Z INFO [auth-service] Request processed successfully req_id=59615 latency=45ms
+2026-11-29T00:14:44.000Z INFO [auth-service] Service healthy replicas=3/3 memory_usage=4.1GB uptime=120s
+2026-11-29T00:14:29.000Z INFO [auth-service] Pod restarted attempt=4 status=CrashLoopBackoff restarts=23
+2026-11-29T00:08:43.000Z ERROR [auth-service] Redis connection pool exhausted pool_size=100 waiting=847
+2026-11-29T00:10:32.000Z FATAL [auth-service] OutOfMemoryError: Java heap space heap_used=7.9GB heap_max=8GB
+2026-11-29T00:03:50.000Z INFO [auth-service] Request processed successfully req_id=48469 latency=45ms
+2026-11-29T00:00:10.000Z INFO [auth-service] Request processed successfully req_id=98696 latency=45ms
+2026-11-29T00:07:31.000Z ERROR [auth-service] Redis connection pool exhausted pool_size=100 waiting=847
+2026-11-29T00:07:43.000Z ERROR [auth-service] Redis connection pool exhausted pool_size=100 waiting=847
+2026-11-29T00:10:22.000Z FATAL [auth-service] JVM crash detected OOMKilled signal=9 pod=auth-service-7f98c6 node=ip-10-0-1-42
+2026-11-29T00:05:52.000Z WARN [auth-service] JWT validation cache miss rate=34% redis_conn_timeout=true
+2026-11-29T00:14:11.000Z INFO [auth-service] Pod restarted attempt=3 status=CrashLoopBackoff restarts=17
+2026-11-29T00:07:58.000Z ERROR [auth-service] Redis connection pool exhausted pool_size=100 waiting=847
+2026-11-29T00:05:47.000Z WARN [auth-service] JWT validation cache miss rate=34% redis_conn_timeout=true
+2026-11-29T00:14:32.000Z INFO [auth-service] Pod restarted attempt=5 status=CrashLoopBackoff restarts=24
+2026-11-29T00:09:01.000Z ERROR [auth-service] Redis connection pool exhausted pool_size=100 waiting=847
+2026-11-29T00:13:32.000Z INFO [auth-service] Pod restarted attempt=5 status=CrashLoopBackoff restarts=4
+2026-11-29T00:10:32.000Z FATAL [auth-service] JVM crash detected OOMKilled signal=9 pod=auth-service-7f98c6 node=ip-10-0-1-42
+2026-11-29T00:06:42.000Z WARN [auth-service] JWT validation cache miss rate=34% redis_conn_timeout=true
+2026-11-29T00:02:35.000Z INFO [auth-service] Request processed successfully req_id=37653 latency=45ms
+2026-11-29T00:06:47.000Z WARN [auth-service] JWT validation cache miss rate=34% redis_conn_timeout=true
+2026-11-29T00:14:47.000Z INFO [auth-service] Service healthy replicas=3/3 memory_usage=4.1GB uptime=120s
+2026-11-29T00:13:20.000Z INFO [auth-service] Pod restarted attempt=1 status=CrashLoopBackoff restarts=0
+2026-11-29T00:08:37.000Z ERROR [auth-service] Redis connection pool exhausted pool_size=100 waiting=847
+2026-11-29T00:13:56.000Z INFO [auth-service] Pod restarted attempt=3 status=CrashLoopBackoff restarts=12
+2026-11-29T00:08:04.000Z ERROR [auth-service] Redis connection pool exhausted pool_size=100 waiting=847
+2026-11-29T00:08:25.000Z ERROR [auth-service] Redis connection pool exhausted pool_size=100 waiting=847
+2026-11-29T00:05:27.000Z WARN [auth-service] JWT validation cache miss rate=34% redis_conn_timeout=true
+2026-11-29T00:10:04.000Z FATAL [auth-service] OutOfMemoryError: Java heap space heap_used=7.9GB heap_max=8GB
+2026-11-29T00:08:46.000Z ERROR [auth-service] Redis connection pool exhausted pool_size=100 waiting=847
+2026-11-29T00:09:04.000Z ERROR [auth-service] Redis connection pool exhausted pool_size=100 waiting=847
+2026-11-29T00:13:29.000Z INFO [auth-service] Pod restarted attempt=4 status=CrashLoopBackoff restarts=3
+2026-11-29T00:05:37.000Z WARN [auth-service] JWT validation cache miss rate=34% redis_conn_timeout=true
+2026-11-29T00:13:41.000Z INFO [auth-service] Pod restarted attempt=3 status=CrashLoopBackoff restarts=7
+2026-11-29T00:10:16.000Z FATAL [auth-service] OutOfMemoryError: Java heap space heap_used=7.9GB heap_max=8GB
+2026-11-29T00:07:34.000Z ERROR [auth-service] Redis connection pool exhausted pool_size=100 waiting=847
+2026-11-29T00:10:26.000Z FATAL [auth-service] JVM crash detected OOMKilled signal=9 pod=auth-service-7f98c6 node=ip-10-0-1-42
+2026-11-29T00:08:31.000Z ERROR [auth-service] Redis connection pool exhausted pool_size=100 waiting=847
+2026-11-29T00:03:20.000Z INFO [auth-service] Request processed successfully req_id=30033 latency=45ms
+2026-11-29T00:14:44.000Z INFO [auth-service] Pod restarted attempt=4 status=CrashLoopBackoff restarts=28
+2026-11-29T00:07:02.000Z WARN [auth-service] JWT validation cache miss rate=34% redis_conn_timeout=true
+2026-11-29T00:10:18.000Z FATAL [auth-service] OutOfMemoryError: Java heap space heap_used=7.9GB heap_max=8GB
+2026-11-29T00:08:58.000Z ERROR [auth-service] Redis connection pool exhausted pool_size=100 waiting=847
+2026-11-29T00:08:10.000Z ERROR [auth-service] Redis connection pool exhausted pool_size=100 waiting=847
+2026-11-29T00:10:20.000Z FATAL [auth-service] OutOfMemoryError: Java heap space heap_used=7.9GB heap_max=8GB
+2026-11-29T00:08:49.000Z ERROR [auth-service] Redis connection pool exhausted pool_size=100 waiting=847
+2026-11-29T00:09:22.000Z ERROR [auth-service] Redis connection pool exhausted pool_size=100 waiting=847
+2026-11-29T00:09:16.000Z ERROR [auth-service] Redis connection pool exhausted pool_size=100 waiting=847
+2026-11-29T00:10:08.000Z FATAL [auth-service] JVM crash detected OOMKilled signal=9 pod=auth-service-7f98c6 node=ip-10-0-1-42
+2026-11-29T00:10:30.000Z FATAL [auth-service] JVM crash detected OOMKilled signal=9 pod=auth-service-7f98c6 node=ip-10-0-1-42
+2026-11-29T00:10:24.000Z FATAL [auth-service] OutOfMemoryError: Java heap space heap_used=7.9GB heap_max=8GB
+2026-11-29T00:08:52.000Z ERROR [auth-service] Redis connection pool exhausted pool_size=100 waiting=847
+2026-11-29T00:14:35.000Z INFO [auth-service] Service healthy replicas=3/3 memory_usage=4.1GB uptime=120s
+2026-11-29T00:08:40.000Z ERROR [auth-service] Redis connection pool exhausted pool_size=100 waiting=847
+2026-11-29T00:08:07.000Z ERROR [auth-service] Redis connection pool exhausted pool_size=100 waiting=847
+2026-11-29T00:06:17.000Z WARN [auth-service] JWT validation cache miss rate=34% redis_conn_timeout=true
+2026-11-29T00:10:00.000Z FATAL [auth-service] OutOfMemoryError: Java heap space heap_used=7.9GB heap_max=8GB
+2026-11-29T00:08:22.000Z ERROR [auth-service] Redis connection pool exhausted pool_size=100 waiting=847
+2026-11-29T00:14:23.000Z INFO [auth-service] Pod restarted attempt=2 status=CrashLoopBackoff restarts=21
+2026-11-29T00:10:36.000Z FATAL [auth-service] OutOfMemoryError: Java heap space heap_used=7.9GB heap_max=8GB
+2026-11-29T00:14:26.000Z INFO [auth-service] Pod restarted attempt=3 status=CrashLoopBackoff restarts=22
+2026-11-29T00:10:16.000Z FATAL [auth-service] JVM crash detected OOMKilled signal=9 pod=auth-service-7f98c6 node=ip-10-0-1-42
+2026-11-29T00:07:46.000Z ERROR [auth-service] Redis connection pool exhausted pool_size=100 waiting=847
+2026-11-29T00:00:00.000Z INFO [auth-service] Request processed successfully req_id=13278 latency=45ms
+2026-11-29T00:05:57.000Z WARN [auth-service] JWT validation cache miss rate=34% redis_conn_timeout=true
+2026-11-29T00:08:16.000Z ERROR [auth-service] Redis connection pool exhausted pool_size=100 waiting=847
+2026-11-29T00:08:19.000Z ERROR [auth-service] Redis connection pool exhausted pool_size=100 waiting=847
+2026-11-29T00:10:02.000Z FATAL [auth-service] JVM crash detected OOMKilled signal=9 pod=auth-service-7f98c6 node=ip-10-0-1-42
+2026-11-29T00:10:46.000Z FATAL [auth-service] JVM crash detected OOMKilled signal=9 pod=auth-service-7f98c6 node=ip-10-0-1-42
+2026-11-29T00:13:35.000Z INFO [auth-service] Pod restarted attempt=1 status=CrashLoopBackoff restarts=5
+2026-11-29T00:07:17.000Z WARN [auth-service] JWT validation cache miss rate=34% redis_conn_timeout=true
+2026-11-29T00:10:04.000Z FATAL [auth-service] JVM crash detected OOMKilled signal=9 pod=auth-service-7f98c6 node=ip-10-0-1-42
+2026-11-29T00:09:10.000Z ERROR [auth-service] Redis connection pool exhausted pool_size=100 waiting=847
+2026-11-29T00:10:34.000Z FATAL [auth-service] JVM crash detected OOMKilled signal=9 pod=auth-service-7f98c6 node=ip-10-0-1-42
+2026-11-29T00:08:34.000Z ERROR [auth-service] Redis connection pool exhausted pool_size=100 waiting=847
+2026-11-29T00:07:40.000Z ERROR [auth-service] Redis connection pool exhausted pool_size=100 waiting=847
+2026-11-29T00:06:37.000Z WARN [auth-service] JWT validation cache miss rate=34% redis_conn_timeout=true
+2026-11-29T00:10:14.000Z FATAL [auth-service] JVM crash detected OOMKilled signal=9 pod=auth-service-7f98c6 node=ip-10-0-1-42
+2026-11-29T00:06:07.000Z WARN [auth-service] JWT validation cache miss rate=34% redis_conn_timeout=true
+2026-11-29T00:10:18.000Z FATAL [auth-service] JVM crash detected OOMKilled signal=9 pod=auth-service-7f98c6 node=ip-10-0-1-42
+2026-11-29T00:09:19.000Z ERROR [auth-service] Redis connection pool exhausted pool_size=100 waiting=847
+2026-11-29T00:10:02.000Z FATAL [auth-service] OutOfMemoryError: Java heap space heap_used=7.9GB heap_max=8GB
+2026-11-29T00:05:02.000Z WARN [auth-service] JWT validation cache miss rate=34% redis_conn_timeout=true
+2026-11-29T00:07:27.000Z WARN [auth-service] JWT validation cache miss rate=34% redis_conn_timeout=true
+2026-11-29T00:10:26.000Z FATAL [auth-service] OutOfMemoryError: Java heap space heap_used=7.9GB heap_max=8GB
+2026-11-29T00:14:02.000Z INFO [auth-service] Pod restarted attempt=5 status=CrashLoopBackoff restarts=14
+2026-11-29T00:06:12.000Z WARN [auth-service] JWT validation cache miss rate=34% redis_conn_timeout=true
+2026-11-29T00:08:28.000Z ERROR [auth-service] Redis connection pool exhausted pool_size=100 waiting=847
+2026-11-29T00:10:42.000Z FATAL [auth-service] JVM crash detected OOMKilled signal=9 pod=auth-service-7f98c6 node=ip-10-0-1-42
+2026-11-29T00:13:26.000Z INFO [auth-service] Pod restarted attempt=3 status=CrashLoopBackoff restarts=2
+2026-11-29T00:10:48.000Z FATAL [auth-service] JVM crash detected OOMKilled signal=9 pod=auth-service-7f98c6 node=ip-10-0-1-42
+2026-11-29T00:10:46.000Z FATAL [auth-service] OutOfMemoryError: Java heap space heap_used=7.9GB heap_max=8GB
+2026-11-29T00:02:05.000Z INFO [auth-service] Request processed successfully req_id=89840 latency=45ms
+2026-11-29T00:00:15.000Z INFO [auth-service] Request processed successfully req_id=87397 latency=45ms
+2026-11-29T00:14:26.000Z INFO [auth-service] Service healthy replicas=3/3 memory_usage=4.1GB uptime=120s
+2026-11-29T00:06:57.000Z WARN [auth-service] JWT validation cache miss rate=34% redis_conn_timeout=true
+2026-11-29T00:10:40.000Z FATAL [auth-service] OutOfMemoryError: Java heap space heap_used=7.9GB heap_max=8GB
+2026-11-29T00:09:25.000Z ERROR [auth-service] Redis connection pool exhausted pool_size=100 waiting=847
+2026-11-29T00:07:07.000Z WARN [auth-service] JWT validation cache miss rate=34% redis_conn_timeout=true
+2026-11-29T00:09:13.000Z ERROR [auth-service] Redis connection pool exhausted pool_size=100 waiting=847
+2026-11-29T00:06:52.000Z WARN [auth-service] JWT validation cache miss rate=34% redis_conn_timeout=true
+2026-11-29T00:10:34.000Z FATAL [auth-service] OutOfMemoryError: Java heap space heap_used=7.9GB heap_max=8GB
+2026-11-29T00:10:48.000Z FATAL [auth-service] OutOfMemoryError: Java heap space heap_used=7.9GB heap_max=8GB
+2026-11-29T00:14:17.000Z INFO [auth-service] Pod restarted attempt=5 status=CrashLoopBackoff restarts=19
+2026-11-29T00:14:41.000Z INFO [auth-service] Pod restarted attempt=3 status=CrashLoopBackoff restarts=27
+2026-11-29T00:09:28.000Z ERROR [auth-service] Redis connection pool exhausted pool_size=100 waiting=847
+2026-11-29T00:10:12.000Z FATAL [auth-service] OutOfMemoryError: Java heap space heap_used=7.9GB heap_max=8GB
+2026-11-29T00:08:55.000Z ERROR [auth-service] Redis connection pool exhausted pool_size=100 waiting=847
+2026-11-29T00:05:22.000Z WARN [auth-service] JWT validation cache miss rate=34% redis_conn_timeout=true

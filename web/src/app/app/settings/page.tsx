@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Shield, Cpu, HardDrive, Save, Check, RefreshCw, Webhook, Plus, Trash2, TestTube2, Bell, CheckCircle2, XCircle, AlertTriangle, ChevronDown, Cloud } from 'lucide-react';
 import { apiFetch, apiPut, apiPost, apiDelete } from '@/lib/api';
+import { useToast } from '@/context/ToastContext';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -74,25 +75,26 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: () => void 
   return (
     <label className="relative inline-flex items-center cursor-pointer">
       <input type="checkbox" checked={checked} onChange={onChange} className="sr-only peer" />
-      <div className="w-11 h-6 bg-zinc-700 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-fuchsia-500"></div>
+      <div className="w-11 h-6 bg-[var(--bg-track)] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[var(--primary)]"></div>
     </label>
   );
 }
 
 const PRIORITY_STYLES: Record<string, string> = {
-  P0: 'bg-red-500/20 text-red-300 border border-red-500/30',
-  P1: 'bg-orange-500/20 text-orange-300 border border-orange-500/30',
-  P2: 'bg-yellow-500/20 text-yellow-300 border border-yellow-500/30',
-  P3: 'bg-zinc-800 text-zinc-400 border border-zinc-700',
+  P0: 'bg-red-500/20 text-red-400 border border-red-500/30',
+  P1: 'bg-orange-500/20 text-orange-400 border border-orange-500/30',
+  P2: 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30',
+  P3: 'bg-[var(--bg-inset)] text-[var(--text-muted)] border border-[var(--border-subtle)]',
 };
 
 const CHANNEL_ICONS: Record<string, string> = {
-  slack: '\uD83D\uDD14', pagerduty: '\uD83D\uDCDF', teams: '\uD83D\uDCBC', generic: '\uD83C\uDF10'
+  slack: '🔔', pagerduty: '📟', teams: '💼', generic: '🌐'
 };
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
+  const { toast } = useToast();
   const [settings, setSettings] = useState<SettingsState>({
     store_raw_logs: true,
     redact_pii: true,
@@ -153,8 +155,11 @@ export default function SettingsPage() {
     try {
       await apiPut('/settings', settings);
       setSaved(true);
+      toast.success('Settings saved successfully');
       setTimeout(() => setSaved(false), 2000);
-    } catch (e: unknown) { alert(`Failed to save: ${errorMessage(e)}`); }
+    } catch (e: unknown) { 
+      toast.error(`Failed to save settings: ${errorMessage(e)}`); 
+    }
   };
 
   const updateSetting = <K extends SettingKey>(key: K, value: SettingsState[K]) => {
@@ -170,6 +175,7 @@ export default function SettingsPage() {
       await fetchWebhooks();
       setShowAddForm(false);
       setNewWebhook({ name: '', channel_type: 'slack', url: '', min_priority: 'P1', enabled: true, extra: {} });
+      toast.success('Alert destination registered successfully');
     } catch (e: unknown) {
       setAddError(errorMessage(e) || 'Failed to register webhook');
     } finally { setAddLoading(false); }
@@ -180,14 +186,20 @@ export default function SettingsPage() {
     try {
       await apiDelete(`/webhooks/${id}`);
       setWebhooks(prev => prev.filter(w => w.id !== id));
-    } catch (e: unknown) { alert(`Delete failed: ${errorMessage(e)}`); }
+      toast.success('Alert destination deleted');
+    } catch (e: unknown) { 
+      toast.error(`Delete failed: ${errorMessage(e)}`); 
+    }
   };
 
   const handleToggleWebhook = async (wh: WebhookDest) => {
     try {
       await apiPut(`/webhooks/${wh.id}`, { enabled: !wh.enabled });
       setWebhooks(prev => prev.map(w => w.id === wh.id ? { ...w, enabled: !w.enabled } : w));
-    } catch {}
+      toast.success(`Webhook ${wh.enabled ? 'disabled' : 'enabled'}`);
+    } catch {
+      toast.error('Failed to toggle webhook');
+    }
   };
 
   const handleTestFire = async (id: string) => {
@@ -196,18 +208,31 @@ export default function SettingsPage() {
       const result = await apiPost(`/webhooks/${id}/test`, {}) as TestWebhookResult;
       await fetchDeliveryLog();
       if (result.status === 'delivered') {
-        alert(`Test alert delivered! HTTP ${result.http_status} in ${result.latency_ms?.toFixed(0)}ms`);
+        toast.success(`Test alert delivered! HTTP ${result.http_status} in ${result.latency_ms?.toFixed(0)}ms`);
       } else {
-        alert(`Test delivery failed: ${result.error || 'Unknown error'}`);
+        toast.error(`Test delivery failed: ${result.error || 'Unknown error'}`);
       }
-    } catch (e: unknown) { alert(`Test failed: ${errorMessage(e)}`); }
-    finally { setTestingId(null); }
+    } catch (e: unknown) { 
+      toast.error(`Test failed: ${errorMessage(e)}`); 
+    } finally { 
+      setTestingId(null); 
+    }
   };
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64 text-zinc-500">
-        <RefreshCw size={20} className="animate-spin mr-2" /> Loading settings...
+      <div className="max-w-[1600px] mx-auto pb-10">
+        <div className="flex items-center justify-between mb-8">
+          <div className="space-y-2">
+            <div className="shimmer-bg h-6 w-32 rounded" />
+            <div className="shimmer-bg h-4 w-96 rounded" />
+          </div>
+          <div className="shimmer-bg h-10 w-32 rounded" />
+        </div>
+        <div className="space-y-6 max-w-4xl">
+          <div className="shimmer-bg h-64 w-full rounded-xl" />
+          <div className="shimmer-bg h-64 w-full rounded-xl" />
+        </div>
       </div>
     );
   }
@@ -216,12 +241,12 @@ export default function SettingsPage() {
     <div className="max-w-[1600px] mx-auto pb-10">
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-xl font-bold text-white mb-1">Settings</h1>
-          <p className="text-xs text-zinc-500">Configure local engine preferences, privacy, models, and alert routing.</p>
+          <h1 className="text-xl font-bold text-[var(--text-primary)] mb-1">Settings</h1>
+          <p className="text-xs text-[var(--text-muted)]">Configure local engine preferences, privacy, models, and alert routing.</p>
         </div>
         <button
           onClick={handleSave}
-          className={`font-bold rounded-lg px-5 py-2.5 text-xs flex items-center gap-2 transition-all cursor-pointer ${saved ? 'bg-emerald-600 text-white' : 'bg-fuchsia-600 hover:bg-fuchsia-500 text-white'}`}
+          className={`font-bold rounded-lg px-5 py-2.5 text-xs flex items-center gap-2 transition-all cursor-pointer border-none ${saved ? 'bg-emerald-600 text-white' : 'bg-fuchsia-600 hover:bg-fuchsia-500 text-white'}`}
         >
           {saved ? <><Check size={14} /> Saved!</> : <><Save size={14} /> Save Changes</>}
         </button>
@@ -230,11 +255,11 @@ export default function SettingsPage() {
       <div className="space-y-6 max-w-4xl">
 
         {/* Privacy & Data */}
-        <div className="bg-[#121214] border-none rounded-xl p-6 shadow-sm">
-          <div className="flex items-center justify-between mb-6 pb-6 border-b border-white/5">
+        <div className="bg-[var(--bg-card)] border-none rounded-xl p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-6 pb-6 border-b border-[var(--border-subtle)]">
             <div>
-              <h2 className="text-sm font-bold text-white mb-1">Privacy &amp; Data</h2>
-              <p className="text-xs text-zinc-500">All processing happens locally. No data leaves your machine unless explicitly configured.</p>
+              <h2 className="text-sm font-bold text-[var(--text-primary)] mb-1">Privacy &amp; Data</h2>
+              <p className="text-xs text-[var(--text-muted)]">All processing happens locally. No data leaves your machine unless explicitly configured.</p>
             </div>
             <Shield size={24} className="text-emerald-500" />
           </div>
@@ -246,8 +271,8 @@ export default function SettingsPage() {
             ] satisfies { key: BooleanSettingKey; label: string; desc: string }[]).map(({ key, label, desc }) => (
               <div key={key} className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-bold text-white mb-1">{label}</p>
-                  <p className="text-[10px] text-zinc-500">{desc}</p>
+                  <p className="text-sm font-bold text-[var(--text-primary)] mb-1">{label}</p>
+                  <p className="text-[10px] text-[var(--text-muted)]">{desc}</p>
                 </div>
                 <Toggle checked={settings[key]} onChange={() => updateSetting(key, !settings[key])} />
               </div>
@@ -256,19 +281,19 @@ export default function SettingsPage() {
         </div>
 
         {/* LLM */}
-        <div className="bg-[#121214] border-none rounded-xl p-6 shadow-sm">
-          <div className="flex items-center justify-between mb-6 pb-6 border-b border-white/5">
+        <div className="bg-[var(--bg-card)] border-none rounded-xl p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-6 pb-6 border-b border-[var(--border-subtle)]">
             <div>
-              <h2 className="text-sm font-bold text-white mb-1">Local Intelligence (LLM)</h2>
-              <p className="text-xs text-zinc-500">Configure the model used for root-cause diagnosis.</p>
+              <h2 className="text-sm font-bold text-[var(--text-primary)] mb-1">Local Intelligence (LLM)</h2>
+              <p className="text-xs text-[var(--text-muted)]">Configure the model used for root-cause diagnosis.</p>
             </div>
             <Cpu size={24} className="text-fuchsia-500" />
           </div>
           <div className="space-y-6">
             <div>
-              <p className="text-xs font-bold text-zinc-300 mb-2">Active Model</p>
+              <p className="text-xs font-bold text-[var(--text-secondary)] mb-2">Active Model</p>
               <select value={settings.llm_model} onChange={e => updateSetting('llm_model', e.target.value)}
-                className="w-full bg-[#1a1a1c] border border-white/10 text-white text-sm rounded-md px-4 py-2.5 outline-none appearance-none cursor-pointer">
+                className="w-full bg-[var(--bg-input)] border border-[var(--border)] text-[var(--text-primary)] text-sm rounded-md px-4 py-2.5 outline-none appearance-none cursor-pointer">
                 <option value="llama-3.3-70b">Llama 3.3-70B (Local / Default)</option>
                 <option value="llama-3.1-8b">Llama 3.1-8B (Fast / Lightweight)</option>
                 <option value="gpt-4o">GPT-4o (Cloud / OpenAI)</option>
@@ -277,96 +302,96 @@ export default function SettingsPage() {
               </select>
             </div>
             <div>
-              <p className="text-xs font-bold text-zinc-300 mb-4">Diagnosis Confidence Threshold</p>
+              <p className="text-xs font-bold text-[var(--text-secondary)] mb-4">Diagnosis Confidence Threshold</p>
               <div className="flex items-center gap-4">
                 <input type="range" min="0" max="100" value={settings.confidence_threshold}
                   onChange={e => updateSetting('confidence_threshold', parseInt(e.target.value))}
-                  className="w-full h-1.5 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-fuchsia-500" />
-                <span className="text-xs text-zinc-400 font-mono w-10 text-right">{settings.confidence_threshold}%</span>
+                  className="w-full h-1.5 bg-[var(--bg-track)] rounded-lg appearance-none cursor-pointer accent-fuchsia-500" />
+                <span className="text-xs text-[var(--text-secondary)] font-mono w-10 text-right">{settings.confidence_threshold}%</span>
               </div>
             </div>
           </div>
         </div>
 
         {/* Retention */}
-        <div className="bg-[#121214] border-none rounded-xl p-6 shadow-sm">
-          <div className="flex items-center justify-between mb-6 pb-6 border-b border-white/5">
+        <div className="bg-[var(--bg-card)] border-none rounded-xl p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-6 pb-6 border-b border-[var(--border-subtle)]">
             <div>
-              <h2 className="text-sm font-bold text-white mb-1">Retention &amp; Engine Performance</h2>
-              <p className="text-xs text-zinc-500">Manage disk usage and memory consumption.</p>
+              <h2 className="text-sm font-bold text-[var(--text-primary)] mb-1">Retention &amp; Engine Performance</h2>
+              <p className="text-xs text-[var(--text-muted)]">Manage disk usage and memory consumption.</p>
             </div>
             <HardDrive size={24} className="text-blue-500" />
           </div>
-          <div className="grid grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
-              <p className="text-xs font-bold text-zinc-300 mb-2">Snapshot Retention (Days)</p>
+              <p className="text-xs font-bold text-[var(--text-secondary)] mb-2">Snapshot Retention (Days)</p>
               <input type="number" value={settings.retention_days}
                 onChange={e => updateSetting('retention_days', parseInt(e.target.value) || 30)}
-                className="w-full bg-[#1a1a1c] border border-white/10 text-white text-sm rounded-md px-4 py-2.5 outline-none" />
+                className="w-full bg-[var(--bg-input)] border border-[var(--border)] text-[var(--text-primary)] text-sm rounded-md px-4 py-2.5 outline-none" />
             </div>
             <div>
-              <p className="text-xs font-bold text-zinc-300 mb-2">Neural Sampling Threshold</p>
+              <p className="text-xs font-bold text-[var(--text-secondary)] mb-2">Neural Sampling Threshold</p>
               <input type="number" value={settings.sampling_threshold}
                 onChange={e => updateSetting('sampling_threshold', parseInt(e.target.value) || 50000)}
-                className="w-full bg-[#1a1a1c] border border-white/10 text-white text-sm rounded-md px-4 py-2.5 outline-none" />
+                className="w-full bg-[var(--bg-input)] border border-[var(--border)] text-[var(--text-primary)] text-sm rounded-md px-4 py-2.5 outline-none" />
             </div>
           </div>
         </div>
 
         {/* Object Storage */}
-        <div className="bg-[#121214] border-none rounded-xl p-6 shadow-sm">
-          <div className="flex items-center justify-between mb-6 pb-6 border-b border-white/5">
+        <div className="bg-[var(--bg-card)] border-none rounded-xl p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-6 pb-6 border-b border-[var(--border-subtle)]">
             <div>
-              <h2 className="text-sm font-bold text-white mb-1">Object Storage Archive</h2>
-              <p className="text-xs text-zinc-500">Compress and archive logs past the retention window to S3-compatible storage.</p>
+              <h2 className="text-sm font-bold text-[var(--text-primary)] mb-1">Object Storage Archive</h2>
+              <p className="text-xs text-[var(--text-muted)]">Compress and archive logs past the retention window to S3-compatible storage.</p>
             </div>
             <Cloud size={24} className="text-cyan-400" />
           </div>
           <div className="space-y-5">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-bold text-white mb-1">Enable S3/MinIO Archival</p>
-                <p className="text-[10px] text-zinc-500">The retention scheduler uploads compressed old logs before deleting local copies.</p>
+                <p className="text-sm font-bold text-[var(--text-primary)] mb-1">Enable S3/MinIO Archival</p>
+                <p className="text-[10px] text-[var(--text-muted)]">The retention scheduler uploads compressed old logs before deleting local copies.</p>
               </div>
               <Toggle checked={settings.s3_enabled} onChange={() => updateSetting('s3_enabled', !settings.s3_enabled)} />
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <p className="text-xs font-bold text-zinc-300 mb-2">Endpoint</p>
+                <p className="text-xs font-bold text-[var(--text-secondary)] mb-2">Endpoint</p>
                 <input value={settings.s3_endpoint}
                   onChange={e => updateSetting('s3_endpoint', e.target.value)}
-                  className="w-full bg-[#1a1a1c] border border-white/10 text-white text-sm rounded-md px-4 py-2.5 outline-none font-mono" />
+                  className="w-full bg-[var(--bg-input)] border border-[var(--border)] text-[var(--text-primary)] text-sm rounded-md px-4 py-2.5 outline-none font-mono" />
               </div>
               <div>
-                <p className="text-xs font-bold text-zinc-300 mb-2">Bucket</p>
+                <p className="text-xs font-bold text-[var(--text-secondary)] mb-2">Bucket</p>
                 <input value={settings.s3_bucket}
                   onChange={e => updateSetting('s3_bucket', e.target.value)}
-                  className="w-full bg-[#1a1a1c] border border-white/10 text-white text-sm rounded-md px-4 py-2.5 outline-none font-mono" />
+                  className="w-full bg-[var(--bg-input)] border border-[var(--border)] text-[var(--text-primary)] text-sm rounded-md px-4 py-2.5 outline-none font-mono" />
               </div>
               <div>
-                <p className="text-xs font-bold text-zinc-300 mb-2">Access Key</p>
+                <p className="text-xs font-bold text-[var(--text-secondary)] mb-2">Access Key</p>
                 <input value={settings.s3_access_key}
                   onChange={e => updateSetting('s3_access_key', e.target.value)}
-                  className="w-full bg-[#1a1a1c] border border-white/10 text-white text-sm rounded-md px-4 py-2.5 outline-none font-mono" />
+                  className="w-full bg-[var(--bg-input)] border border-[var(--border)] text-[var(--text-primary)] text-sm rounded-md px-4 py-2.5 outline-none font-mono" />
               </div>
               <div>
-                <p className="text-xs font-bold text-zinc-300 mb-2">Secret Key</p>
+                <p className="text-xs font-bold text-[var(--text-secondary)] mb-2">Secret Key</p>
                 <input type="password" value={settings.s3_secret_key}
                   onChange={e => updateSetting('s3_secret_key', e.target.value)}
-                  className="w-full bg-[#1a1a1c] border border-white/10 text-white text-sm rounded-md px-4 py-2.5 outline-none font-mono" />
+                  className="w-full bg-[var(--bg-input)] border border-[var(--border)] text-[var(--text-primary)] text-sm rounded-md px-4 py-2.5 outline-none font-mono" />
               </div>
             </div>
           </div>
         </div>
 
         {/* Alert Routing */}
-        <div className="bg-[#121214] border border-white/5 rounded-xl shadow-sm overflow-hidden">
-          <div className="flex items-center justify-between p-6 border-b border-white/5">
+        <div className="bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-xl shadow-sm overflow-hidden">
+          <div className="flex items-center justify-between p-6 border-b border-[var(--border-subtle)]">
             <div>
-              <h2 className="text-sm font-bold text-white mb-1 flex items-center gap-2">
+              <h2 className="text-sm font-bold text-[var(--text-primary)] mb-1 flex items-center gap-2">
                 <Bell size={16} className="text-fuchsia-400" /> Alert Routing
               </h2>
-              <p className="text-xs text-zinc-500">
+              <p className="text-xs text-[var(--text-muted)]">
                 Configure destinations for automatic P0/P1 alerts. Supports Slack, PagerDuty, Teams, and generic webhooks.
               </p>
             </div>
@@ -377,35 +402,35 @@ export default function SettingsPage() {
           </div>
 
           {showAddForm && (
-            <div className="p-6 bg-[#18181b] border-b border-white/5 space-y-4">
-              <p className="text-xs font-bold text-zinc-300 uppercase tracking-wider">New Alert Destination</p>
-              <div className="grid grid-cols-2 gap-4">
+            <div className="p-6 bg-[var(--bg-inset)] border-b border-[var(--border-subtle)] space-y-4">
+              <p className="text-xs font-bold text-[var(--text-primary)] uppercase tracking-wider">New Alert Destination</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="text-[10px] font-bold text-zinc-500 uppercase block mb-1">Display Name</label>
+                  <label className="text-[10px] font-bold text-[var(--text-muted)] uppercase block mb-1">Display Name</label>
                   <input value={newWebhook.name} onChange={e => setNewWebhook(p => ({ ...p, name: e.target.value }))}
                     placeholder="#sre-alerts"
-                    className="w-full bg-[#121214] border border-white/10 text-white text-xs rounded-lg px-3 py-2 outline-none focus:border-fuchsia-500/50" />
+                    className="w-full bg-[var(--bg-card)] border border-[var(--border)] text-[var(--text-primary)] text-xs rounded-lg px-3 py-2 outline-none focus:border-fuchsia-500/50" />
                 </div>
                 <div>
-                  <label className="text-[10px] font-bold text-zinc-500 uppercase block mb-1">Channel Type</label>
+                  <label className="text-[10px] font-bold text-[var(--text-muted)] uppercase block mb-1">Channel Type</label>
                   <select value={newWebhook.channel_type} onChange={e => setNewWebhook(p => ({ ...p, channel_type: e.target.value as ChannelType }))}
-                    className="w-full bg-[#121214] border border-white/10 text-white text-xs rounded-lg px-3 py-2 outline-none appearance-none cursor-pointer focus:border-fuchsia-500/50">
+                    className="w-full bg-[var(--bg-card)] border border-[var(--border)] text-[var(--text-primary)] text-xs rounded-lg px-3 py-2 outline-none appearance-none cursor-pointer focus:border-fuchsia-500/50">
                     <option value="slack">Slack</option>
                     <option value="pagerduty">PagerDuty</option>
                     <option value="teams">Microsoft Teams</option>
                     <option value="generic">Generic Webhook</option>
                   </select>
                 </div>
-                <div className="col-span-2">
-                  <label className="text-[10px] font-bold text-zinc-500 uppercase block mb-1">Endpoint URL</label>
+                <div className="col-span-1 md:col-span-2">
+                  <label className="text-[10px] font-bold text-[var(--text-muted)] uppercase block mb-1">Endpoint URL</label>
                   <input value={newWebhook.url} onChange={e => setNewWebhook(p => ({ ...p, url: e.target.value }))}
                     placeholder="https://hooks.slack.com/services/..."
-                    className="w-full bg-[#121214] border border-white/10 text-white text-xs rounded-lg px-3 py-2 outline-none focus:border-fuchsia-500/50 font-mono" />
+                    className="w-full bg-[var(--bg-card)] border border-[var(--border)] text-[var(--text-primary)] text-xs rounded-lg px-3 py-2 outline-none focus:border-fuchsia-500/50 font-mono" />
                 </div>
                 <div>
-                  <label className="text-[10px] font-bold text-zinc-500 uppercase block mb-1">Minimum Priority</label>
+                  <label className="text-[10px] font-bold text-[var(--text-muted)] uppercase block mb-1">Minimum Priority</label>
                   <select value={newWebhook.min_priority} onChange={e => setNewWebhook(p => ({ ...p, min_priority: e.target.value }))}
-                    className="w-full bg-[#121214] border border-white/10 text-white text-xs rounded-lg px-3 py-2 outline-none appearance-none cursor-pointer focus:border-fuchsia-500/50">
+                    className="w-full bg-[var(--bg-card)] border border-[var(--border)] text-[var(--text-primary)] text-xs rounded-lg px-3 py-2 outline-none appearance-none cursor-pointer focus:border-fuchsia-500/50">
                     <option value="P0">P0 — Critical only</option>
                     <option value="P1">P1 — High and above</option>
                     <option value="P2">P2 — Medium and above</option>
@@ -414,10 +439,10 @@ export default function SettingsPage() {
                 </div>
                 {newWebhook.channel_type === 'pagerduty' && (
                   <div>
-                    <label className="text-[10px] font-bold text-zinc-500 uppercase block mb-1">PagerDuty Routing Key</label>
+                    <label className="text-[10px] font-bold text-[var(--text-muted)] uppercase block mb-1">PagerDuty Routing Key</label>
                     <input onChange={e => setNewWebhook(p => ({ ...p, extra: { ...p.extra, routing_key: e.target.value } }))}
                       placeholder="R01AB2C3D4E5F6..."
-                      className="w-full bg-[#121214] border border-white/10 text-white text-xs rounded-lg px-3 py-2 outline-none focus:border-fuchsia-500/50 font-mono" />
+                      className="w-full bg-[var(--bg-card)] border border-[var(--border)] text-[var(--text-primary)] text-xs rounded-lg px-3 py-2 outline-none focus:border-fuchsia-500/50 font-mono" />
                   </div>
                 )}
               </div>
@@ -428,7 +453,7 @@ export default function SettingsPage() {
               )}
               <div className="flex justify-end gap-3">
                 <button onClick={() => { setShowAddForm(false); setAddError(null); }}
-                  className="text-zinc-400 text-xs px-4 py-2 rounded-lg hover:bg-white/5 transition-colors cursor-pointer border-none">Cancel</button>
+                  className="text-[var(--text-muted)] hover:text-[var(--text-primary)] text-xs px-4 py-2 rounded-lg hover:bg-[var(--bg-surface-hover)] transition-colors cursor-pointer border-none bg-transparent">Cancel</button>
                 <button onClick={handleAddWebhook} disabled={addLoading}
                   className="bg-fuchsia-600 hover:bg-fuchsia-500 disabled:opacity-50 text-white text-xs font-bold px-4 py-2 rounded-lg flex items-center gap-2 transition-colors cursor-pointer border-none">
                   {addLoading ? <><RefreshCw size={12} className="animate-spin" /> Registering...</> : <><Webhook size={12} /> Register</>}
@@ -439,19 +464,19 @@ export default function SettingsPage() {
 
           {webhooks.length === 0 ? (
             <div className="p-12 text-center">
-              <Bell size={32} className="text-zinc-700 mx-auto mb-3" />
-              <p className="text-sm font-bold text-zinc-500">No alert destinations configured</p>
-              <p className="text-xs text-zinc-600 mt-1">Add a Slack, PagerDuty, or Teams webhook to receive P0/P1 alerts automatically.</p>
+              <Bell size={32} className="text-[var(--text-dimmed)] mx-auto mb-3" />
+              <p className="text-sm font-bold text-[var(--text-secondary)]">No alert destinations configured</p>
+              <p className="text-xs text-[var(--text-muted)] mt-1">Add a Slack, PagerDuty, or Teams webhook to receive P0/P1 alerts automatically.</p>
             </div>
           ) : (
-            <div className="divide-y divide-white/5">
+            <div className="divide-y divide-[var(--border-subtle)]">
               {webhooks.map(wh => (
-                <div key={wh.id} className="flex items-center justify-between px-6 py-4 hover:bg-white/5 transition-colors">
+                <div key={wh.id} className="flex items-center justify-between px-6 py-4 hover:bg-[var(--bg-surface-hover)] transition-colors">
                   <div className="flex items-center gap-3 min-w-0">
-                    <span className="text-lg">{CHANNEL_ICONS[wh.channel_type] || '\uD83C\uDF10'}</span>
+                    <span className="text-lg">{CHANNEL_ICONS[wh.channel_type] || '🌐'}</span>
                     <div className="min-w-0">
-                      <p className="text-sm font-bold text-white truncate">{wh.name}</p>
-                      <p className="text-[10px] text-zinc-500 font-mono truncate max-w-[240px]">{wh.url}</p>
+                      <p className="text-sm font-bold text-[var(--text-primary)] truncate">{wh.name}</p>
+                      <p className="text-[10px] text-[var(--text-muted)] font-mono truncate max-w-[240px]">{wh.url}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-4 shrink-0">
@@ -460,11 +485,11 @@ export default function SettingsPage() {
                     </span>
                     <Toggle checked={wh.enabled} onChange={() => handleToggleWebhook(wh)} />
                     <button onClick={() => handleTestFire(wh.id)} disabled={testingId === wh.id} title="Send test alert"
-                      className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-white/10 text-zinc-400 hover:text-fuchsia-400 transition-colors cursor-pointer border-none disabled:opacity-50">
+                      className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-[var(--bg-surface-hover)] text-[var(--text-muted)] hover:text-fuchsia-400 transition-colors cursor-pointer border-none bg-transparent disabled:opacity-50">
                       {testingId === wh.id ? <RefreshCw size={13} className="animate-spin" /> : <TestTube2 size={13} />}
                     </button>
                     <button onClick={() => handleDeleteWebhook(wh.id)} title="Delete"
-                      className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-red-500/10 text-zinc-600 hover:text-red-400 transition-colors cursor-pointer border-none">
+                      className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-red-500/10 text-[var(--text-muted)] hover:text-red-400 transition-colors cursor-pointer border-none bg-transparent">
                       <Trash2 size={13} />
                     </button>
                   </div>
@@ -473,26 +498,26 @@ export default function SettingsPage() {
             </div>
           )}
 
-          <div className="border-t border-white/5">
+          <div className="border-t border-[var(--border-subtle)]">
             <button onClick={() => { setShowLog(s => !s); if (!showLog) fetchDeliveryLog(); }}
-              className="w-full flex items-center justify-between px-6 py-3 text-xs font-bold text-zinc-500 hover:text-white hover:bg-white/5 transition-colors cursor-pointer border-none">
+              className="w-full flex items-center justify-between px-6 py-3 text-xs font-bold text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-hover)] transition-colors cursor-pointer border-none bg-transparent">
               <span className="flex items-center gap-2"><Bell size={12} /> Delivery Audit Log</span>
               <ChevronDown size={14} className={`transition-transform ${showLog ? 'rotate-180' : ''}`} />
             </button>
             {showLog && (
               <div className="px-6 pb-6 space-y-2 max-h-60 overflow-y-auto">
                 {deliveryLog.length === 0
-                  ? <p className="text-xs text-zinc-600 text-center py-4">No delivery records yet.</p>
+                  ? <p className="text-xs text-[var(--text-muted)] text-center py-4">No delivery records yet.</p>
                   : deliveryLog.map((r, i) => (
-                    <div key={i} className="flex items-center justify-between text-[10px] bg-black/30 rounded-lg px-3 py-2 font-mono">
+                    <div key={i} className="flex items-center justify-between text-[10px] bg-[var(--bg-inset)] rounded-lg px-3 py-2 font-mono">
                       <div className="flex items-center gap-2 min-w-0">
                         {r.status === 'delivered' ? <CheckCircle2 size={12} className="text-emerald-400 shrink-0" />
                           : r.status === 'failed' ? <XCircle size={12} className="text-red-400 shrink-0" />
                           : <AlertTriangle size={12} className="text-yellow-400 shrink-0" />}
                         <span className={`${PRIORITY_STYLES[r.priority] || ''} px-1 rounded text-[9px] font-bold`}>{r.priority}</span>
-                        <span className="text-zinc-400 truncate">{r.alert_fingerprint}</span>
+                        <span className="text-[var(--text-secondary)] truncate">{r.alert_fingerprint}</span>
                       </div>
-                      <div className="flex items-center gap-3 text-zinc-500 shrink-0">
+                      <div className="flex items-center gap-3 text-[var(--text-muted)] shrink-0">
                         {r.latency_ms > 0 && <span>{r.latency_ms.toFixed(0)}ms</span>}
                         {r.http_status && <span>HTTP {r.http_status}</span>}
                         <span>{r.timestamp?.slice(11, 19)}</span>
@@ -508,3 +533,4 @@ export default function SettingsPage() {
     </div>
   );
 }
+

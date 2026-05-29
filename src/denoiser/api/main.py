@@ -78,10 +78,26 @@ app.add_middleware(CorrelationIDMiddleware)
 from denoiser.api.alerts import router as alerts_router
 from denoiser.api.audit import AuditMiddleware
 from denoiser.api.audit import router as audit_router
+from denoiser.api.tracing import router as tracing_router
+from denoiser.api.query import router as query_router
+from denoiser.api.slo import router as slo_router
+from denoiser.api.dashboards import router as dashboards_router
+from denoiser.api.metrics import router as metrics_router
+from denoiser.api.automation import router as automation_router
+from denoiser.api.integrations import router as integrations_router
+from denoiser.api.deployments import router as deployments_router
 
 app.add_middleware(AuditMiddleware)
 app.include_router(audit_router)
 app.include_router(alerts_router)
+app.include_router(tracing_router)
+app.include_router(query_router)
+app.include_router(slo_router)
+app.include_router(dashboards_router)
+app.include_router(metrics_router)
+app.include_router(automation_router)
+app.include_router(integrations_router)
+app.include_router(deployments_router)
 
 # Register global exception handlers (Task 3)
 register_exception_handlers(app)
@@ -772,7 +788,7 @@ def get_task_status(task_id: str, current_user: User = Depends(require_role(["VI
 
 @app.get("/incidents")
 def get_incidents(db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
-    incidents = db.query(Incident).order_by(Incident.created_at.desc()).all()
+    incidents = db.query(Incident).filter(Incident.tenant_id == current_user.tenant_id).order_by(Incident.created_at.desc()).all()
     return [_incident_to_dict(inc) for inc in incidents]
 
 
@@ -847,8 +863,30 @@ def compare_runs(run_a: str, run_b: str, db: Session = Depends(get_db), current_
     snap_a_data = db_run_a.clusters_snapshot or []
     snap_b_data = db_run_b.clusters_snapshot or []
 
-    clusters_a = [ClusterSnapshot(**d) for d in snap_a_data]
-    clusters_b = [ClusterSnapshot(**d) for d in snap_b_data]
+    clusters_a = [
+        ClusterSnapshot(
+            cluster_id=d.get("cluster_id") or d.get("id") or 0,
+            template=d.get("template") or d.get("representative_template") or "",
+            size=d.get("size") or 0,
+            anomaly_score=d.get("anomaly_score") or 0.0,
+            priority=d.get("priority") or "P3",
+            composite_severity_score=d.get("composite_severity_score") or 0.0,
+            keyword_flag=d.get("keyword_flag") or False,
+            summary=d.get("summary") or ""
+        ) for d in snap_a_data
+    ]
+    clusters_b = [
+        ClusterSnapshot(
+            cluster_id=d.get("cluster_id") or d.get("id") or 0,
+            template=d.get("template") or d.get("representative_template") or "",
+            size=d.get("size") or 0,
+            anomaly_score=d.get("anomaly_score") or 0.0,
+            priority=d.get("priority") or "P3",
+            composite_severity_score=d.get("composite_severity_score") or 0.0,
+            keyword_flag=d.get("keyword_flag") or False,
+            summary=d.get("summary") or ""
+        ) for d in snap_b_data
+    ]
 
     detector = DriftDetector()
     report = detector.compare(run_a, clusters_a, run_b, clusters_b)

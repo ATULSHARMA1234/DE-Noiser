@@ -313,6 +313,7 @@ def run_analysis_task(self, request_dict: dict):
 
         if llm_payload:
             new_incident = Incident(
+                tenant_id=1,
                 title=llm_payload.get("failure_domain", "Unknown Failure"),
                 domain=llm_payload.get("failure_domain", "System"),
                 impact_score=min(1.0, len(clusters) / 10.0) if len(clusters) > 1 else 0.3,
@@ -387,6 +388,15 @@ def run_analysis_task(self, request_dict: dict):
                 logger.error(f"Failed to dispatch alerts: {e}")
 
         db.commit()
+        
+        # Post-commit triggers
+        if llm_payload:
+            try:
+                from denoiser.automation.engine import process_incident
+                process_incident(db, new_incident)
+            except Exception as auto_err:
+                logger.error(f"Failed to execute runbooks: {auto_err}")
+
     except Exception as e:
         logger.error(f"DB Error: {e}")
         db.rollback()

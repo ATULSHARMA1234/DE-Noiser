@@ -34,3 +34,139 @@
 {"message": "log line 2"}
 {"message": "log line 3"}
 {"message": "log line 4"}
+{"message": "test log line", "level": "INFO"}
+{"message": "log line 0"}
+{"message": "log line 1"}
+{"message": "log line 2"}
+{"message": "log line 3"}
+{"message": "log line 4"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U2058 amt=$233", "service": "acme-payment-gateway", "trace_id": "c4176f64-76ec-41a5-972d-1e6a5599b004"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U7427 amt=$117", "service": "acme-payment-gateway", "trace_id": "27d5d25a-fa0e-4b74-9f4c-3de69c768341"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U1660 amt=$107", "service": "acme-payment-gateway", "trace_id": "48b40f58-d1e4-4462-8d20-9d1ee5481eb9"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U8872 amt=$480", "service": "acme-payment-gateway", "trace_id": "f282c091-6cc4-43ce-94d8-eb64cf723c2d"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U3099 amt=$325", "service": "acme-payment-gateway", "trace_id": "446fcb9f-0cba-4f7d-b841-00f24581f616"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U9846 amt=$458", "service": "acme-payment-gateway", "trace_id": "9a84e29a-4a25-4006-b714-f2552a7192fa"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U8760 amt=$145", "service": "acme-payment-gateway", "trace_id": "d1d7555b-a980-45ca-a601-95905c29a4d7"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U2397 amt=$219", "service": "acme-payment-gateway", "trace_id": "46e4669e-8e10-443d-8aa7-cfa00049268d"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U3443 amt=$217", "service": "acme-payment-gateway", "trace_id": "9fcebadc-fc17-4ab9-ae5f-0562b9444d8c"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U9671 amt=$365", "service": "acme-payment-gateway", "trace_id": "e15830a7-662c-4e7a-95cb-0f1b317844a1"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U6294 amt=$434", "service": "acme-payment-gateway", "trace_id": "9b2787f5-daa6-4667-ae5a-de239459c4ee"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U8838 amt=$439", "service": "acme-payment-gateway", "trace_id": "72bb8639-4652-4afb-a3b2-eea900cf8817"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U6758 amt=$138", "service": "acme-payment-gateway", "trace_id": "7d0c020a-0851-4612-9b61-ab6da9d32c7e"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U2025 amt=$438", "service": "acme-payment-gateway", "trace_id": "8d6fece6-7ddc-4125-be0a-c4f51e71df38"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U9128 amt=$494", "service": "acme-payment-gateway", "trace_id": "82a297de-61a2-4a62-b25e-29346eeb8a6d"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U8307 amt=$260", "service": "acme-payment-gateway", "trace_id": "5fddd40c-fa66-4fb9-94a1-0765beaf495d"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U5768 amt=$461", "service": "acme-payment-gateway", "trace_id": "ce23435e-9658-4c70-b8d1-1fab02a9e718"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U7811 amt=$340", "service": "acme-payment-gateway", "trace_id": "bd82bd54-9920-4050-af12-29974c145473"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U2376 amt=$201", "service": "acme-payment-gateway", "trace_id": "78ce74d0-d18e-4b87-b420-6a2fda511ca7"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U8338 amt=$439", "service": "acme-payment-gateway", "trace_id": "2ef12f48-eebb-4a5d-8df8-959b7c924ce0"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U5376 amt=$472", "service": "acme-payment-gateway", "trace_id": "b0a48d40-bfc6-4f01-b6e4-61371fc821a2"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U1543 amt=$301", "service": "acme-payment-gateway", "trace_id": "86ae60ae-9df6-40d4-80ef-3a2176303438"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U7883 amt=$440", "service": "acme-payment-gateway", "trace_id": "893f5a45-f2d2-4b4d-a9dc-4a0eeab133f4"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U9427 amt=$294", "service": "acme-payment-gateway", "trace_id": "ce8d0083-02fd-412d-9c94-68595d4a9cd8"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U6962 amt=$248", "service": "acme-payment-gateway", "trace_id": "ded75b86-01b3-494e-97df-a9d75ffaa073"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U4513 amt=$95", "service": "acme-payment-gateway", "trace_id": "03a634fa-c77a-4410-828a-b21460812a7e"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U4387 amt=$247", "service": "acme-payment-gateway", "trace_id": "ab3d8c61-9829-4d2c-b2ad-be6c8bddf3fb"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U2415 amt=$219", "service": "acme-payment-gateway", "trace_id": "c5080405-f8bf-467e-ae20-55939a64caa4"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U6891 amt=$29", "service": "acme-payment-gateway", "trace_id": "5f838248-6d18-459c-b675-abca1b7c2ecd"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U7101 amt=$370", "service": "acme-payment-gateway", "trace_id": "69fad744-869d-4961-9c9c-5400d381bbe0"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U2759 amt=$312", "service": "acme-payment-gateway", "trace_id": "90e5cd1a-b679-4fbb-8515-120f870fe96b"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U3716 amt=$429", "service": "acme-payment-gateway", "trace_id": "2ff0329d-f479-4978-ad15-6cb3d77c8228"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U5198 amt=$313", "service": "acme-payment-gateway", "trace_id": "9200a4bb-79d0-48ad-bff5-86404af481bd"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U3133 amt=$280", "service": "acme-payment-gateway", "trace_id": "3002c54b-bc55-4fbc-aa23-987a0071e251"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U3435 amt=$201", "service": "acme-payment-gateway", "trace_id": "65a0c275-9dae-4be0-b735-3e73790f23cc"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U5766 amt=$391", "service": "acme-payment-gateway", "trace_id": "21ed5c79-30ed-4d93-b0d3-7c9306f50789"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U6908 amt=$399", "service": "acme-payment-gateway", "trace_id": "56bd565b-80a8-4fcc-b6b3-564c32ed47f1"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U5065 amt=$375", "service": "acme-payment-gateway", "trace_id": "93978bab-4419-480d-8700-789ac778ae6a"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U2270 amt=$346", "service": "acme-payment-gateway", "trace_id": "0c322a3e-2e97-4e71-887a-3820079c0fcd"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U2278 amt=$213", "service": "acme-payment-gateway", "trace_id": "fd085ba5-4f3b-435e-ab24-be71d4dbfd56"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U3817 amt=$376", "service": "acme-payment-gateway", "trace_id": "02a7a76f-d35a-47c3-8d5f-15f614cc6693"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U3039 amt=$57", "service": "acme-payment-gateway", "trace_id": "2e3db801-3803-485f-ba41-54804bf2f8f1"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U1344 amt=$114", "service": "acme-payment-gateway", "trace_id": "f8268666-ab4b-4dee-87fc-4842e4a32c30"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U1386 amt=$200", "service": "acme-payment-gateway", "trace_id": "94a93bf9-0c89-4ba6-9a1b-41b85139f8ba"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U1973 amt=$92", "service": "acme-payment-gateway", "trace_id": "fbc241be-6be7-4046-b275-e6462ad35224"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U9876 amt=$11", "service": "acme-payment-gateway", "trace_id": "c2a0c031-6684-4b6e-85c4-df7908469a38"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U1013 amt=$246", "service": "acme-payment-gateway", "trace_id": "648dde6e-41a3-4e26-be31-b02daa658115"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U3904 amt=$193", "service": "acme-payment-gateway", "trace_id": "2893ac9a-2469-47e2-8a97-fc7f028e7805"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U8670 amt=$379", "service": "acme-payment-gateway", "trace_id": "45f8153a-ed62-4e58-909d-e9b65e1a9029"}
+{"timestamp": 1780049890440, "level": "INFO", "message": "Payment request received. user_id=U1273 amt=$458", "service": "acme-payment-gateway", "trace_id": "cb25d267-2a5d-4f03-a304-caa861436d72"}
+{"timestamp": 1780049890440, "level": "ERROR", "message": "Database timeout while connecting to write replica in us-east-1.", "service": "acme-payment-gateway", "trace_id": "c090ac4b-53cc-4644-9cb5-0c3963c019ae"}
+{"timestamp": 1780049890440, "level": "ERROR", "message": "Database timeout while connecting to write replica in us-east-1.", "service": "acme-payment-gateway", "trace_id": "7cba1b96-1e30-4215-99f3-8f29411d9c68"}
+{"timestamp": 1780049890440, "level": "ERROR", "message": "Database timeout while connecting to write replica in us-east-1.", "service": "acme-payment-gateway", "trace_id": "c2e5ebf8-3f34-4033-b43e-31a2cd5381fd"}
+{"timestamp": 1780049890440, "level": "ERROR", "message": "Database timeout while connecting to write replica in us-east-1.", "service": "acme-payment-gateway", "trace_id": "ea2e9016-8d29-4655-919f-266a02e2a29c"}
+{"timestamp": 1780049890440, "level": "ERROR", "message": "Database timeout while connecting to write replica in us-east-1.", "service": "acme-payment-gateway", "trace_id": "6dc60708-62db-4344-8bf5-22b6e362f14a"}
+{"timestamp": 1780049890440, "level": "ERROR", "message": "Database timeout while connecting to write replica in us-east-1.", "service": "acme-payment-gateway", "trace_id": "cfbff16f-44b1-49f8-9605-e07ec51569c1"}
+{"timestamp": 1780049890440, "level": "ERROR", "message": "Database timeout while connecting to write replica in us-east-1.", "service": "acme-payment-gateway", "trace_id": "2a579993-6234-4715-ae74-8cc826b63b6b"}
+{"timestamp": 1780049890440, "level": "ERROR", "message": "Database timeout while connecting to write replica in us-east-1.", "service": "acme-payment-gateway", "trace_id": "458bd794-ede1-4a99-96af-d257d8ac9f48"}
+{"timestamp": 1780049890440, "level": "ERROR", "message": "Database timeout while connecting to write replica in us-east-1.", "service": "acme-payment-gateway", "trace_id": "555d0455-d2fd-46d1-b9b7-171a4e2945b6"}
+{"timestamp": 1780049890440, "level": "ERROR", "message": "Database timeout while connecting to write replica in us-east-1.", "service": "acme-payment-gateway", "trace_id": "7df40258-112d-4dd1-9531-8cfed5709c73"}
+{"timestamp": 1780049890440, "level": "ERROR", "message": "Database timeout while connecting to write replica in us-east-1.", "service": "acme-payment-gateway", "trace_id": "cce8795d-7e82-418d-b7ce-3d080460aef7"}
+{"timestamp": 1780049890440, "level": "ERROR", "message": "Database timeout while connecting to write replica in us-east-1.", "service": "acme-payment-gateway", "trace_id": "742e8a94-5a1c-4f55-a9d9-8bdb737615bd"}
+{"timestamp": 1780049890440, "level": "ERROR", "message": "Database timeout while connecting to write replica in us-east-1.", "service": "acme-payment-gateway", "trace_id": "36da5110-521f-437f-97cc-3b8801bd6b07"}
+{"timestamp": 1780049890440, "level": "ERROR", "message": "Database timeout while connecting to write replica in us-east-1.", "service": "acme-payment-gateway", "trace_id": "b7cad5e1-39eb-408c-a332-66450ca5e180"}
+{"timestamp": 1780049890440, "level": "ERROR", "message": "Database timeout while connecting to write replica in us-east-1.", "service": "acme-payment-gateway", "trace_id": "df24fb06-5cd7-4ee8-afaa-a2bf6d334ec7"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U8187 amt=$470", "service": "acme-payment-gateway", "trace_id": "ce8405bc-82b4-45db-9c8b-8eb12a15d39f"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U5129 amt=$205", "service": "acme-payment-gateway", "trace_id": "952630b5-c795-4db5-8430-aef1e3797fd1"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U2574 amt=$169", "service": "acme-payment-gateway", "trace_id": "66705d12-b514-47db-93ed-11b710073b5d"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U3811 amt=$108", "service": "acme-payment-gateway", "trace_id": "c685c3ec-2f56-4ce2-b54c-9ac5cc1afd87"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U7967 amt=$476", "service": "acme-payment-gateway", "trace_id": "9aea7574-3eaa-42a2-a3ae-5f1bce68cea5"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U4442 amt=$324", "service": "acme-payment-gateway", "trace_id": "ed60156b-3c7b-486c-bdfa-9e50977d73a1"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U8911 amt=$110", "service": "acme-payment-gateway", "trace_id": "305a75b7-109d-4c09-b078-a633dc30366b"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U9809 amt=$348", "service": "acme-payment-gateway", "trace_id": "df3824dc-32c1-44b0-9a6b-4cb409446827"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U8908 amt=$227", "service": "acme-payment-gateway", "trace_id": "25b65a20-6e34-4afe-855a-cbb219c55e62"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U9208 amt=$208", "service": "acme-payment-gateway", "trace_id": "34f8bae4-b6c2-4b64-985a-0878fe18f2b2"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U5149 amt=$454", "service": "acme-payment-gateway", "trace_id": "0fcba10e-6d08-4179-9e15-d6c0dcbbd2aa"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U2062 amt=$61", "service": "acme-payment-gateway", "trace_id": "4cc63755-f592-4754-a2da-6913bc510ab7"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U3682 amt=$123", "service": "acme-payment-gateway", "trace_id": "79f87ce0-c48c-486b-a8cf-53048bc7a178"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U2052 amt=$162", "service": "acme-payment-gateway", "trace_id": "71a60905-cb6b-41e4-a9e1-62b7e6ef0adb"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U2295 amt=$403", "service": "acme-payment-gateway", "trace_id": "5cb2cb00-e983-41d8-a5b3-068c59e47800"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U8517 amt=$137", "service": "acme-payment-gateway", "trace_id": "f3152001-6635-4aba-9348-8b7fc78077b1"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U6291 amt=$335", "service": "acme-payment-gateway", "trace_id": "35f22240-0895-4507-b9a5-ef381630d977"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U8930 amt=$175", "service": "acme-payment-gateway", "trace_id": "dd8de576-a8ba-4052-bb3e-a63cb52e08c9"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U3481 amt=$490", "service": "acme-payment-gateway", "trace_id": "ad7a6273-3df9-4ad3-8555-c2704ec99a16"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U4263 amt=$416", "service": "acme-payment-gateway", "trace_id": "4728f6ea-7d59-4a56-afc5-ff972c5e34da"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U7720 amt=$16", "service": "acme-payment-gateway", "trace_id": "796a91df-b467-42ac-98d6-7621c70707ac"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U5918 amt=$47", "service": "acme-payment-gateway", "trace_id": "ef3e8530-da2d-49f7-a671-371500f32b76"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U2357 amt=$245", "service": "acme-payment-gateway", "trace_id": "b7dd813c-2eb0-4cd1-801f-a06076b9014f"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U7336 amt=$184", "service": "acme-payment-gateway", "trace_id": "738a0792-cc6b-46b3-87b1-669ba6905055"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U4654 amt=$197", "service": "acme-payment-gateway", "trace_id": "c7408e47-0304-4fe7-bce6-f814a2f4c6ef"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U7547 amt=$55", "service": "acme-payment-gateway", "trace_id": "e9d1e6de-4d17-4a33-bb3a-498cd389f845"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U8679 amt=$407", "service": "acme-payment-gateway", "trace_id": "d8efae9e-ec02-452f-b7c7-18e0b31c34f8"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U2443 amt=$194", "service": "acme-payment-gateway", "trace_id": "a935a78e-650d-4f23-9337-623b0d5ad04e"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U7597 amt=$221", "service": "acme-payment-gateway", "trace_id": "18e1fd7b-1d57-4d36-aca2-f37ae7ea8e02"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U8602 amt=$380", "service": "acme-payment-gateway", "trace_id": "d815f5a4-1805-4a24-b17b-050b42cd7221"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U3576 amt=$131", "service": "acme-payment-gateway", "trace_id": "1aa462ee-3a73-41e0-a10f-4b85ab762010"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U9598 amt=$104", "service": "acme-payment-gateway", "trace_id": "8f3f7dc7-bd88-4f07-b26c-9870fdb169be"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U3756 amt=$122", "service": "acme-payment-gateway", "trace_id": "15fe1d40-82a8-43d8-b3db-930e6c53449b"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U5250 amt=$438", "service": "acme-payment-gateway", "trace_id": "33401bb9-9f7c-45a3-a71d-ce337d2d4a4d"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U3717 amt=$373", "service": "acme-payment-gateway", "trace_id": "6ecffc1c-b6fa-4ca8-8c42-b8e10d83288c"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U2899 amt=$387", "service": "acme-payment-gateway", "trace_id": "0ae8ba50-a6c2-45e8-a8a4-47b7fbe107be"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U2716 amt=$56", "service": "acme-payment-gateway", "trace_id": "f16c4a5f-ef5f-4c4e-892d-466f36729ae7"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U2549 amt=$252", "service": "acme-payment-gateway", "trace_id": "59a31106-08b8-4120-9212-fa8df8685950"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U9756 amt=$238", "service": "acme-payment-gateway", "trace_id": "21e4f598-6200-4a9c-81c1-b152066250d1"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U3935 amt=$219", "service": "acme-payment-gateway", "trace_id": "f9cd632d-39ce-47a6-b235-656bf8c4fcbf"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U4782 amt=$118", "service": "acme-payment-gateway", "trace_id": "ec3614cc-bae6-44ce-a33e-0938fed4f828"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U4704 amt=$244", "service": "acme-payment-gateway", "trace_id": "6e9dd2c6-a569-4c89-a0b1-82467e1c36fa"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U2420 amt=$182", "service": "acme-payment-gateway", "trace_id": "673f0595-1b6d-4ede-8d84-e3a5f341d233"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U5323 amt=$480", "service": "acme-payment-gateway", "trace_id": "4cfbe10f-c235-4236-ad03-62e34ef2ef64"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U4302 amt=$219", "service": "acme-payment-gateway", "trace_id": "e09d9675-18f7-43a5-b772-8d664acbe2f8"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U6598 amt=$495", "service": "acme-payment-gateway", "trace_id": "63edf845-2331-4503-8351-3d1430e944da"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U3391 amt=$178", "service": "acme-payment-gateway", "trace_id": "fc5dc150-ccbe-4c90-94d0-a0026f0fb9f3"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U9454 amt=$241", "service": "acme-payment-gateway", "trace_id": "89a743ad-dcd8-4062-9a2f-70f081a3bd6c"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U4674 amt=$134", "service": "acme-payment-gateway", "trace_id": "a62df62e-52eb-4230-ac46-46b8f32ad1d0"}
+{"timestamp": 1780049979890, "level": "INFO", "message": "Payment request received. user_id=U2657 amt=$129", "service": "acme-payment-gateway", "trace_id": "7cf10e73-7668-4210-a59f-0ba8f635db7b"}
+{"timestamp": 1780049979890, "level": "ERROR", "message": "Database timeout while connecting to write replica in us-east-1.", "service": "acme-payment-gateway", "trace_id": "954bb21c-288e-4096-b00e-0eaafa38d842"}
+{"timestamp": 1780049979890, "level": "ERROR", "message": "Database timeout while connecting to write replica in us-east-1.", "service": "acme-payment-gateway", "trace_id": "76266628-fcbe-474d-b6f7-d56ccc1a306c"}
+{"timestamp": 1780049979890, "level": "ERROR", "message": "Database timeout while connecting to write replica in us-east-1.", "service": "acme-payment-gateway", "trace_id": "c62c5848-ac27-4303-993c-17328d105157"}
+{"timestamp": 1780049979890, "level": "ERROR", "message": "Database timeout while connecting to write replica in us-east-1.", "service": "acme-payment-gateway", "trace_id": "9ef98b0e-57c8-4535-b055-f00093f63404"}
+{"timestamp": 1780049979890, "level": "ERROR", "message": "Database timeout while connecting to write replica in us-east-1.", "service": "acme-payment-gateway", "trace_id": "e5016245-4490-424e-a245-5090ea1f4464"}
+{"timestamp": 1780049979890, "level": "ERROR", "message": "Database timeout while connecting to write replica in us-east-1.", "service": "acme-payment-gateway", "trace_id": "2bec3d87-f5c4-4586-9608-3ea66a0044a7"}
+{"timestamp": 1780049979890, "level": "ERROR", "message": "Database timeout while connecting to write replica in us-east-1.", "service": "acme-payment-gateway", "trace_id": "389e20b6-dc0f-42ea-b2b8-b2977cc8a16e"}
+{"timestamp": 1780049979890, "level": "ERROR", "message": "Database timeout while connecting to write replica in us-east-1.", "service": "acme-payment-gateway", "trace_id": "8e4c90b3-db6b-472b-9706-47fb4477dfa0"}
+{"timestamp": 1780049979890, "level": "ERROR", "message": "Database timeout while connecting to write replica in us-east-1.", "service": "acme-payment-gateway", "trace_id": "8c06d1e3-783a-43cc-8a4c-50888e04df8c"}
+{"timestamp": 1780049979890, "level": "ERROR", "message": "Database timeout while connecting to write replica in us-east-1.", "service": "acme-payment-gateway", "trace_id": "a3396e54-228e-44aa-b6b6-68148090046e"}
+{"timestamp": 1780049979890, "level": "ERROR", "message": "Database timeout while connecting to write replica in us-east-1.", "service": "acme-payment-gateway", "trace_id": "083624c4-c662-4a97-8426-f16af3b9d6e8"}
+{"timestamp": 1780049979890, "level": "ERROR", "message": "Database timeout while connecting to write replica in us-east-1.", "service": "acme-payment-gateway", "trace_id": "de17f2f3-b792-40cc-9c1a-81e69f070b1d"}
+{"timestamp": 1780049979890, "level": "ERROR", "message": "Database timeout while connecting to write replica in us-east-1.", "service": "acme-payment-gateway", "trace_id": "4c240955-cc5f-4175-964f-db2c1ac9b6e9"}
+{"timestamp": 1780049979890, "level": "ERROR", "message": "Database timeout while connecting to write replica in us-east-1.", "service": "acme-payment-gateway", "trace_id": "57f531dd-e7ce-412d-ab4e-d218ab4ff656"}
+{"timestamp": 1780049979890, "level": "ERROR", "message": "Database timeout while connecting to write replica in us-east-1.", "service": "acme-payment-gateway", "trace_id": "b5e3cfe3-64be-4abe-8d20-142be6f34153"}

@@ -1,0 +1,34 @@
+from pydantic import BaseModel, Field
+from typing import List, Dict, Any, Optional
+from datetime import datetime
+
+class SpanEvent(BaseModel):
+    name: str
+    timestamp: datetime
+    attributes: Dict[str, Any] = Field(default_factory=dict)
+
+class SpanSchema(BaseModel):
+    trace_id: str
+    span_id: str
+    parent_span_id: Optional[str] = None
+    service_name: str
+    operation_name: str
+    start_time: datetime
+    end_time: datetime
+    duration_ms: float
+    status_code: Optional[str] = None
+    attributes: Dict[str, Any] = Field(default_factory=dict)
+    events: List[SpanEvent] = Field(default_factory=list)
+
+    class Config:
+        from_attributes = True
+
+class TraceSchema(BaseModel):
+    trace_id: str
+    root_service: str
+    root_operation: str
+    start_time: datetime
+    duration_ms: float
+    span_count: int
+    error_count: int
+    spans: List[SpanSchema] = Field(default_factory=list)
