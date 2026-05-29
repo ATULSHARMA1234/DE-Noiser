@@ -1,87 +1,140 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 from datetime import datetime, timedelta
 import random
 
-from denoiser.storage.db import ServiceLevelObjective, SLODataPoint, Span
+from denoiser.storage.db import ServiceLevelObjective
+from denoiser.storage.clickhouse_store import ClickHouseStore
+from denoiser.logging import get_logger
+
+logger = get_logger(__name__)
 
 def calculate_slo_status(db: Session, slo: ServiceLevelObjective):
     """
-    Calculate the current SLO status based on spans from the database.
-    If no spans exist, we'll generate some dummy data for demonstration.
+    Calculate the current SLO status by querying real event data from ClickHouse.
     """
     end_time = datetime.utcnow()
     start_time = end_time - timedelta(days=slo.window_days)
     
-    # In a real system, we'd query Traces/Spans or Metrics to determine SLI
-    spans = db.query(Span).filter(
-        Span.service_name == slo.service,
-        Span.start_time >= start_time
-    ).all()
-    
-    total_events = len(spans)
-    
-    if total_events > 0:
-        if slo.sli_type == 'availability':
-            good_events = sum(1 for s in spans if s.status_code != 'ERROR')
-        elif slo.sli_type == 'latency':
-            # Assuming latency target is 500ms
-            good_events = sum(1 for s in spans if s.duration_ms < 500)
-        else:
-            good_events = total_events
-    else:
-        # Mock data for sandbox demonstration
-        total_events = random.randint(10000, 50000)
-        
-        # Determine if we should mock a healthy or unhealthy SLO based on target
-        if slo.target_percentage >= 99.9:
-            # 99.9% target is hard, maybe we have 99.8% actual
-            actual_percent = 99.8 + (random.random() * 0.15) 
-        else:
-            actual_percent = slo.target_percentage + (random.random() * 2)
+    ch_store = ClickHouseStore()
+    client = ch_store.client
+
+    total_events = 0
+    good_events = 0
+
+    if client:
+        try:
+            # Format datetime for ClickHouse
+            start_str = start_time.strftime('%Y-%m-%d %H:%M:%S')
             
-        good_events = int(total_events * (actual_percent / 100.0))
-        
-    current_value = (good_events / total_events * 100) if total_events > 0 else 100.0
-    
-    # Error budget math
-    allowed_failures_percent = 100.0 - slo.target_percentage
-    error_budget_total = int(total_events * (allowed_failures_percent / 100.0))
-    actual_failures = total_events - good_events
-    error_budget_remaining = error_budget_total - actual_failures
-    
-    # Burn rate (how fast we are consuming the budget vs expected)
-    # If we consumed 50% of budget in 10% of time window -> burn rate = 5
-    # For mock data, we just derive it from remaining budget
-    burn_rate = 1.0
-    if error_budget_remaining < 0:
-        burn_rate = random.uniform(2.5, 5.0)
-    elif error_budget_remaining < (error_budget_total * 0.2):
-        burn_rate = random.uniform(1.1, 2.0)
+            # Count total events
+            total_query = f"""
+                SELECT count() FROM semantic_logs 
+                WHERE source = '{slo.service}' 
+                AND timestamp >= '{start_str}'
+            """
+            total_result = client.query(total_query)
+            total_events = total_result.result_rows[0][0] if total_result.result_rows else 0
+            
+            if total_events > 0:
+                if slo.sli_type == 'availability':
+                    good_query = f"""
+                        SELECT count() FROM semantic_logs 
+                        WHERE source = '{slo.service}' 
+                        AND timestamp >= '{start_str}'
+                        AND lower(level) NOT IN ('error', 'fatal', 'critical')
+                    """
+                    good_result = client.query(good_query)
+                    good_events = good_result.result_rows[0][0] if good_result.result_rows else 0
+                elif slo.sli_type == 'latency':
+                    good_query = f"""
+                        SELECT count() FROM semantic_logs 
+                        WHERE source = '{slo.service}' 
+                        AND timestamp >= '{start_str}'
+                        AND (
+                            JSONExtractFloat(raw_json, 'duration_ms') < 500
+                            OR JSONExtractFloat(raw_json, 'latency') < 500
+                            OR JSONHas(raw_json, 'duration_ms') = 0
+                        )
+                    """
+                    good_result = client.query(good_query)
+                    good_events = good_result.result_rows[0][0] if good_result.result_rows else 0
+                else:
+                    good_events = total_events
+        except Exception as e:
+            logger.error(f"Failed to query ClickHouse for SLO calculation: {e}")
+            total_events = 0
+            
+    # If ClickHouse failed or returned 0 events, we don't use mock data anymore.
+    # We show an empty/perfect state.
+    if total_events == 0:
+        current_value = 100.0
+        error_budget_total = 0
+        error_budget_remaining = 0
+        burn_rate = 0.0
+        status = "HEALTHY"
+        data_points = []
     else:
-        burn_rate = random.uniform(0.1, 0.9)
+        current_value = (good_events / total_events * 100) if total_events > 0 else 100.0
         
-    status = "HEALTHY"
-    if error_budget_remaining < 0:
-        status = "BREACHED"
-    elif burn_rate > 1.5:
-        status = "WARNING"
+        # Error budget math
+        allowed_failures_percent = 100.0 - slo.target_percentage
+        error_budget_total = int(total_events * (allowed_failures_percent / 100.0))
+        actual_failures = total_events - good_events
+        error_budget_remaining = error_budget_total - actual_failures
         
-    # Generate some timeline data points for chart
-    data_points = []
-    points_count = min(30, slo.window_days)
-    
-    for i in range(points_count):
-        # random fluctuation around the current value
-        point_val = current_value + (random.random() * 0.4 - 0.2)
-        point_val = min(100.0, max(0.0, point_val))
-        point_time = end_time - timedelta(days=(points_count - i - 1))
-        
-        data_points.append({
-            "timestamp": point_time.isoformat(),
-            "value": point_val
-        })
-        
+        if error_budget_total > 0:
+            burn_rate = actual_failures / error_budget_total
+        else:
+            burn_rate = 0.0
+            
+        status = "HEALTHY"
+        if error_budget_remaining < 0:
+            status = "BREACHED"
+        elif burn_rate > 0.8:
+            status = "WARNING"
+            
+        # Generate timeline data points using a real time-series query
+        data_points = []
+        if client:
+            try:
+                if slo.sli_type == 'latency':
+                    interval_sql = f"""
+                        SELECT 
+                            toStartOfDay(timestamp) as day,
+                            count() as total,
+                            countIf(
+                                JSONExtractFloat(raw_json, 'duration_ms') < 500
+                                OR JSONExtractFloat(raw_json, 'latency') < 500
+                                OR JSONHas(raw_json, 'duration_ms') = 0
+                            ) as good
+                        FROM semantic_logs
+                        WHERE source = '{slo.service}' AND timestamp >= '{start_str}'
+                        GROUP BY day
+                        ORDER BY day ASC
+                    """
+                else:
+                    interval_sql = f"""
+                        SELECT 
+                            toStartOfDay(timestamp) as day,
+                            count() as total,
+                            countIf(lower(level) NOT IN ('error', 'fatal', 'critical')) as good
+                        FROM semantic_logs
+                        WHERE source = '{slo.service}' AND timestamp >= '{start_str}'
+                        GROUP BY day
+                        ORDER BY day ASC
+                    """
+                
+                ts_result = client.query(interval_sql)
+                for row in ts_result.result_rows:
+                    day, day_total, day_good = row[0], row[1], row[2]
+                    day_val = (day_good / day_total * 100) if day_total > 0 else 100.0
+                    data_points.append({
+                        "timestamp": day.isoformat(),
+                        "value": day_val
+                    })
+            except Exception as e:
+                logger.error(f"Failed to query timeseries points for SLO: {e}")
+
     return {
         "slo_id": slo.id,
         "current_value": current_value,

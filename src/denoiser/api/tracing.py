@@ -1,45 +1,155 @@
 from fastapi import APIRouter, Depends, HTTPException, Body
-from sqlalchemy.orm import Session
-from sqlalchemy import func
 from typing import List, Dict, Any
+import json
 
-from denoiser.storage.db import get_db, Span
-from denoiser.api.auth import get_current_user, require_role, User
+from denoiser.api.auth import require_role, User
 from denoiser.tracing.otlp_collector import process_otlp_traces
 from denoiser.tracing.models import TraceSchema, SpanSchema
+from denoiser.storage.clickhouse_store import ClickHouseStore
+
+# SQLite dependencies just for OTLP collector signature if needed
+from sqlalchemy.orm import Session
+from denoiser.storage.db import get_db
 
 router = APIRouter(prefix="/traces", tags=["tracing"])
 
+from fastapi import Header
+
 @router.post("/v1/traces", summary="OTLP HTTP Ingest")
-def ingest_traces(payload: Dict[Any, Any] = Body(...), db: Session = Depends(get_db)):
+def ingest_traces(
+    payload: Dict[Any, Any] = Body(...), 
+    db: Session = Depends(get_db),
+    api_key: str = Header(None, alias="x-api-key")
+):
     """
     Ingest OpenTelemetry traces via HTTP JSON.
-    Usually authenticated via a different mechanism for collectors, but we'll accept it raw for now.
     """
     try:
-        process_otlp_traces(db, payload)
+        from denoiser.storage.db import Tenant
+        tenant = db.query(Tenant).filter(Tenant.api_key == api_key).first() if api_key else None
+        # Default fallback for testing if no key is provided
+        tenant_id = tenant.id if tenant else "default_tenant"
+        
+        process_otlp_traces(db, payload, tenant_id=tenant_id)
         return {"status": "success"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("", response_model=List[TraceSchema])
-def list_traces(limit: int = 50, db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
+def list_traces(limit: int = 50, current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
     """
-    List trace aggregates. We group by trace_id.
+    List trace aggregates fetched directly from ClickHouse.
     """
-    # SQLite/PostgreSQL compatible grouping
-    # Find all root spans (parent_span_id is None) to get trace metadata
-    root_spans = db.query(Span).filter(Span.parent_span_id == None).order_by(Span.start_time.desc()).limit(limit).all()
+    store = ClickHouseStore()
+    client = store.client
+    if not client:
+        raise HTTPException(status_code=500, detail="ClickHouse not available")
+
+    # Group by trace_id to get root span data and trace metadata
+    sql = f"""
+        SELECT 
+            trace_id,
+            any(service_name) AS root_service,
+            any(operation_name) AS root_operation,
+            min(start_time) AS start_time,
+            max(end_time) AS end_time,
+            count() AS span_count,
+            countIf(status_code = 'ERROR') AS error_count
+        FROM semantic_traces
+        WHERE tenant_id = {{tenant_id:String}}
+        GROUP BY trace_id
+        ORDER BY start_time DESC
+        LIMIT {limit}
+    """
     
-    result = []
-    for root in root_spans:
-        # get all spans for this trace
-        all_spans = db.query(Span).filter(Span.trace_id == root.trace_id).all()
-        error_count = sum(1 for s in all_spans if s.status_code == "ERROR")
+    try:
+        result = client.query(sql, parameters={'tenant_id': current_user.tenant_id})
         
-        # calculate total duration from root or min/max
-        start = min(s.start_time for s in all_spans)
-        end = max(s.end_time for s in all_spans)
+        traces = []
+        for row in result.result_rows:
+            row_dict = dict(zip(result.column_names, row))
+            
+            # ClickHouse datetime objects can be converted
+            start_t = row_dict['start_time']
+            end_t = row_dict['end_time']
+            duration_ms = max(0, (end_t - start_t).total_seconds() * 1000.0)
+            
+            trace = TraceSchema(
+                trace_id=row_dict['trace_id'],
+                root_service=row_dict['root_service'],
+                root_operation=row_dict['root_operation'],
+                start_time=start_t,
+                duration_ms=duration_ms,
+                span_count=row_dict['span_count'],
+                error_count=row_dict['error_count'],
+                spans=[] # exclude spans for list view
+            )
+            traces.append(trace)
+            
+        return traces
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/{trace_id}", response_model=TraceSchema)
+def get_trace(trace_id: str, current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
+    """
+    Get full trace details including all spans from ClickHouse.
+    """
+    store = ClickHouseStore()
+    client = store.client
+    if not client:
+        raise HTTPException(status_code=500, detail="ClickHouse not available")
+        
+    sql = f"""
+        SELECT *
+        FROM semantic_traces
+        WHERE tenant_id = {{tenant_id:String}} AND trace_id = {{trace_id:String}}
+        ORDER BY start_time ASC
+    """
+    
+    try:
+        result = client.query(sql, parameters={'tenant_id': current_user.tenant_id, 'trace_id': trace_id})
+        if not result.result_rows:
+            raise HTTPException(status_code=404, detail="Trace not found")
+            
+        spans = []
+        for row in result.result_rows:
+            s_dict = dict(zip(result.column_names, row))
+            
+            attributes = {}
+            if s_dict.get('attributes'):
+                try:
+                    attributes = json.loads(s_dict['attributes'])
+                except:
+                    pass
+                    
+            events = []
+            if s_dict.get('events'):
+                try:
+                    events = json.loads(s_dict['events'])
+                except:
+                    pass
+                    
+            # Parse datetime fields handled by clickhouse-connect
+            spans.append(SpanSchema(
+                trace_id=s_dict['trace_id'],
+                span_id=s_dict['span_id'],
+                parent_span_id=s_dict['parent_span_id'] or None,
+                service_name=s_dict['service_name'],
+                operation_name=s_dict['operation_name'],
+                start_time=s_dict['start_time'],
+                end_time=s_dict['end_time'],
+                duration_ms=s_dict['duration_ms'],
+                status_code=s_dict['status_code'],
+                attributes=attributes,
+                events=events
+            ))
+            
+        root = next((s for s in spans if not s.parent_span_id), spans[0])
+        error_count = sum(1 for s in spans if s.status_code == 'ERROR')
+        
+        start = min(s.start_time for s in spans)
+        end = max(s.end_time for s in spans)
         duration_ms = max(0, (end - start).total_seconds() * 1000.0)
         
         trace = TraceSchema(
@@ -48,38 +158,13 @@ def list_traces(limit: int = 50, db: Session = Depends(get_db), current_user: Us
             root_operation=root.operation_name,
             start_time=start,
             duration_ms=duration_ms,
-            span_count=len(all_spans),
+            span_count=len(spans),
             error_count=error_count,
-            spans=[] # don't include all spans in list view to save bandwidth
+            spans=spans
         )
-        result.append(trace)
+        return trace
         
-    return result
-
-@router.get("/{trace_id}", response_model=TraceSchema)
-def get_trace(trace_id: str, db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
-    """
-    Get full trace details including all spans for waterfall visualization.
-    """
-    all_spans = db.query(Span).filter(Span.trace_id == trace_id).order_by(Span.start_time.asc()).all()
-    if not all_spans:
-        raise HTTPException(status_code=404, detail="Trace not found")
-        
-    root = next((s for s in all_spans if s.parent_span_id is None), all_spans[0])
-    error_count = sum(1 for s in all_spans if s.status_code == "ERROR")
-    
-    start = min(s.start_time for s in all_spans)
-    end = max(s.end_time for s in all_spans)
-    duration_ms = max(0, (end - start).total_seconds() * 1000.0)
-    
-    trace = TraceSchema(
-        trace_id=root.trace_id,
-        root_service=root.service_name,
-        root_operation=root.operation_name,
-        start_time=start,
-        duration_ms=duration_ms,
-        span_count=len(all_spans),
-        error_count=error_count,
-        spans=[SpanSchema.model_validate(s) for s in all_spans]
-    )
-    return trace
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

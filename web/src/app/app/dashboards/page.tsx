@@ -110,9 +110,20 @@ export default function DashboardsPage() {
     }
   };
 
-  const onLayoutChange = (layout: any) => {
-    // Save layout state in the background if needed
-    // The `layout` array contains {i, x, y, w, h}
+  const onLayoutChange = async (layout: any) => {
+    if (!selectedDashboard || !isEditing) return;
+    
+    const updatedDash = { ...selectedDashboard, layout };
+    setSelectedDashboard(updatedDash);
+    
+    try {
+      await apiFetch(`/dashboards/${selectedDashboard.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ layout })
+      });
+    } catch (e: any) {
+      console.error('Failed to save layout', e);
+    }
   };
 
   const removeWidget = async (widgetId: string) => {
@@ -247,15 +258,17 @@ export default function DashboardsPage() {
             <ResponsiveGridLayout
               className="layout"
               layouts={{
-                lg: selectedDashboard.widgets.map((w: any, i: number) => ({
-                  i: w.id,
-                  x: (i * 4) % 12,
-                  y: Math.floor(i / 3) * 4,
-                  w: 4,
-                  h: 4,
-                  minW: 2,
-                  minH: 3
-                }))
+                lg: (selectedDashboard.layout && selectedDashboard.layout.length > 0)
+                  ? selectedDashboard.layout 
+                  : selectedDashboard.widgets.map((w: any, i: number) => ({
+                    i: w.id,
+                    x: (i * 4) % 12,
+                    y: Math.floor(i / 3) * 4,
+                    w: 4,
+                    h: 4,
+                    minW: 2,
+                    minH: 3
+                  }))
               }}
               breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }}
               cols={{ lg: 12, md: 10, sm: 6, xs: 4, xxs: 2 }}

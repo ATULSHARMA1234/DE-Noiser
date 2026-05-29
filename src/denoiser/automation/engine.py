@@ -41,7 +41,7 @@ def process_incident(db: Session, incident: Incident):
     """
     Called when a new incident is created. Evaluates active runbooks and executes them.
     """
-    runbooks = db.query(Runbook).filter(Runbook.enabled == True).all()
+    runbooks = db.query(Runbook).filter(Runbook.enabled == True, Runbook.tenant_id == incident.tenant_id).all()
     
     for rb in runbooks:
         # Evaluate trigger conditions

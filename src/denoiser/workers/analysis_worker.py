@@ -436,7 +436,7 @@ def evaluate_slos():
             # Simplistic Evaluation
             # Let's query ClickHouse to see the volume of logs for this service
             try:
-                res = ch_store.query_logs(f"service:{slo.service}", limit=1000)
+                res = ch_store.query_logs(f"service:{slo.service}", limit=1000, tenant_id=slo.tenant_id)
                 total_events = len(res)
                 
                 # Mock good events based on target percentage to keep it looking somewhat realistic
@@ -461,6 +461,29 @@ def evaluate_slos():
                     value=value
                 )
                 db.add(dp)
+
+                if value < slo.target_percentage:
+                    # SLO Breach -> Incident
+                    from denoiser.storage.db import Incident
+                    incident = Incident(
+                        tenant_id=slo.tenant_id,
+                        title=f"SLO Breach: {slo.name}",
+                        domain=slo.service,
+                        impact_score=1.0,
+                        summary=f"SLO '{slo.name}' breached for service '{slo.service}'. Target: {slo.target_percentage}%, Actual: {value:.2f}%",
+                        remediation_hints=["Check recent deployments", "Scale up service replicas"],
+                        source="SLO Evaluator"
+                    )
+                    db.add(incident)
+                    db.commit() # commit early to trigger runbook
+                    db.refresh(incident)
+
+                    try:
+                        from denoiser.automation.engine import process_incident
+                        process_incident(db, incident)
+                    except Exception as auto_err:
+                        logger.error(f"Failed to execute runbook on SLO breach: {auto_err}")
+
             except Exception as e:
                 logger.error(f"Failed to evaluate SLO {slo.id}: {e}")
                 

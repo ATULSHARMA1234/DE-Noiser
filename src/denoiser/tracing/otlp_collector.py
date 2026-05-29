@@ -3,7 +3,7 @@ import json
 from sqlalchemy.orm import Session
 from denoiser.storage.db import Span
 
-def process_otlp_traces(db: Session, payload: dict):
+def process_otlp_traces(db: Session, payload: dict, tenant_id: str = "default_tenant"):
     """
     Process OpenTelemetry HTTP JSON payload and store spans in the database.
     OTLP JSON format: https://opentelemetry.io/docs/specs/otlp/#json-protobuf-encoding
@@ -77,21 +77,6 @@ def process_otlp_traces(db: Session, payload: dict):
                         "attributes": ev_attrs
                     })
                     
-                db_span = Span(
-                    trace_id=trace_id,
-                    span_id=span_id,
-                    parent_span_id=parent_span_id,
-                    service_name=service_name,
-                    operation_name=name,
-                    start_time=start_time,
-                    end_time=end_time,
-                    duration_ms=duration_ms,
-                    status_code=status_code,
-                    attributes=span_attributes,
-                    events=events
-                )
-                db.add(db_span)
-                
                 # Prepare for ClickHouse
                 ch_traces.append((
                     trace_id or "",
@@ -107,9 +92,7 @@ def process_otlp_traces(db: Session, payload: dict):
                     json.dumps(events)
                 ))
                 
-    db.commit()
-    
-    # Dual write to ClickHouse
+    # Write to ClickHouse
     if ch_traces:
         from denoiser.storage.clickhouse_store import ClickHouseStore
         ch_store = ClickHouseStore()

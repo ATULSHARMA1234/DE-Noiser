@@ -32,20 +32,39 @@ const ToastContext = createContext<ToastContextType | undefined>(undefined);
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const timersRef = React.useRef<{ [key: string]: NodeJS.Timeout }>({});
 
   const removeToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
+    if (timersRef.current[id]) {
+      clearTimeout(timersRef.current[id]);
+      delete timersRef.current[id];
+    }
   }, []);
 
   const addToast = useCallback((type: ToastType, message: string) => {
     const id = Math.random().toString(36).substring(2, 9);
-    setToasts((prev) => [...prev, { id, type, message }]);
+    setToasts((prev) => {
+      // Limit to max 5 toasts to prevent DOM crashes
+      const next = [...prev, { id, type, message }];
+      if (next.length > 5) {
+        return next.slice(next.length - 5);
+      }
+      return next;
+    });
     
     // Auto-remove after 4 seconds
-    setTimeout(() => {
+    timersRef.current[id] = setTimeout(() => {
       removeToast(id);
     }, 4000);
   }, [removeToast]);
+
+  // Cleanup all timeouts on unmount
+  React.useEffect(() => {
+    return () => {
+      Object.values(timersRef.current).forEach(clearTimeout);
+    };
+  }, []);
 
   const toastFn = useCallback((options: ToastOptions) => {
     const msg = options.description ? `${options.title}: ${options.description}` : (options.title || '');

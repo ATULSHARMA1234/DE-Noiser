@@ -32,17 +32,19 @@ class ClickHouseStore:
             # Ensure tables exist
             self.client.command("""
                 CREATE TABLE IF NOT EXISTS semantic_logs (
+                    tenant_id String,
                     timestamp DateTime64(3, 'UTC'),
                     source String,
                     level String,
                     message String,
                     raw_json String
                 ) ENGINE = MergeTree()
-                ORDER BY (source, timestamp)
+                ORDER BY (tenant_id, source, timestamp)
             """)
             
             self.client.command("""
                 CREATE TABLE IF NOT EXISTS semantic_traces (
+                    tenant_id String,
                     trace_id String,
                     span_id String,
                     parent_span_id String,
@@ -55,7 +57,7 @@ class ClickHouseStore:
                     attributes String,
                     events String
                 ) ENGINE = MergeTree()
-                ORDER BY (service_name, start_time)
+                ORDER BY (tenant_id, service_name, start_time)
             """)
             
             logger.info(f"Connected to ClickHouse at {self.host}:{self.port}")
@@ -63,7 +65,7 @@ class ClickHouseStore:
             logger.error(f"Failed to connect to ClickHouse: {e}")
             self.client = None
 
-    def insert_logs(self, logs: list[dict[str, Any]]):
+    def insert_logs(self, logs: list[dict[str, Any]], tenant_id: str):
         """Dual-write logs to ClickHouse"""
         if not self.client:
             return False
@@ -81,6 +83,7 @@ class ClickHouseStore:
                     dt = datetime.now(UTC)
 
                 data.append((
+                    tenant_id,
                     dt,
                     log.get("source", "unknown"),
                     log.get("level", "INFO"),
@@ -88,20 +91,23 @@ class ClickHouseStore:
                     json.dumps(log)
                 ))
 
-            self.client.insert('semantic_logs', data, column_names=['timestamp', 'source', 'level', 'message', 'raw_json'])
+            self.client.insert('semantic_logs', data, column_names=['tenant_id', 'timestamp', 'source', 'level', 'message', 'raw_json'])
             return True
         except Exception as e:
             logger.error(f"Failed to insert into ClickHouse: {e}")
             return False
 
-    def insert_traces(self, traces_data: list[tuple]):
+    def insert_traces(self, traces_data: list[tuple], tenant_id: str):
         """Insert processed OTLP spans into ClickHouse"""
         if not self.client:
             return False
             
         try:
-            self.client.insert('semantic_traces', traces_data, column_names=[
-                'trace_id', 'span_id', 'parent_span_id', 'service_name', 
+            # Insert tenant_id to the beginning of each tuple
+            traces_data_with_tenant = [(tenant_id,) + row for row in traces_data]
+            
+            self.client.insert('semantic_traces', traces_data_with_tenant, column_names=[
+                'tenant_id', 'trace_id', 'span_id', 'parent_span_id', 'service_name', 
                 'operation_name', 'start_time', 'end_time', 'duration_ms', 
                 'status_code', 'attributes', 'events'
             ])
@@ -110,41 +116,28 @@ class ClickHouseStore:
             logger.error(f"Failed to insert traces into ClickHouse: {e}")
             return False
 
-    def query_logs(self, query_string: str = "", limit: int = 100):
+    def query_logs(self, query_string: str = "", limit: int = 100, tenant_id: str = ""):
         """Execute a parsed Log Query Language (LQL) search against ClickHouse."""
         if not self.client:
             return []
             
-        where_clauses = []
-        parameters = {}
+        from denoiser.query.parser import parse_query, compile_to_sql
         
-        if query_string:
-            tokens = query_string.split(" AND ")
-            for i, token in enumerate(tokens):
-                if ":" in token:
-                    key, val = token.split(":", 1)
-                    key = key.strip()
-                    val = val.strip()
-                    if key in ["source", "level"]:
-                        where_clauses.append(f"{key} = {{val_{i}:String}}")
-                        parameters[f"val_{i}"] = val
-                    else:
-                        # JSON extraction for custom attributes
-                        where_clauses.append(f"JSONExtractString(raw_json, '{key}') = {{val_{i}:String}}")
-                        parameters[f"val_{i}"] = val
-                else:
-                    # Free text search in message
-                    where_clauses.append(f"message ILIKE {{val_{i}:String}}")
-                    parameters[f"val_{i}"] = f"%{token.strip()}%"
+        ast = parse_query(query_string)
+        params = {}
+        sql_where = compile_to_sql(ast, params)
+        
+        if tenant_id:
+            sql_where = f"tenant_id = {{tenant_id:String}} AND ({sql_where})"
+            params['tenant_id'] = tenant_id
                     
         sql = "SELECT * FROM semantic_logs"
-        if where_clauses:
-            sql += " WHERE " + " AND ".join(where_clauses)
+        sql += f" WHERE {sql_where}"
             
         sql += f" ORDER BY timestamp DESC LIMIT {limit}"
         
         try:
-            result = self.client.query(sql, parameters=parameters)
+            result = self.client.query(sql, parameters=params)
             return [dict(zip(result.column_names, row)) for row in result.result_rows]
         except Exception as e:
             logger.error(f"Failed to query ClickHouse: {e}")

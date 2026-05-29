@@ -163,7 +163,6 @@ class Dashboard(Base):
     id = Column(Integer, primary_key=True, index=True)
     tenant_id = Column(Integer, index=True, nullable=True)
     name = Column(String, nullable=False)
-    user_id = Column(Integer, index=True, nullable=False)
     layout = Column(JSON, default=list)
     widgets = Column(JSON, default=list)
     is_shared = Column(Boolean, default=False)
@@ -216,6 +215,7 @@ class Tenant(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False, unique=True)
+    api_key = Column(String, nullable=True, unique=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 class Integration(Base):

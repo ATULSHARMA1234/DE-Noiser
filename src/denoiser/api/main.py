@@ -84,6 +84,7 @@ from denoiser.api.slo import router as slo_router
 from denoiser.api.dashboards import router as dashboards_router
 from denoiser.api.metrics import router as metrics_router
 from denoiser.api.automation import router as automation_router
+from denoiser.api.runbooks import router as runbooks_router
 from denoiser.api.integrations import router as integrations_router
 from denoiser.api.deployments import router as deployments_router
 
@@ -96,6 +97,7 @@ app.include_router(slo_router)
 app.include_router(dashboards_router)
 app.include_router(metrics_router)
 app.include_router(automation_router)
+app.include_router(runbooks_router)
 app.include_router(integrations_router)
 app.include_router(deployments_router)
 
@@ -353,24 +355,30 @@ def verify_ingest_auth(
     api_key: str | None = Depends(api_key_header),
     token: str | None = Depends(oauth2_scheme),
     db: Session = Depends(get_db)
-):
-    """Allow ingest if X-API-Key header matches static config, or if a valid JWT is present."""
-    static_key = os.getenv("INGEST_API_KEY", "semanticos-ingest-key-123")
-    if api_key and api_key == static_key:
-        return
+) -> str:
+    """Allow ingest if X-API-Key header matches static config, or if a valid JWT is present. Returns tenant_id."""
+    from denoiser.storage.db import Tenant
+    if api_key:
+        tenant = db.query(Tenant).filter(Tenant.api_key == api_key).first()
+        if tenant:
+            return tenant.id
+        # Fallback to default for local dev
+        static_key = os.getenv("INGEST_API_KEY", "semanticos-ingest-key-123")
+        if api_key == static_key:
+            return "default_tenant"
 
     if token:
         try:
-            get_current_user(token, db)
-            return
+            user = get_current_user(token, db)
+            return user.tenant_id
         except Exception:
             pass
 
     raise HTTPException(status_code=401, detail="Invalid API Key or JWT token")
 
 
-@app.post("/ingest", dependencies=[Depends(verify_ingest_auth)])
-async def ingest_logs(payload: IngestPayload):
+@app.post("/ingest")
+async def ingest_logs(payload: IngestPayload, tenant_id: str = Depends(verify_ingest_auth)):
     """
     Standard HTTP ingestion endpoint.
     Accepts arrays of JSON logs (standard format from FluentBit / Vector).
@@ -400,7 +408,7 @@ async def ingest_logs(payload: IngestPayload):
         # Dual-write to ClickHouse for analytics (Task 40)
         # Assuming body is a list of dicts, if strings, we skip ClickHouse for now
         if isinstance(body[0], dict):
-            clickhouse_store.insert_logs(body)
+            clickhouse_store.insert_logs(body, tenant_id=tenant_id)
 
         # Task 45: Publish to Redis Pub/Sub for horizontally scaled WebSockets
         try:
@@ -485,7 +493,7 @@ class LogQuery(BaseModel):
 def query_logs_api(payload: LogQuery, current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
     """Execute a Log Query Language (LQL) search against the unified ClickHouse log stream."""
     try:
-        results = clickhouse_store.query_logs(payload.query, limit=payload.limit)
+        results = clickhouse_store.query_logs(payload.query, limit=payload.limit, tenant_id=current_user.tenant_id)
         return {"status": "success", "count": len(results), "results": results}
     except Exception as e:
         logger.error(f"LQL Query failed: {e}")

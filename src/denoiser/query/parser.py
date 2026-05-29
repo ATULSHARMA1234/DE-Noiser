@@ -85,23 +85,31 @@ def evaluate_in_memory(node: QueryNode, log: Dict[str, Any]) -> bool:
         return evaluate_in_memory(node.left, log) or evaluate_in_memory(node.right, log)
     return False
 
-def compile_to_sql(node: QueryNode) -> str:
-    """Compile the AST to ClickHouse SQL WHERE clause"""
+def compile_to_sql(node: QueryNode, params: Dict[str, Any]) -> str:
+    """Compile the AST to ClickHouse SQL WHERE clause using parameterized parameters"""
+    param_id = f"p{len(params)}"
+    
     if isinstance(node, TextMatch):
         if not node.text:
             return "1=1"
-        # ClickHouse syntax for searching JSON string or message
-        safe_text = node.text.replace("'", "''")
-        return f"(message ILIKE '%{safe_text}%' OR raw_json ILIKE '%{safe_text}%')"
+        params[param_id] = f"%{node.text}%"
+        return f"(message ILIKE {{{param_id}:String}} OR raw_json ILIKE {{{param_id}:String}})"
+        
     elif isinstance(node, FieldMatch):
-        safe_val = node.value.replace("'", "''")
+        params[param_id] = node.value
         if node.field in ("source", "level"):
-            return f"{node.field} = '{safe_val}'"
+            return f"{node.field} = {{{param_id}:String}}"
         else:
-            # JSON extract for arbitrary fields
-            return f"JSONExtractString(raw_json, '{node.field}') = '{safe_val}'"
+            return f"JSONExtractString(raw_json, '{node.field}') = {{{param_id}:String}}"
+            
     elif isinstance(node, AndNode):
-        return f"({compile_to_sql(node.left)} AND {compile_to_sql(node.right)})"
+        left_sql = compile_to_sql(node.left, params)
+        right_sql = compile_to_sql(node.right, params)
+        return f"({left_sql} AND {right_sql})"
+        
     elif isinstance(node, OrNode):
-        return f"({compile_to_sql(node.left)} OR {compile_to_sql(node.right)})"
+        left_sql = compile_to_sql(node.left, params)
+        right_sql = compile_to_sql(node.right, params)
+        return f"({left_sql} OR {right_sql})"
+        
     return "1=1"

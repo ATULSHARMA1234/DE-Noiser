@@ -24,16 +24,30 @@ def execute_query(payload: QueryRequestSchema, current_user: User = Depends(requ
     
     if clickhouse_store.client:
         try:
-            sql_where = compile_to_sql(ast)
+            params = {'tenant_id': current_user.tenant_id}
+            sql_where = compile_to_sql(ast, params)
+            sql_where = f"tenant_id = {{tenant_id:String}} AND ({sql_where})"
+            
             query = f"SELECT timestamp, source, level, message, raw_json FROM semantic_logs WHERE {sql_where} ORDER BY timestamp DESC LIMIT {payload.limit}"
-            result = clickhouse_store.client.command(query)
-            # convert to dict
+            result = clickhouse_store.client.query(query, parameters=params)
+            
             logs = []
-            if result:
-                for row in result:
-                    # Depending on clickhouse_connect return format (list of tuples)
-                    if isinstance(row, tuple) and len(row) >= 5:
-                        logs.append(json.loads(row[4]))
+            if result and result.result_rows:
+                for row in result.result_rows:
+                    row_dict = dict(zip(result.column_names, row))
+                    log_entry = {}
+                    if row_dict.get('raw_json'):
+                        try:
+                            log_entry = json.loads(row_dict['raw_json'])
+                        except:
+                            pass
+                    # Merge structured fields
+                    log_entry['timestamp'] = row_dict['timestamp']
+                    log_entry['source'] = row_dict['source']
+                    log_entry['level'] = row_dict['level']
+                    log_entry['message'] = row_dict['message']
+                    logs.append(log_entry)
+                    
             return {"status": "success", "engine": "clickhouse", "logs": logs}
         except Exception as e:
             # Fallback to in-memory
