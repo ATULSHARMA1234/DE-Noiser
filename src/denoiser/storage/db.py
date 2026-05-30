@@ -54,6 +54,10 @@ class Incident(Base):
     total_logs = Column(Integer, nullable=True)
     cluster_count = Column(Integer, nullable=True)
 
+    # Predictive AI
+    is_predictive = Column(Boolean, default=False)
+    forecasted_depletion_time = Column(DateTime, nullable=True)
+
 
 class AnalysisRun(Base):
     __tablename__ = "analysis_runs"
@@ -191,6 +195,7 @@ class Runbook(Base):
     __tablename__ = "runbooks"
 
     id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, index=True, nullable=True)
     name = Column(String, nullable=False)
     trigger_condition = Column(JSON, default=dict)
     steps = Column(JSON, default=list)
@@ -216,6 +221,18 @@ class Tenant(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False, unique=True)
     api_key = Column(String, nullable=True, unique=True)
+    tier = Column(String, default="free")  # free, pro, enterprise
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+class BillingMeter(Base):
+    __tablename__ = "billing_meters"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, index=True, nullable=False)
+    date = Column(DateTime, nullable=False)
+    total_logs_ingested = Column(Integer, default=0)
+    total_bytes_ingested = Column(Integer, default=0)
+    total_traces_ingested = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 class Integration(Base):

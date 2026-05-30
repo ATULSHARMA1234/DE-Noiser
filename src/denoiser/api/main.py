@@ -62,6 +62,9 @@ metrics_agent = MetricsCollector()
 ebpf_agent = EBPFCollector()
 clickhouse_store = ClickHouseStore()
 
+from aiokafka import AIOKafkaProducer
+kafka_producer = None
+
 app = FastAPI(title="SemanticOS — Enterprise Log Intelligence API", version="2.0.0")
 
 # ── Enterprise Middleware Stack (Tasks 1, 3, 4) ──────────────────────────────
@@ -135,7 +138,7 @@ def _save_settings(s: dict):
 
 
 @app.on_event("startup")
-def on_startup():
+async def on_startup():
     init_db()
     DATA_DIR.mkdir(exist_ok=True)
     if not SETTINGS_FILE.exists():
@@ -143,12 +146,27 @@ def on_startup():
     metrics_agent.start()
     ebpf_agent.start()
     start_scheduler()
+    
+    global kafka_producer
+    try:
+        kafka_producer = AIOKafkaProducer(
+            bootstrap_servers=os.getenv("KAFKA_BROKER", "localhost:9092")
+        )
+        await kafka_producer.start()
+        logger.info("Kafka Producer started")
+    except Exception as e:
+        logger.error(f"Failed to start Kafka Producer: {e}")
 
 @app.on_event("shutdown")
-def on_shutdown():
+async def on_shutdown():
     metrics_agent.stop()
     ebpf_agent.stop()
     stop_scheduler()
+    
+    global kafka_producer
+    if kafka_producer:
+        await kafka_producer.stop()
+        logger.info("Kafka Producer stopped")
 
 
 # ─── MODELS — Now imported from denoiser.api.schemas ─────────────────────────
@@ -405,10 +423,17 @@ async def ingest_logs(payload: IngestPayload, tenant_id: str = Depends(verify_in
                 else:
                     f.write(str(log_entry) + "\n")
 
-        # Dual-write to ClickHouse for analytics (Task 40)
-        # Assuming body is a list of dicts, if strings, we skip ClickHouse for now
-        if isinstance(body[0], dict):
-            clickhouse_store.insert_logs(body, tenant_id=tenant_id)
+        # Hyperscale ingestion (Phase 24): Push to Redpanda/Kafka instead of ClickHouse directly
+        if kafka_producer:
+            for log_entry in body:
+                payload_to_send = log_entry if isinstance(log_entry, dict) else {"raw_text": str(log_entry)}
+                payload_to_send["_tenant_id"] = tenant_id
+                msg_bytes = json.dumps(payload_to_send).encode('utf-8')
+                await kafka_producer.send_and_wait("logs_topic", msg_bytes)
+        else:
+            # Fallback to direct ClickHouse insert if Kafka is unavailable
+            if isinstance(body[0], dict):
+                clickhouse_store.insert_logs(body, tenant_id=tenant_id)
 
         # Task 45: Publish to Redis Pub/Sub for horizontally scaled WebSockets
         try:

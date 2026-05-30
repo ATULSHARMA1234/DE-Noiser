@@ -16,7 +16,7 @@ router = APIRouter(prefix="/traces", tags=["tracing"])
 from fastapi import Header
 
 @router.post("/v1/traces", summary="OTLP HTTP Ingest")
-def ingest_traces(
+async def ingest_traces(
     payload: Dict[Any, Any] = Body(...), 
     db: Session = Depends(get_db),
     api_key: str = Header(None, alias="x-api-key")
@@ -30,7 +30,13 @@ def ingest_traces(
         # Default fallback for testing if no key is provided
         tenant_id = tenant.id if tenant else "default_tenant"
         
-        process_otlp_traces(db, payload, tenant_id=tenant_id)
+        from denoiser.api.main import kafka_producer
+        if kafka_producer:
+            payload["_tenant_id"] = tenant_id
+            msg_bytes = json.dumps(payload).encode('utf-8')
+            await kafka_producer.send_and_wait("traces_topic", msg_bytes)
+        else:
+            process_otlp_traces(db, payload, tenant_id=tenant_id)
         return {"status": "success"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

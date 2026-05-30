@@ -3,8 +3,9 @@
 import React, { useState, useEffect } from 'react';
 import { apiFetch } from '@/lib/api';
 import { useToast } from '@/context/ToastContext';
+import { ShimmerCardList } from '@/components/ShimmerSkeleton';
 import { LayoutGrid, Plus, Edit2, Trash2, ArrowLeft, BarChart2, Activity, List, X } from 'lucide-react';
-import { Responsive, WidthProvider } from "react-grid-layout";
+import { Responsive, WidthProvider } from "react-grid-layout/legacy";
 
 const ResponsiveGridLayout = WidthProvider(Responsive);
 

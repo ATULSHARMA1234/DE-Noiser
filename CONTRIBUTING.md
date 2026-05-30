@@ -1,59 +1,33 @@
 # Contributing to SemanticOS
 
-First off, thank you for considering contributing to SemanticOS! It's people like you that make SemanticOS such a great observability platform.
+First off, thank you for considering contributing to SemanticOS! It's people like you that make SemanticOS such a great tool.
 
-## Code of Conduct
+## How Can I Contribute?
 
-By participating in this project, you are expected to uphold our Code of Conduct. Please be respectful, inclusive, and professional in all interactions.
+### Reporting Bugs
+This section guides you through submitting a bug report. Following these guidelines helps maintainers and the community understand your report, reproduce the behavior, and find related reports.
+* Use a clear and descriptive title.
+* Describe the exact steps to reproduce the problem.
+* Provide specific examples to demonstrate the steps.
 
-## How to Contribute
+### Suggesting Enhancements
+* Use a clear and descriptive title.
+* Provide a step-by-step description of the suggested enhancement.
+* Provide specific examples to demonstrate the steps.
+* Describe the current behavior and explain which behavior you expected to see instead.
 
-### 1. Reporting Bugs
-- Check the issue tracker to see if the bug has already been reported.
-- If not, open a new issue. Please include:
-  - A clear, descriptive title.
-  - Steps to reproduce the bug.
-  - Expected vs. actual behavior.
-  - Your environment details (OS, Python version, Docker version, etc.).
-
-### 2. Suggesting Enhancements
-- Open an issue describing the feature.
-- Explain *why* this enhancement would be useful to most users.
-- If you have an idea of how to implement it, please include it!
-
-### 3. Pull Requests
-1. **Fork the repo** and create your branch from `main`.
-2. **Install dependencies**:
-   - Backend: `uv sync`
-   - Frontend: `cd web && npm install`
-3. **Make your changes**. If you've added code that should be tested, add tests.
-4. **Ensure the test suite passes**.
-5. **Update documentation** if you've changed APIs or features.
-6. **Submit that pull request!**
+### Pull Requests
+* Fill in the required template.
+* Do not include issue numbers in the PR title.
+* Follow the Python and TypeScript style guides.
+* Ensure all tests pass (`pytest` and `npm run test`).
 
 ## Development Setup
 
-### Backend (Python)
-We use `uv` for lightning-fast dependency management.
-```bash
-uv sync
-uv run python -m uvicorn denoiser.api.main:app --reload
-```
+1. Clone the repository
+2. Run `docker-compose up -d` to start the backend services (Redpanda, ClickHouse, Redis).
+3. Start the FastAPI backend: `cd src && uv run python -m uvicorn denoiser.api.main:app`
+4. Start the Next.js frontend: `cd web && npm install && npm run dev`
 
-### Frontend (Next.js)
-```bash
-cd web
-npm run dev
-```
-
-### eBPF Agent (C/Go)
-If modifying the agent, you will need a Linux machine (or VM/container) with `clang` and `llvm` installed.
-```bash
-cd agent
-make generate
-make build
-```
-
-## Architecture
-
-Please review `README.md` for a high-level overview. When adding new features, try to respect the existing boundaries between the ingestion gateway (`api`), background workers (`analysis_worker.py`), and storage interfaces (`clickhouse_store.py`).
+## Code of Conduct
+By participating in this project, you are expected to uphold our Code of Conduct. Please be respectful to all community members.

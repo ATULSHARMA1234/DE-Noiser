@@ -70,7 +70,7 @@ export default function ExplorePage() {
     }
   };
 
-  const handleSampleClick = (sample: str) => {
+  const handleSampleClick = (sample: string) => {
     setQuery(sample);
   };
 

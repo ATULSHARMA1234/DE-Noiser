@@ -3,7 +3,7 @@ import json
 import os
 import time
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import polars as pl
@@ -463,7 +463,7 @@ def evaluate_slos():
                 db.add(dp)
 
                 if value < slo.target_percentage:
-                    # SLO Breach -> Incident
+                    # Current SLO Breach -> Incident
                     from denoiser.storage.db import Incident
                     incident = Incident(
                         tenant_id=slo.tenant_id,
@@ -472,7 +472,8 @@ def evaluate_slos():
                         impact_score=1.0,
                         summary=f"SLO '{slo.name}' breached for service '{slo.service}'. Target: {slo.target_percentage}%, Actual: {value:.2f}%",
                         remediation_hints=["Check recent deployments", "Scale up service replicas"],
-                        source="SLO Evaluator"
+                        source="SLO Evaluator",
+                        is_predictive=False
                     )
                     db.add(incident)
                     db.commit() # commit early to trigger runbook
@@ -483,6 +484,59 @@ def evaluate_slos():
                         process_incident(db, incident)
                     except Exception as auto_err:
                         logger.error(f"Failed to execute runbook on SLO breach: {auto_err}")
+
+                else:
+                    # Evaluate Predictive AI / Anomaly Forecasting
+                    # Fetch last 10 data points
+                    recent_points = db.query(SLODataPoint).filter(SLODataPoint.slo_id == slo.id).order_by(SLODataPoint.timestamp.desc()).limit(10).all()
+                    if len(recent_points) >= 5:
+                        recent_points.reverse() # chronological
+                        
+                        # Calculate slope (value change per minute)
+                        # For simplicity, X is index 0 to N-1
+                        x_mean = sum(range(len(recent_points))) / len(recent_points)
+                        y_mean = sum(p.value for p in recent_points) / len(recent_points)
+                        
+                        numerator = sum((i - x_mean) * (p.value - y_mean) for i, p in enumerate(recent_points))
+                        denominator = sum((i - x_mean) ** 2 for i in range(len(recent_points)))
+                        slope = numerator / denominator if denominator != 0 else 0
+                        
+                        # Only trigger if the trend is downwards
+                        if slope < -0.05:
+                            # minutes to target = (value - target) / |slope|
+                            minutes_to_depletion = (recent_points[-1].value - slo.target_percentage) / abs(slope)
+                            if minutes_to_depletion < 240 and minutes_to_depletion > 0: # < 4 hours
+                                forecasted_time = datetime.now(UTC) + timedelta(minutes=minutes_to_depletion)
+                                from denoiser.storage.db import Incident
+                                
+                                # Check if we already have a predictive incident for this SLO recently to avoid spam
+                                recent_predictive = db.query(Incident).filter(
+                                    Incident.tenant_id == slo.tenant_id,
+                                    Incident.title == f"Predictive Warning: {slo.name} will breach soon",
+                                    Incident.status == "OPEN"
+                                ).first()
+                                
+                                if not recent_predictive:
+                                    incident = Incident(
+                                        tenant_id=slo.tenant_id,
+                                        title=f"Predictive Warning: {slo.name} will breach soon",
+                                        domain=slo.service,
+                                        impact_score=0.8,
+                                        summary=f"Predictive AI foresees SLO '{slo.name}' for service '{slo.service}' will breach its target of {slo.target_percentage}% in approx {int(minutes_to_depletion)} minutes.",
+                                        remediation_hints=["Investigate current trend", "Rollback recent deployment"],
+                                        source="SLO Evaluator",
+                                        is_predictive=True,
+                                        forecasted_depletion_time=forecasted_time
+                                    )
+                                    db.add(incident)
+                                    db.commit()
+                                    db.refresh(incident)
+                                    
+                                    try:
+                                        from denoiser.automation.engine import process_incident
+                                        process_incident(db, incident)
+                                    except Exception as auto_err:
+                                        logger.error(f"Failed to execute runbook on predictive SLO breach: {auto_err}")
 
             except Exception as e:
                 logger.error(f"Failed to evaluate SLO {slo.id}: {e}")

@@ -65,6 +65,27 @@ class ClickHouseStore:
             logger.error(f"Failed to connect to ClickHouse: {e}")
             self.client = None
 
+    def cleanup_old_data(self, tenant_id: str, days_to_keep: int):
+        """
+        Phase 26: Data Tiering. Deletes logs and traces older than `days_to_keep` for a specific tenant.
+        """
+        if not self.client:
+            return
+        try:
+            # Delete old logs
+            self.client.command(f"""
+                ALTER TABLE semantic_logs 
+                DELETE WHERE tenant_id = '{tenant_id}' AND timestamp < now() - INTERVAL {days_to_keep} DAY
+            """)
+            # Delete old traces
+            self.client.command(f"""
+                ALTER TABLE semantic_traces 
+                DELETE WHERE tenant_id = '{tenant_id}' AND start_time < now() - INTERVAL {days_to_keep} DAY
+            """)
+            logger.info(f"Cleaned up data older than {days_to_keep} days for tenant {tenant_id}")
+        except Exception as e:
+            logger.error(f"Failed to cleanup old data for tenant {tenant_id}: {e}")
+
     def insert_logs(self, logs: list[dict[str, Any]], tenant_id: str):
         """Dual-write logs to ClickHouse"""
         if not self.client:

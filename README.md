@@ -1,68 +1,69 @@
 # SemanticOS
 
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Status](https://img.shields.io/badge/Status-Beta-purple.svg)]()
+SemanticOS is a privacy-first, hyperscale, on-premise log analysis and observability platform. It uses semantic clustering (HDBSCAN), a causal proximity scorer, and a local LLM to automatically denoise millions of logs, find root causes, and trigger automated runbooks — all without your data ever leaving your infrastructure.
 
-**SemanticOS** is an open-source, privacy-first observability platform designed to automatically denoise high-volume logs, reduce alert fatigue, and generate root-cause intelligence locally—without sending your data to a third-party cloud.
+![Command Center Dashboard](https://via.placeholder.com/1200x600?text=SemanticOS+Command+Center)
 
-It combines the power of OpenTelemetry, ClickHouse, and local large language models (LLMs) to provide an enterprise-grade experience at zero cost.
+## Why SemanticOS?
+Modern enterprise observability tools (like Datadog, Splunk, or New Relic) are expensive and require you to send sensitive PII and infrastructure data to third-party clouds. SemanticOS provides the same advanced AIOps features for free, running entirely on your own hardware.
 
-## Features
-
-- 🧠 **AI-Powered Log Denoising**: Uses HDBSCAN and semantic clustering to reduce millions of raw logs into a handful of actionable patterns.
-- 🕵️ **Local Root Cause Analysis**: Leverages a local LLM to analyze correlated traces and logs, outputting a human-readable incident summary and remediation steps.
-- ⚡ **High-Performance Storage**: Built on ClickHouse for blazingly fast queries and high-throughput ingestion.
-- 🔍 **Log Query Language (LQL)**: A secure, AST-based search language for rapid ad-hoc log querying and filtering.
-- 📊 **SLO & Metrics**: Automatic Log-to-Metrics conversion to track error budgets and Service Level Objectives.
-- 🤖 **Automated Runbooks**: Execute remediation workflows (webhooks, scripts) automatically upon SLO breach or P0 incident detection.
-- 🏢 **Multi-Tenancy**: Built-in row-level data isolation and JWT role-based access control (RBAC).
+### Key Features
+- **Semantic Clustering:** Automatically groups millions of similar log lines into unique pattern templates using an agglomerative HDBSCAN pipeline.
+- **Predictive AI & SLOs:** Defines error budgets and uses forecasting models to predict when an SLO will breach.
+- **Distributed Tracing (eBPF):** High-performance kernel-level tracing without instrumenting application code.
+- **Hyperscale Ingestion:** Powered by Redpanda and ClickHouse to ingest and store millions of events per second with multi-tenant data tiering.
+- **Local LLM Incident Narratives:** Generates human-readable root cause analyses using local models (e.g. Llama 3 via Ollama).
+- **Log Query Language:** A custom query DSL to search structured and unstructured logs efficiently.
+- **Automated Runbooks:** Triggers automated workflows and multi-channel alerts (Slack, PagerDuty) on anomalies.
 
 ## Architecture
 
-1. **Ingestion**: OTLP traces and structured logs are ingested via the FastAPI gateway.
-2. **Storage**: Data is durably persisted into ClickHouse.
-3. **Analysis Worker**: A Celery worker periodically clusters logs, evaluates SLOs, and extracts metrics.
-4. **Intelligence**: When anomalies are detected, logs are embedded via LanceDB and summarized via the LLM.
-5. **Runbooks**: Incidents trigger automated, user-defined runbooks.
+```mermaid
+graph TD
+    A[Logs / eBPF Traces] --> B[FastAPI Ingestion]
+    B --> C[Redpanda / Kafka]
+    C --> D[Ingestion Worker]
+    D --> E[(ClickHouse)]
+    E --> F[Analysis Worker (Clustering & Scoring)]
+    F --> G[Local LLM]
+    F --> H[(PostgreSQL)]
+    H --> I[Next.js Frontend]
+```
 
 ## Quickstart
 
 ### Prerequisites
 - Docker & Docker Compose
+- Node.js v18+
 - Python 3.11+
-- Node.js 18+
+- `uv` package manager
 
-### Running Locally
+### 1. Start Infrastructure
+Start Redpanda, ClickHouse, Redis, and PostgreSQL:
+```bash
+docker-compose up -d
+```
 
-1. **Start the Infrastructure** (ClickHouse, Redis)
-   ```bash
-   docker-compose up -d
-   ```
+### 2. Start Backend
+Run the FastAPI application:
+```bash
+uv run python -m uvicorn denoiser.api.main:app --host 0.0.0.0 --port 8000
+```
 
-2. **Start the API & Worker**
-   ```bash
-   # Terminal 1
-   uv run python -m uvicorn denoiser.api.main:app --reload
+### 3. Start Frontend
+Run the Next.js React frontend:
+```bash
+cd web
+npm install
+npm run dev
+```
 
-   # Terminal 2
-   uv run celery -A denoiser.workers.analysis_worker.celery_app worker --loglevel=info
-   ```
+The Command Center will be available at [http://localhost:3000/app](http://localhost:3000/app).
 
-3. **Start the Frontend**
-   ```bash
-   cd web
-   npm install
-   npm run dev
-   ```
-
-4. **Visit SemanticOS**
-   Open [http://localhost:3000](http://localhost:3000) in your browser. Log in with the default credentials (`admin@semanticos.local` / `admin`).
-
-## Community & Support
-
-- **Bug Reports**: Please use the GitHub Issue Tracker.
-- **Discussions**: Join our Discord community (link coming soon).
+## Documentation
+- [Contributing Guidelines](CONTRIBUTING.md)
+- [API Reference](docs/api.md) *(coming soon)*
+- [Architecture Details](docs/architecture.md) *(coming soon)*
 
 ## License
-
-SemanticOS is licensed under the Apache License 2.0. See [LICENSE](LICENSE) for details.
+SemanticOS is licensed under the [MIT License](LICENSE).
