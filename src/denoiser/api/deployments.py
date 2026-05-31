@@ -1,11 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-from typing import List, Optional
-from pydantic import BaseModel
 from datetime import datetime
 
-from denoiser.storage.db import get_db, DeploymentMarker as DBDeploymentMarker
-from denoiser.api.auth import require_role, User
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from denoiser.api.auth import User, require_role
+from denoiser.storage.db import DeploymentMarker as DBDeploymentMarker
+from denoiser.storage.db import get_db
 
 router = APIRouter(prefix="/deployments", tags=["deployments"])
 
@@ -13,20 +14,20 @@ class DeploymentMarkerCreateSchema(BaseModel):
     service: str
     version: str
     environment: str
-    description: Optional[str] = None
+    description: str | None = None
 
 class DeploymentMarkerSchema(BaseModel):
     id: int
     service: str
     version: str
     environment: str
-    description: Optional[str]
+    description: str | None
     timestamp: datetime
 
     class Config:
         from_attributes = True
 
-@router.get("", response_model=List[DeploymentMarkerSchema])
+@router.get("", response_model=list[DeploymentMarkerSchema])
 def list_deployments(db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
     deployments = db.query(DBDeploymentMarker).filter(DBDeploymentMarker.tenant_id == current_user.tenant_id).order_by(DBDeploymentMarker.timestamp.desc()).limit(100).all()
     return deployments

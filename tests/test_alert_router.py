@@ -5,7 +5,6 @@ Uses httpx's MockTransport to avoid network calls.
 """
 from __future__ import annotations
 
-import asyncio
 import pytest
 
 from denoiser.integrations.alert_router import (
@@ -14,13 +13,12 @@ from denoiser.integrations.alert_router import (
     ChannelType,
     DeliveryStatus,
     WebhookConfig,
-    _format_slack,
-    _format_pagerduty,
-    _format_teams,
     _format_generic,
+    _format_pagerduty,
+    _format_slack,
+    _format_teams,
     _should_route,
 )
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -166,7 +164,7 @@ class TestDelivery:
         router.register(cfg)
 
         alert = _make_alert("P3")
-        records = await router.dispatch(alert)
+        await router.dispatch(alert)
 
         # No HTTP records because dispatch was skipped
         skipped = [r for r in router.get_delivery_log() if r["status"] == "skipped"]
@@ -175,7 +173,6 @@ class TestDelivery:
     @pytest.mark.asyncio
     async def test_delivery_attempted_on_matching_priority(self, respx_mock):
         """P0 alert on a P1 channel should be attempted (HTTP mock returns 200)."""
-        import respx
         import httpx
 
         router = AlertRouter()

@@ -45,7 +45,7 @@ class ObjectStore:
             else:
                 logger.error(f"Failed to check/create bucket {self.bucket_name}: {e}")
 
-    def upload_file(self, file_path: str, object_name: str = None) -> bool:
+    def upload_file(self, file_path: str, object_name: str | None = None) -> bool:
         """Upload a file to an S3 bucket"""
         if object_name is None:
             object_name = os.path.basename(file_path)

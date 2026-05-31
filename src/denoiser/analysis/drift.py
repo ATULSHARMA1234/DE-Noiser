@@ -29,11 +29,11 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 
 # ── Enumerations ──────────────────────────────────────────────────────────────
 
-class DriftKind(str, Enum):
+class DriftKind(StrEnum):
     EMERGED        = "emerged"
     RESOLVED       = "resolved"
     ESCALATED      = "escalated"
@@ -230,7 +230,7 @@ def _health_score(clusters: list[ClusterSnapshot]) -> float:
     # P0 (rank 0) -> 0.0. P3 (rank 3) -> 1.0
     rank_scores = [_PRIORITY_RANK.get(c.priority, 3) / 3 for c in clusters]
     anomaly_scores = [1.0 - min(c.anomaly_score, 1.0) for c in clusters]
-    return sum(r + a for r, a in zip(rank_scores, anomaly_scores)) / (2 * len(clusters))
+    return sum(r + a for r, a in zip(rank_scores, anomaly_scores, strict=False)) / (2 * len(clusters))
 
 
 # ── Detector ──────────────────────────────────────────────────────────────────

@@ -1,16 +1,18 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-from typing import List, Dict, Any
 import datetime
 import random
 
-from denoiser.storage.db import get_db, MetricRule as DBMetricRule, ExtractedMetric as DBExtractedMetric
-from denoiser.api.auth import require_role, User
-from denoiser.metrics.models import MetricRuleCreateSchema, MetricRuleSchema, ExtractedMetricSchema
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+
+from denoiser.api.auth import User, require_role
+from denoiser.metrics.models import MetricRuleCreateSchema, MetricRuleSchema
+from denoiser.storage.db import ExtractedMetric as DBExtractedMetric
+from denoiser.storage.db import MetricRule as DBMetricRule
+from denoiser.storage.db import get_db
 
 router = APIRouter(prefix="/metrics", tags=["metrics"])
 
-@router.get("/rules", response_model=List[MetricRuleSchema])
+@router.get("/rules", response_model=list[MetricRuleSchema])
 def list_metric_rules(db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
     rules = db.query(DBMetricRule).order_by(DBMetricRule.created_at.desc()).all()
     return rules
@@ -33,7 +35,7 @@ def delete_metric_rule(rule_id: int, db: Session = Depends(get_db), current_user
     rule = db.query(DBMetricRule).filter(DBMetricRule.id == rule_id).first()
     if not rule:
         raise HTTPException(status_code=404, detail="Rule not found")
-        
+
     db.delete(rule)
     db.commit()
     return {"status": "deleted"}
@@ -43,9 +45,9 @@ def get_metric_data(rule_id: int, db: Session = Depends(get_db), current_user: U
     rule = db.query(DBMetricRule).filter(DBMetricRule.id == rule_id).first()
     if not rule:
         raise HTTPException(status_code=404, detail="Rule not found")
-        
+
     metrics = db.query(DBExtractedMetric).filter(DBExtractedMetric.rule_id == rule_id).order_by(DBExtractedMetric.timestamp.asc()).all()
-    
+
     # If no data exists yet, mock some data for the sandbox
     if not metrics:
         now = datetime.datetime.utcnow()

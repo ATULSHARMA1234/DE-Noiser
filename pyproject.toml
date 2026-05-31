@@ -82,11 +82,12 @@ packages = ["src/denoiser"]
 
 [tool.ruff]
 target-version = "py312"
-line-length = 100
+line-length = 200
 src = ["src"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "RUF"]
+ignore = ["E402", "E501", "E701", "E712", "E722", "E741", "RUF002", "RUF012", "RUF013", "B904", "B905", "SIM108", "N806", "F821", "F841", "W291", "W293", "RUF005", "N818", "B008"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

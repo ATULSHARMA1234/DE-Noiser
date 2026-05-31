@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { apiFetch } from '@/lib/api';
 import { useToast } from '@/context/ToastContext';
-import { Activity, Clock, Search, AlertCircle, Server, FileText, ChevronRight, ArrowLeft } from 'lucide-react';
+import { Activity, Clock, Search, AlertCircle, Server, ChevronRight, ArrowLeft } from 'lucide-react';
 
 export default function TracesPage() {
   const { toast } = useToast();
@@ -11,12 +11,7 @@ export default function TracesPage() {
   const [loading, setLoading] = useState(true);
   const [selectedTraceId, setSelectedTraceId] = useState<string | null>(null);
   const [traceDetail, setTraceDetail] = useState<any>(null);
-  const [loadingDetail, setLoadingDetail] = useState(false);
   const [selectedSpan, setSelectedSpan] = useState<any>(null);
-
-  useEffect(() => {
-    fetchTraces();
-  }, []);
 
   const fetchTraces = async () => {
     setLoading(true);
@@ -30,17 +25,20 @@ export default function TracesPage() {
     }
   };
 
+  useEffect(() => {
+    fetchTraces();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+
   const loadTraceDetail = async (traceId: string) => {
     setSelectedTraceId(traceId);
-    setLoadingDetail(true);
     try {
       const data = await apiFetch(`/traces/${traceId}`);
       setTraceDetail(data);
       setSelectedSpan(null);
     } catch (e: any) {
       toast({ title: 'Error fetching trace detail', description: e.message, type: 'error' });
-    } finally {
-      setLoadingDetail(false);
     }
   };
 

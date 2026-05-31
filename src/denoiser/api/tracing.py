@@ -1,23 +1,27 @@
-from fastapi import APIRouter, Depends, HTTPException, Body
-from typing import List, Dict, Any
 import json
+from typing import Any
 
-from denoiser.api.auth import require_role, User
-from denoiser.tracing.otlp_collector import process_otlp_traces
-from denoiser.tracing.models import TraceSchema, SpanSchema
-from denoiser.storage.clickhouse_store import ClickHouseStore
+from fastapi import APIRouter, Body, Depends, HTTPException
 
 # SQLite dependencies just for OTLP collector signature if needed
 from sqlalchemy.orm import Session
+
+from denoiser.api.auth import User, require_role
+from denoiser.storage.clickhouse_store import ClickHouseStore
 from denoiser.storage.db import get_db
+from denoiser.tracing.models import SpanSchema, TraceSchema
+from denoiser.tracing.otlp_collector import process_otlp_traces
 
 router = APIRouter(prefix="/traces", tags=["tracing"])
 
+import contextlib
+
 from fastapi import Header
+
 
 @router.post("/v1/traces", summary="OTLP HTTP Ingest")
 async def ingest_traces(
-    payload: Dict[Any, Any] = Body(...), 
+    payload: dict[Any, Any] = Body(...),
     db: Session = Depends(get_db),
     api_key: str = Header(None, alias="x-api-key")
 ):
@@ -29,7 +33,7 @@ async def ingest_traces(
         tenant = db.query(Tenant).filter(Tenant.api_key == api_key).first() if api_key else None
         # Default fallback for testing if no key is provided
         tenant_id = tenant.id if tenant else "default_tenant"
-        
+
         from denoiser.api.main import kafka_producer
         if kafka_producer:
             payload["_tenant_id"] = tenant_id
@@ -41,7 +45,7 @@ async def ingest_traces(
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@router.get("", response_model=List[TraceSchema])
+@router.get("", response_model=list[TraceSchema])
 def list_traces(limit: int = 50, current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
     """
     List trace aggregates fetched directly from ClickHouse.
@@ -53,7 +57,7 @@ def list_traces(limit: int = 50, current_user: User = Depends(require_role(["VIE
 
     # Group by trace_id to get root span data and trace metadata
     sql = f"""
-        SELECT 
+        SELECT
             trace_id,
             any(service_name) AS root_service,
             any(operation_name) AS root_operation,
@@ -67,19 +71,19 @@ def list_traces(limit: int = 50, current_user: User = Depends(require_role(["VIE
         ORDER BY start_time DESC
         LIMIT {limit}
     """
-    
+
     try:
         result = client.query(sql, parameters={'tenant_id': current_user.tenant_id})
-        
+
         traces = []
         for row in result.result_rows:
-            row_dict = dict(zip(result.column_names, row))
-            
+            row_dict = dict(zip(result.column_names, row, strict=False))
+
             # ClickHouse datetime objects can be converted
             start_t = row_dict['start_time']
             end_t = row_dict['end_time']
             duration_ms = max(0, (end_t - start_t).total_seconds() * 1000.0)
-            
+
             trace = TraceSchema(
                 trace_id=row_dict['trace_id'],
                 root_service=row_dict['root_service'],
@@ -91,7 +95,7 @@ def list_traces(limit: int = 50, current_user: User = Depends(require_role(["VIE
                 spans=[] # exclude spans for list view
             )
             traces.append(trace)
-            
+
         return traces
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -105,37 +109,33 @@ def get_trace(trace_id: str, current_user: User = Depends(require_role(["VIEWER"
     client = store.client
     if not client:
         raise HTTPException(status_code=500, detail="ClickHouse not available")
-        
-    sql = f"""
+
+    sql = """
         SELECT *
         FROM semantic_traces
-        WHERE tenant_id = {{tenant_id:String}} AND trace_id = {{trace_id:String}}
+        WHERE tenant_id = {tenant_id:String} AND trace_id = {trace_id:String}
         ORDER BY start_time ASC
     """
-    
+
     try:
         result = client.query(sql, parameters={'tenant_id': current_user.tenant_id, 'trace_id': trace_id})
         if not result.result_rows:
             raise HTTPException(status_code=404, detail="Trace not found")
-            
+
         spans = []
         for row in result.result_rows:
-            s_dict = dict(zip(result.column_names, row))
-            
+            s_dict = dict(zip(result.column_names, row, strict=False))
+
             attributes = {}
             if s_dict.get('attributes'):
-                try:
+                with contextlib.suppress(BaseException):
                     attributes = json.loads(s_dict['attributes'])
-                except:
-                    pass
-                    
+
             events = []
             if s_dict.get('events'):
-                try:
+                with contextlib.suppress(BaseException):
                     events = json.loads(s_dict['events'])
-                except:
-                    pass
-                    
+
             # Parse datetime fields handled by clickhouse-connect
             spans.append(SpanSchema(
                 trace_id=s_dict['trace_id'],
@@ -150,14 +150,14 @@ def get_trace(trace_id: str, current_user: User = Depends(require_role(["VIEWER"
                 attributes=attributes,
                 events=events
             ))
-            
+
         root = next((s for s in spans if not s.parent_span_id), spans[0])
         error_count = sum(1 for s in spans if s.status_code == 'ERROR')
-        
+
         start = min(s.start_time for s in spans)
         end = max(s.end_time for s in spans)
         duration_ms = max(0, (end - start).total_seconds() * 1000.0)
-        
+
         trace = TraceSchema(
             trace_id=root.trace_id,
             root_service=root.service_name,
@@ -169,7 +169,7 @@ def get_trace(trace_id: str, current_user: User = Depends(require_role(["VIEWER"
             spans=spans
         )
         return trace
-        
+
     except HTTPException:
         raise
     except Exception as e:

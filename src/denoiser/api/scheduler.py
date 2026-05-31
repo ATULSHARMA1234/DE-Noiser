@@ -69,9 +69,8 @@ async def archive_old_logs_to_s3():
                 # 1. Compress it
                 gz_path = str(file_path) + ".gz"
                 try:
-                    with open(file_path, 'rb') as f_in:
-                        with gzip.open(gz_path, 'wb') as f_out:
-                            shutil.copyfileobj(f_in, f_out)
+                    with open(file_path, 'rb') as f_in, gzip.open(gz_path, 'wb') as f_out:
+                        shutil.copyfileobj(f_in, f_out)
 
                     # 2. Upload to S3
                     object_name = f"archive/{file_path.name}.gz"

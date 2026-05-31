@@ -1,6 +1,7 @@
-from pydantic import BaseModel
-from typing import List, Optional
 from datetime import datetime
+
+from pydantic import BaseModel
+
 
 class SLOCreateSchema(BaseModel):
     name: str
@@ -28,4 +29,4 @@ class SLOStatusSchema(BaseModel):
     error_budget_remaining: int
     burn_rate: float
     status: str  # 'HEALTHY', 'WARNING', 'BREACHED'
-    data_points: List[dict]
+    data_points: list[dict]

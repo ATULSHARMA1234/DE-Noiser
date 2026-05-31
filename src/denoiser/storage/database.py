@@ -56,7 +56,7 @@ def save_analysis(
     total_logs: int,
     intelligence: dict,
     clusters: list,
-    anomalies: dict = None
+    anomalies: dict | None = None
 ):
     session = SessionLocal()
     try:

@@ -194,7 +194,7 @@ class LogClusterer:
         for cluster_id in unique_labels:
             mask = labels == cluster_id
             cluster_vectors = vectors[mask]
-            cluster_templates = [t for t, is_in in zip(unique_templates, mask) if is_in]
+            cluster_templates = [t for t, is_in in zip(unique_templates, mask, strict=False) if is_in]
 
             # Centroid
             centroid = np.mean(cluster_vectors, axis=0)

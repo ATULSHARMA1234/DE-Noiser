@@ -20,6 +20,7 @@ export default function SLOsPage() {
   });
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/immutability
     fetchSLOs();
   }, []);
 

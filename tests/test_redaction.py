@@ -2,7 +2,6 @@
 Task 7: Unit tests for the PII Redactor.
 """
 
-import pytest
 from denoiser.preprocessing.redaction import Redactor
 
 

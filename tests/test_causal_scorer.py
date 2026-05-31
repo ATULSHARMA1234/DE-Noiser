@@ -5,13 +5,13 @@ Verifies the CausalScorer math, sliding-window search, and directionality.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
-from datetime import datetime, timezone, timedelta
-from typing import Dict, List
 
 from denoiser.clustering.models import Cluster
+from denoiser.detection.causal_scorer import CausalScorer
 from denoiser.ingestion.models import LogRecord
-from denoiser.detection.causal_scorer import CausalScorer, CausalLink
 
 
 class TestCausalScorer:
@@ -20,8 +20,8 @@ class TestCausalScorer:
     @pytest.fixture
     def sample_data(self) -> tuple[list[Cluster], dict[str, list[LogRecord]]]:
         """Creates dummy clusters and records simulating cross-service causal events.
-        
-        Service A (payment) has a failure, and 50ms later, Service B (order) 
+
+        Service A (payment) has a failure, and 50ms later, Service B (order)
         has a timeout warning, repeating 3 times.
         """
         # Cluster 0: payment-service errors
@@ -51,8 +51,8 @@ class TestCausalScorer:
         clusters = [c0, c1]
 
         # Construct timestamps
-        base_time = datetime(2026, 5, 22, 23, 0, 0, tzinfo=timezone.utc)
-        
+        base_time = datetime(2026, 5, 22, 23, 0, 0, tzinfo=UTC)
+
         # Service A events at: base_time, base_time + 10s, base_time + 20s
         records_a = [
             LogRecord(
@@ -87,7 +87,7 @@ class TestCausalScorer:
     def test_causal_scorer_detects_link(self, sample_data):
         """Should detect directed causal link A -> B with exact delay and high confidence."""
         clusters, template_to_records = sample_data
-        
+
         scorer = CausalScorer(window_size_ms=500.0)
         links = scorer.analyze(clusters, template_to_records)
 
@@ -109,7 +109,7 @@ class TestCausalScorer:
     def test_causal_scorer_ignores_large_delays(self, sample_data):
         """If the delay is larger than the window size, no link should be found."""
         clusters, template_to_records = sample_data
-        
+
         # Modify Service B timestamps so they occur 600ms after Service A (outside the 500ms window)
         for record in template_to_records["order_service payment delayed timeout"]:
             record.timestamp = record.timestamp + timedelta(milliseconds=550) # 50ms + 550ms = 600ms
@@ -122,7 +122,7 @@ class TestCausalScorer:
     def test_causal_scorer_ignores_same_service_events(self, sample_data):
         """Events originating from the same service should be excluded from cross-service analysis."""
         clusters, template_to_records = sample_data
-        
+
         # Modify metadata so both belong to the same service
         for rec in template_to_records["payment_service failed charging card"]:
             rec.metadata["source_label"] = "common_service"
@@ -138,7 +138,7 @@ class TestCausalScorer:
         """Fewer than 2 clusters should immediately return empty results."""
         scorer = CausalScorer()
         assert scorer.analyze([], {}) == []
-        
+
         c = Cluster(
             cluster_id=0, centroid=None, size=1,
             representative_template="temp", representative_raw="raw",

@@ -1,12 +1,13 @@
-from pydantic import BaseModel
-from typing import List, Optional
 from datetime import datetime
+
+from pydantic import BaseModel
+
 
 class SavedQuerySchema(BaseModel):
     id: int
     name: str
     query_text: str
-    user_id: Optional[int] = None
+    user_id: int | None = None
     created_at: datetime
     last_used: datetime
 

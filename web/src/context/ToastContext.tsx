@@ -61,8 +61,9 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 
   // Cleanup all timeouts on unmount
   React.useEffect(() => {
+    const timers = timersRef.current;
     return () => {
-      Object.values(timersRef.current).forEach(clearTimeout);
+      Object.values(timers).forEach(clearTimeout);
     };
   }, []);
 
@@ -72,11 +73,14 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   }, [addToast]);
 
   const toast = React.useMemo(() => {
-    const fn = toastFn as ToastFunction;
+    const fn: any = (options: ToastOptions) => toastFn(options);
+    // eslint-disable-next-line react-hooks/immutability
     fn.success = (msg: string) => addToast('success', msg);
+    // eslint-disable-next-line react-hooks/immutability
     fn.error = (msg: string) => addToast('error', msg);
+    // eslint-disable-next-line react-hooks/immutability
     fn.info = (msg: string) => addToast('info', msg);
-    return fn;
+    return fn as ToastFunction;
   }, [toastFn, addToast]);
 
   return (

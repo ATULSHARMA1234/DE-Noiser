@@ -31,10 +31,7 @@ class EBPFCollector:
                 event = bpf["events"].event(data)
                 ts_ms = int(time.time() * 1000)
                 comm = getattr(event, "comm", b"")
-                if isinstance(comm, (bytes, bytearray)):
-                    comm_str = comm.split(b"\x00", 1)[0].decode("utf-8", errors="replace")
-                else:
-                    comm_str = str(comm)
+                comm_str = comm.split(b"\x00", 1)[0].decode("utf-8", errors="replace") if isinstance(comm, (bytes, bytearray)) else str(comm)
 
                 payload = {
                     "timestamp": ts_ms,

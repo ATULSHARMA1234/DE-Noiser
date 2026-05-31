@@ -3,14 +3,12 @@ Tests for the DriftDetector (Task 16).
 """
 from __future__ import annotations
 
-import pytest
-
 from denoiser.analysis.drift import (
     ClusterSnapshot,
     DriftDetector,
     DriftKind,
-    _jaccard,
     _health_score,
+    _jaccard,
 )
 
 
@@ -62,7 +60,7 @@ class TestDriftDetector:
         detector = DriftDetector()
         run_a = []
         run_b = [_make_snap(1, "New error pattern emerged in prod", priority="P1")]
-        
+
         report = detector.compare("A", run_a, "B", run_b)
         assert len(report.events) == 1
         assert report.events[0].kind == DriftKind.EMERGED
@@ -73,7 +71,7 @@ class TestDriftDetector:
         detector = DriftDetector()
         run_a = [_make_snap(1, "Old error pattern", priority="P2")]
         run_b = []
-        
+
         report = detector.compare("A", run_a, "B", run_b)
         assert len(report.events) == 1
         assert report.events[0].kind == DriftKind.RESOLVED
@@ -83,7 +81,7 @@ class TestDriftDetector:
         detector = DriftDetector()
         run_a = [_make_snap(1, "DB connection slow", priority="P2")]
         run_b = [_make_snap(2, "DB connection slow", priority="P0")]
-        
+
         report = detector.compare("A", run_a, "B", run_b)
         assert len(report.events) == 1
         assert report.events[0].kind == DriftKind.ESCALATED
@@ -94,7 +92,7 @@ class TestDriftDetector:
         detector = DriftDetector()
         run_a = [_make_snap(1, "DB connection slow", priority="P1")]
         run_b = [_make_snap(2, "DB connection slow", priority="P3")]
-        
+
         report = detector.compare("A", run_a, "B", run_b)
         assert len(report.events) == 1
         assert report.events[0].kind == DriftKind.DE_ESCALATED
@@ -105,7 +103,7 @@ class TestDriftDetector:
         run_a = [_make_snap(1, "Login failed", size=100)]
         # +100% volume
         run_b = [_make_snap(2, "Login failed", size=200)]
-        
+
         report = detector.compare("A", run_a, "B", run_b)
         assert len(report.events) == 1
         assert report.events[0].kind == DriftKind.VOLUME_SURGE
@@ -117,7 +115,7 @@ class TestDriftDetector:
         run_a = [_make_snap(1, "Login failed", size=100)]
         # -60% volume
         run_b = [_make_snap(2, "Login failed", size=40)]
-        
+
         report = detector.compare("A", run_a, "B", run_b)
         assert len(report.events) == 1
         assert report.events[0].kind == DriftKind.VOLUME_DROP
@@ -129,7 +127,7 @@ class TestDriftDetector:
         run_a = [_make_snap(1, "Weird log", anomaly=0.1)]
         # +0.2 spike
         run_b = [_make_snap(2, "Weird log", anomaly=0.3)]
-        
+
         report = detector.compare("A", run_a, "B", run_b)
         assert len(report.events) == 1
         assert report.events[0].kind == DriftKind.ANOMALY_SPIKE
@@ -140,7 +138,7 @@ class TestDriftDetector:
         run_a = [_make_snap(1, "Everything is fine", size=100, anomaly=0.1, priority="P3")]
         # Minor changes below thresholds
         run_b = [_make_snap(2, "Everything is fine", size=110, anomaly=0.15, priority="P3")]
-        
+
         report = detector.compare("A", run_a, "B", run_b)
         assert len(report.events) == 1
         assert report.events[0].kind == DriftKind.STABLE
@@ -158,7 +156,7 @@ class TestDriftDetector:
             _make_snap(3, "Stable log"),              # Stable
             _make_snap(4, "New fatal error", priority="P0") # Emerged
         ]
-        
+
         report = detector.compare("run_foo", run_a, "run_bar", run_b)
         assert "1 new failure pattern(s) emerged" in report.summary
         assert "1 pattern(s) resolved" in report.summary

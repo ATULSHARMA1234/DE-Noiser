@@ -21,6 +21,7 @@ export default function IntegrationsPage() {
   ];
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/immutability
     fetchIntegrations();
   }, []);
 

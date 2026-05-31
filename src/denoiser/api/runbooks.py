@@ -1,33 +1,34 @@
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
-import json
-from denoiser.storage.db import get_db, Runbook, RunbookExecution
-from denoiser.api.auth import get_current_user, require_role, User
+from sqlalchemy.orm import Session
+
+from denoiser.api.auth import User, require_role
+from denoiser.storage.db import Runbook, RunbookExecution, get_db
 
 router = APIRouter(prefix="/runbooks", tags=["runbooks"])
 
 class StepSchema(BaseModel):
     name: str
     action: str
-    url: Optional[str] = None
-    service: Optional[str] = None
+    url: str | None = None
+    service: str | None = None
 
 class TriggerConditionSchema(BaseModel):
-    keyword: Optional[str] = None
+    keyword: str | None = None
 
 class RunbookCreateSchema(BaseModel):
     name: str
-    trigger_condition: Dict[str, Any]
-    steps: List[Dict[str, Any]]
+    trigger_condition: dict[str, Any]
+    steps: list[dict[str, Any]]
     enabled: bool = True
 
 class RunbookResponseSchema(BaseModel):
     id: int
     name: str
-    trigger_condition: Dict[str, Any]
-    steps: List[Dict[str, Any]]
+    trigger_condition: dict[str, Any]
+    steps: list[dict[str, Any]]
     enabled: bool
 
     class Config:
@@ -36,16 +37,16 @@ class RunbookResponseSchema(BaseModel):
 class RunbookExecutionResponseSchema(BaseModel):
     id: int
     runbook_id: int
-    incident_id: Optional[int]
+    incident_id: int | None
     status: str
-    logs: List[str]
+    logs: list[str]
     created_at: str
 
     class Config:
         from_attributes = True
 
 
-@router.get("", response_model=List[RunbookResponseSchema])
+@router.get("", response_model=list[RunbookResponseSchema])
 def list_runbooks(db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
     runbooks = db.query(Runbook).filter(Runbook.tenant_id == current_user.tenant_id).order_by(Runbook.created_at.desc()).all()
     return runbooks
@@ -73,10 +74,10 @@ def delete_runbook(runbook_id: int, db: Session = Depends(get_db), current_user:
     db.commit()
     return {"status": "deleted"}
 
-@router.get("/executions", response_model=List[dict])
+@router.get("/executions", response_model=list[dict])
 def list_executions(db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
     executions = db.query(RunbookExecution).join(Runbook).filter(Runbook.tenant_id == current_user.tenant_id).order_by(RunbookExecution.created_at.desc()).limit(100).all()
-    
+
     return [
         {
             "id": ex.id,

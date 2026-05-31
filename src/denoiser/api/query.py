@@ -1,55 +1,55 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-from typing import List, Dict, Any
+import contextlib
 import json
 from pathlib import Path
+from typing import Any
 
-from denoiser.storage.db import get_db, SavedQuery
-from denoiser.api.auth import get_current_user, require_role, User
-from denoiser.query.models import SavedQuerySchema, QueryCreateSchema, QueryRequestSchema
-from denoiser.query.parser import parse_query, evaluate_in_memory, compile_to_sql
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+
+from denoiser.api.auth import User, require_role
+from denoiser.query.models import QueryCreateSchema, QueryRequestSchema, SavedQuerySchema
+from denoiser.query.parser import compile_to_sql, evaluate_in_memory, parse_query
 from denoiser.storage.clickhouse_store import ClickHouseStore
+from denoiser.storage.db import SavedQuery, get_db
 
 router = APIRouter(prefix="/query", tags=["query"])
 clickhouse_store = ClickHouseStore()
 
 DATA_DIR = Path("data")
 
-@router.post("", response_model=Dict[str, Any])
+@router.post("", response_model=dict[str, Any])
 def execute_query(payload: QueryRequestSchema, current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
     """
     Execute a log query. Uses ClickHouse if available, else falls back to in-memory scanning of data/live_stream.log
     """
     ast = parse_query(payload.query)
-    
+
     if clickhouse_store.client:
         try:
             params = {'tenant_id': current_user.tenant_id}
             sql_where = compile_to_sql(ast, params)
             sql_where = f"tenant_id = {{tenant_id:String}} AND ({sql_where})"
-            
+
             query = f"SELECT timestamp, source, level, message, raw_json FROM semantic_logs WHERE {sql_where} ORDER BY timestamp DESC LIMIT {payload.limit}"
             result = clickhouse_store.client.query(query, parameters=params)
-            
+
             logs = []
             if result and result.result_rows:
                 for row in result.result_rows:
-                    row_dict = dict(zip(result.column_names, row))
+                    row_dict = dict(zip(result.column_names, row, strict=False))
                     log_entry = {}
                     if row_dict.get('raw_json'):
-                        try:
+                        with contextlib.suppress(BaseException):
                             log_entry = json.loads(row_dict['raw_json'])
-                        except:
-                            pass
                     # Merge structured fields
                     log_entry['timestamp'] = row_dict['timestamp']
                     log_entry['source'] = row_dict['source']
                     log_entry['level'] = row_dict['level']
                     log_entry['message'] = row_dict['message']
                     logs.append(log_entry)
-                    
+
             return {"status": "success", "engine": "clickhouse", "logs": logs}
-        except Exception as e:
+        except Exception:
             # Fallback to in-memory
             pass
 
@@ -57,7 +57,7 @@ def execute_query(payload: QueryRequestSchema, current_user: User = Depends(requ
     stream_file = DATA_DIR / "live_stream.log"
     logs = []
     if stream_file.exists():
-        with open(stream_file, "r") as f:
+        with open(stream_file) as f:
             lines = f.readlines()
             # reverse to get newest first
             for line in reversed(lines):
@@ -75,11 +75,11 @@ def execute_query(payload: QueryRequestSchema, current_user: User = Depends(requ
                         logs.append({"message": line})
                         if len(logs) >= payload.limit:
                             break
-                            
+
     return {"status": "success", "engine": "in-memory", "logs": logs}
 
 
-@router.get("/saved", response_model=List[SavedQuerySchema])
+@router.get("/saved", response_model=list[SavedQuerySchema])
 def list_saved_queries(db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
     queries = db.query(SavedQuery).order_by(SavedQuery.created_at.desc()).all()
     return queries

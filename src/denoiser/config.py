@@ -21,7 +21,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # ── Enums ────────────────────────────────────────────────────────────────────
 
 
-class AnalysisMode(str, enum.Enum):
+class AnalysisMode(enum.StrEnum):
     """Pre-configured analysis profiles."""
 
     GENERAL = "general"
@@ -29,7 +29,7 @@ class AnalysisMode(str, enum.Enum):
     PERFORMANCE = "performance"
 
 
-class OutputFormat(str, enum.Enum):
+class OutputFormat(enum.StrEnum):
     """Supported output formats."""
 
     TABLE = "table"
@@ -37,7 +37,7 @@ class OutputFormat(str, enum.Enum):
     MARKDOWN = "markdown"
 
 
-class AnomalySeverity(str, enum.Enum):
+class AnomalySeverity(enum.StrEnum):
     """Severity levels for ``--fail-on-anomaly`` CI gating."""
 
     LOW = "low"
@@ -45,7 +45,7 @@ class AnomalySeverity(str, enum.Enum):
     HIGH = "high"
 
 
-class AnomalyLabel(str, enum.Enum):
+class AnomalyLabel(enum.StrEnum):
     """Classification labels assigned to each log event after scoring."""
 
     KNOWN = "known"
@@ -54,7 +54,7 @@ class AnomalyLabel(str, enum.Enum):
     HIGH_RISK_ANOMALY = "high_risk_anomaly"
 
 
-class LogLevel(str, enum.Enum):
+class LogLevel(enum.StrEnum):
     """Supported verbosity levels for internal logging."""
 
     DEBUG = "DEBUG"

@@ -1,10 +1,10 @@
-from sqlalchemy.orm import Session
-from datetime import datetime
-import json
 import time
+from datetime import datetime
 
-from denoiser.storage.db import Runbook, RunbookExecution, Incident
+from sqlalchemy.orm import Session
+
 from denoiser.logging import get_logger
+from denoiser.storage.db import Incident, Runbook, RunbookExecution
 
 logger = get_logger(__name__)
 
@@ -15,7 +15,7 @@ def execute_runbook_step(step: dict, execution_logs: list):
     """
     action_type = step.get("action", "unknown")
     execution_logs.append(f"[{datetime.utcnow().isoformat()}] Starting step: {step.get('name', 'Unnamed step')}")
-    
+
     if action_type == "webhook":
         url = step.get("url", "")
         execution_logs.append(f"[{datetime.utcnow().isoformat()}] Sending POST request to {url}")
@@ -34,31 +34,31 @@ def execute_runbook_step(step: dict, execution_logs: list):
     else:
         execution_logs.append(f"[{datetime.utcnow().isoformat()}] Unknown action type: {action_type}")
         raise ValueError(f"Unsupported action: {action_type}")
-        
+
     execution_logs.append(f"[{datetime.utcnow().isoformat()}] Step completed successfully.")
 
 def process_incident(db: Session, incident: Incident):
     """
     Called when a new incident is created. Evaluates active runbooks and executes them.
     """
-    runbooks = db.query(Runbook).filter(Runbook.enabled == True, Runbook.tenant_id == incident.tenant_id).all()
-    
+    runbooks = db.query(Runbook).filter(Runbook.enabled, Runbook.tenant_id == incident.tenant_id).all()
+
     for rb in runbooks:
         # Evaluate trigger conditions
         trigger = rb.trigger_condition
         match = True
-        
+
         # Simple evaluation: if trigger has "severity", check incident.severity
         if "severity" in trigger and incident.severity != trigger["severity"]:
             match = False
-            
+
         # Check incident title keyword
         if "keyword" in trigger and trigger["keyword"].lower() not in incident.title.lower():
             match = False
-            
+
         if match:
             logger.info(f"Incident {incident.id} matches Runbook {rb.id} ({rb.name}). Executing...")
-            
+
             # Create execution record
             execution = RunbookExecution(
                 runbook_id=rb.id,
@@ -69,17 +69,17 @@ def process_incident(db: Session, incident: Incident):
             db.add(execution)
             db.commit()
             db.refresh(execution)
-            
+
             # Execute steps
             exec_logs = list(execution.logs)
             try:
                 for step in rb.steps:
                     execute_runbook_step(step, exec_logs)
-                
+
                 execution.status = "SUCCESS"
             except Exception as e:
                 execution.status = "FAILED"
                 exec_logs.append(f"[{datetime.utcnow().isoformat()}] Execution failed: {e}")
-                
+
             execution.logs = exec_logs
             db.commit()

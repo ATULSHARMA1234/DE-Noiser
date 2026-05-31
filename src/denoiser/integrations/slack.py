@@ -110,10 +110,7 @@ class SlackNotifier:
 
             hints = intelligence.get("root_cause_hints")
             if hints:
-                if isinstance(hints, list):
-                    hints_str = "\n".join([f"• {h}" for h in hints])
-                else:
-                    hints_str = str(hints)
+                hints_str = "\n".join([f"• {h}" for h in hints]) if isinstance(hints, list) else str(hints)
 
                 blocks.append({
                     "type": "section",

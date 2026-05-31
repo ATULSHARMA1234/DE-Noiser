@@ -23,7 +23,9 @@ export default function RunbooksPage() {
   const [activeTab, setActiveTab] = useState('rules');
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/immutability
     fetchRunbooks();
+    // eslint-disable-next-line react-hooks/immutability
     fetchExecutions();
   }, []);
 

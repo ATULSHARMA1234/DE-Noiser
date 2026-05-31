@@ -7,12 +7,12 @@ dependency is unavailable.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 
 import numpy as np
 import pytest
 
-hdbscan = pytest.importorskip("hdbscan")  # noqa: F401
+hdbscan = pytest.importorskip("hdbscan")
 
 from denoiser.clustering.hdbscan_clusterer import LogClusterer
 from denoiser.clustering.models import Cluster
@@ -37,7 +37,7 @@ def test_log_clusterer_agglomerative_path() -> None:
     template_to_records: dict[str, list[LogRecord]] = {}
     template_to_counts: dict[str, int] = {}
 
-    base_time = datetime(2026, 5, 22, 23, 0, 0, tzinfo=timezone.utc)
+    base_time = datetime(2026, 5, 22, 23, 0, 0, tzinfo=UTC)
 
     for i, t in enumerate(unique_templates):
         svc = "service_a" if i < n_per_group else "service_b"
@@ -57,12 +57,12 @@ def test_log_clusterer_agglomerative_path() -> None:
 
     assert isinstance(clusters, list)
     assert all(isinstance(c, Cluster) for c in clusters)
-    
+
     # Agglomerative clustering should group these well-separated vectors perfectly
     # into 2 distinct clusters because they are highly clustered.
     non_noise = [c for c in clusters if c.cluster_id != -1]
     assert len(non_noise) >= 2, f"Expected at least 2 clusters, got {len(non_noise)}"
-    
+
     # Check that representative templates are mapped
     for c in non_noise:
         assert c.representative_template in unique_templates
@@ -88,7 +88,7 @@ def test_log_clusterer_hdbscan_path() -> None:
     template_to_records: dict[str, list[LogRecord]] = {}
     template_to_counts: dict[str, int] = {}
 
-    base_time = datetime(2026, 5, 22, 23, 0, 0, tzinfo=timezone.utc)
+    base_time = datetime(2026, 5, 22, 23, 0, 0, tzinfo=UTC)
 
     for i, t in enumerate(unique_templates):
         svc = "service_a" if i < n_per_group else "service_b"

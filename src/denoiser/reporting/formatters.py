@@ -74,9 +74,8 @@ class Reporter:
                 worst_result = None
                 for t in c.templates:
                     res = anomalies.get(t)
-                    if res:
-                        if worst_result is None or res.distance > worst_result.distance:
-                            worst_result = res
+                    if res and (worst_result is None or res.distance > worst_result.distance):
+                        worst_result = res
 
                 if worst_result:
                     cluster_label_str = worst_result.label.value

@@ -111,7 +111,7 @@ def analyze(
     # 1. Update config based on CLI options
     # We do this dynamically for the current run
     try:
-        preset_mode = AnalysisMode(mode)
+        AnalysisMode(mode)
     except ValueError:
         console.print(f"[bold red]Invalid mode '{mode}'[/bold red]")
         sys.exit(1)

@@ -18,7 +18,7 @@ from denoiser.logging import get_logger
 logger = get_logger(__name__)
 
 SYSTEM_PROMPT = """
-You are an expert Site Reliability Engineer (SRE). 
+You are an expert Site Reliability Engineer (SRE).
 Your task is to analyze grouped log clusters and provide a high-level incident summary.
 Distinguish between "new patterns" and "acknowledged safe events".
 """
@@ -141,7 +141,7 @@ class IncidentIntelligence:
             })
 
         prompt = f"""
-        You are an expert SRE and systems architect. 
+        You are an expert SRE and systems architect.
         Analyze these cross-service temporal co-occurrences (causal links):
         {json.dumps(context, indent=2)}
 

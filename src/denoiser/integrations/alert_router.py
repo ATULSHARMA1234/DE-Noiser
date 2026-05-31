@@ -18,7 +18,7 @@ import hashlib
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 
 import httpx
 
@@ -29,14 +29,14 @@ logger = get_logger(__name__)
 
 # ── Enumerations ─────────────────────────────────────────────────────────────
 
-class ChannelType(str, Enum):
+class ChannelType(StrEnum):
     SLACK          = "slack"
     PAGERDUTY      = "pagerduty"
     TEAMS          = "teams"
     GENERIC        = "generic"
 
 
-class DeliveryStatus(str, Enum):
+class DeliveryStatus(StrEnum):
     DELIVERED  = "delivered"
     FAILED     = "failed"
     SKIPPED    = "skipped"   # Priority filter did not match

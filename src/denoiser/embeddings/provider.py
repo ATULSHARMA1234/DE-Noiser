@@ -49,7 +49,7 @@ class EmbeddingCache:
             return {}
 
         hashes = [self._hash_text(t) for t in texts]
-        hash_to_text = dict(zip(hashes, texts))
+        hash_to_text = dict(zip(hashes, texts, strict=False))
 
         placeholders = ",".join("?" * len(hashes))
         query = f"SELECT text_hash, vector FROM embeddings WHERE text_hash IN ({placeholders})"
@@ -71,7 +71,7 @@ class EmbeddingCache:
 
         records = [
             (self._hash_text(text), vector.astype(np.float32).tobytes())
-            for text, vector in zip(texts, vectors)
+            for text, vector in zip(texts, vectors, strict=False)
         ]
 
         with sqlite3.connect(self.db_path) as conn:
@@ -149,7 +149,7 @@ class LocalEmbeddingProvider:
             self.cache.set_many(missing_texts, computed_vectors)
 
             # Merge computed back into our working dict
-            for text, vector in zip(missing_texts, computed_vectors):
+            for text, vector in zip(missing_texts, computed_vectors, strict=False):
                 cached[text] = vector
 
         # 4. Reconstruct original order

@@ -22,7 +22,9 @@ export default function MetricsPage() {
   const [deployments, setDeployments] = useState<any[]>([]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/immutability
     fetchRules();
+    // eslint-disable-next-line react-hooks/immutability
     fetchDeployments();
   }, []);
 

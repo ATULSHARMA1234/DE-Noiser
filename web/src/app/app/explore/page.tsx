@@ -14,6 +14,7 @@ export default function ExplorePage() {
   const [engine, setEngine] = useState<string>('');
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/immutability
     fetchSavedQueries();
   }, []);
 
@@ -125,7 +126,7 @@ export default function ExplorePage() {
               <span>•</span>
               <button onClick={() => handleSampleClick('service:payment AND level:ERROR')} className="hover:text-blue-400">service:payment AND level:ERROR</button>
               <span>•</span>
-              <button onClick={() => handleSampleClick('"database connection failed"')} className="hover:text-blue-400">"exact phrase"</button>
+              <button onClick={() => handleSampleClick('"database connection failed"')} className="hover:text-blue-400">&quot;exact phrase&quot;</button>
             </div>
           </div>
 

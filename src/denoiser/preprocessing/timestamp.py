@@ -77,23 +77,21 @@ class TimestampExtractor:
 
         # Step 2: Try 13-digit Millisecond Epoch
         epoch_ms_match = self.epoch_ms_re.search(text)
-        if epoch_ms_match:
-            if epoch_ms_match.start() < 50:
-                val = int(epoch_ms_match.group(1))
-                # Validate range: Year 2000 to Year 2100 in epoch milliseconds
-                if 946684800000 <= val <= 4102444800000:
-                    return val
+        if epoch_ms_match and epoch_ms_match.start() < 50:
+            val = int(epoch_ms_match.group(1))
+            # Validate range: Year 2000 to Year 2100 in epoch milliseconds
+            if 946684800000 <= val <= 4102444800000:
+                return val
 
         # Step 3: Try 10-digit Second Epoch (with optional decimals)
         epoch_sec_match = self.epoch_sec_re.search(text)
-        if epoch_sec_match:
-            if epoch_sec_match.start() < 50:
-                sec_val = int(epoch_sec_match.group(1))
-                # Validate range: Year 2000 to Year 2100 in epoch seconds
-                if 946684800 <= sec_val <= 4102444800:
-                    frac_str = epoch_sec_match.group(2)
-                    ms_val = self._frac_to_ms(frac_str)
-                    return sec_val * 1000 + ms_val
+        if epoch_sec_match and epoch_sec_match.start() < 50:
+            sec_val = int(epoch_sec_match.group(1))
+            # Validate range: Year 2000 to Year 2100 in epoch seconds
+            if 946684800 <= sec_val <= 4102444800:
+                frac_str = epoch_sec_match.group(2)
+                ms_val = self._frac_to_ms(frac_str)
+                return sec_val * 1000 + ms_val
 
         # Step 4: Try ISO 8601
         iso_match = self.iso8601_re.search(text)
@@ -153,8 +151,5 @@ class TimestampExtractor:
         """Convert fractional seconds string to integer milliseconds."""
         if not frac_str:
             return 0
-        if len(frac_str) < 3:
-            frac_str = frac_str.ljust(3, '0')
-        else:
-            frac_str = frac_str[:3]
+        frac_str = frac_str.ljust(3, '0') if len(frac_str) < 3 else frac_str[:3]
         return int(frac_str)

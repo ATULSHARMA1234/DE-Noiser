@@ -4,14 +4,14 @@ Tests LogReader, Normalizer, and Deduplicator.
 """
 
 import io
+
 import pytest
 
+from denoiser.exceptions import IngestionError
 from denoiser.ingestion.reader import LogReader
 from denoiser.ingestion.stdin import StdinReader
-from denoiser.preprocessing.normalization import Normalizer
 from denoiser.preprocessing.deduplication import Deduplicator
-from denoiser.exceptions import IngestionError
-
+from denoiser.preprocessing.normalization import Normalizer
 
 # ── LogReader Tests ──────────────────────────────────────────────────────────
 

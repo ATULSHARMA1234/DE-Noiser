@@ -388,7 +388,7 @@ def run_analysis_task(self, request_dict: dict):
                 logger.error(f"Failed to dispatch alerts: {e}")
 
         db.commit()
-        
+
         # Post-commit triggers
         if llm_payload:
             try:
@@ -425,20 +425,21 @@ def evaluate_slos():
     logger.info("Evaluating active Service Level Objectives (SLOs)...")
     db = SessionLocal()
     try:
-        from denoiser.storage.db import ServiceLevelObjective, SLODataPoint
-        from denoiser.storage.clickhouse_store import ClickHouseStore
         import random
-        
+
+        from denoiser.storage.clickhouse_store import ClickHouseStore
+        from denoiser.storage.db import ServiceLevelObjective, SLODataPoint
+
         slos = db.query(ServiceLevelObjective).all()
         ch_store = ClickHouseStore()
-        
+
         for slo in slos:
             # Simplistic Evaluation
             # Let's query ClickHouse to see the volume of logs for this service
             try:
                 res = ch_store.query_logs(f"service:{slo.service}", limit=1000, tenant_id=slo.tenant_id)
                 total_events = len(res)
-                
+
                 # Mock good events based on target percentage to keep it looking somewhat realistic
                 target = slo.target_percentage / 100.0
                 if total_events > 0:
@@ -450,9 +451,9 @@ def evaluate_slos():
                     total_events = random.randint(100, 1000)
                     actual_ratio = target + random.uniform(-0.02, 0.005)
                     good_events = int(total_events * actual_ratio)
-                    
+
                 value = (good_events / total_events) * 100.0 if total_events > 0 else 100.0
-                
+
                 dp = SLODataPoint(
                     slo_id=slo.id,
                     timestamp=datetime.now(UTC),
@@ -491,16 +492,16 @@ def evaluate_slos():
                     recent_points = db.query(SLODataPoint).filter(SLODataPoint.slo_id == slo.id).order_by(SLODataPoint.timestamp.desc()).limit(10).all()
                     if len(recent_points) >= 5:
                         recent_points.reverse() # chronological
-                        
+
                         # Calculate slope (value change per minute)
                         # For simplicity, X is index 0 to N-1
                         x_mean = sum(range(len(recent_points))) / len(recent_points)
                         y_mean = sum(p.value for p in recent_points) / len(recent_points)
-                        
+
                         numerator = sum((i - x_mean) * (p.value - y_mean) for i, p in enumerate(recent_points))
                         denominator = sum((i - x_mean) ** 2 for i in range(len(recent_points)))
                         slope = numerator / denominator if denominator != 0 else 0
-                        
+
                         # Only trigger if the trend is downwards
                         if slope < -0.05:
                             # minutes to target = (value - target) / |slope|
@@ -508,14 +509,14 @@ def evaluate_slos():
                             if minutes_to_depletion < 240 and minutes_to_depletion > 0: # < 4 hours
                                 forecasted_time = datetime.now(UTC) + timedelta(minutes=minutes_to_depletion)
                                 from denoiser.storage.db import Incident
-                                
+
                                 # Check if we already have a predictive incident for this SLO recently to avoid spam
                                 recent_predictive = db.query(Incident).filter(
                                     Incident.tenant_id == slo.tenant_id,
                                     Incident.title == f"Predictive Warning: {slo.name} will breach soon",
                                     Incident.status == "OPEN"
                                 ).first()
-                                
+
                                 if not recent_predictive:
                                     incident = Incident(
                                         tenant_id=slo.tenant_id,
@@ -531,7 +532,7 @@ def evaluate_slos():
                                     db.add(incident)
                                     db.commit()
                                     db.refresh(incident)
-                                    
+
                                     try:
                                         from denoiser.automation.engine import process_incident
                                         process_incident(db, incident)
@@ -540,7 +541,7 @@ def evaluate_slos():
 
             except Exception as e:
                 logger.error(f"Failed to evaluate SLO {slo.id}: {e}")
-                
+
         db.commit()
         logger.info(f"Evaluated {len(slos)} SLOs.")
     except Exception as e:
@@ -557,25 +558,26 @@ def extract_metrics():
     logger.info("Extracting metrics from logs...")
     db = SessionLocal()
     try:
-        from denoiser.storage.db import MetricRule, ExtractedMetric
-        from denoiser.storage.clickhouse_store import ClickHouseStore
         import random
-        
-        rules = db.query(MetricRule).filter(MetricRule.enabled == True).all()
+
+        from denoiser.storage.clickhouse_store import ClickHouseStore
+        from denoiser.storage.db import ExtractedMetric, MetricRule
+
+        rules = db.query(MetricRule).filter(MetricRule.enabled).all()
         ch_store = ClickHouseStore()
-        
+
         for rule in rules:
             try:
                 # In a real system, you'd aggregate logs over window_seconds.
                 # Here we just run a basic count to simulate extraction
                 res = ch_store.query_logs(rule.query, limit=100)
                 count = len(res)
-                
+
                 if rule.aggregation == "count":
                     value = count
                 else:
                     value = count * random.uniform(1.0, 5.0) # mock
-                    
+
                 dp = ExtractedMetric(
                     rule_id=rule.id,
                     timestamp=datetime.now(UTC),
@@ -584,7 +586,7 @@ def extract_metrics():
                 db.add(dp)
             except Exception as e:
                 logger.error(f"Failed to extract metric for rule {rule.id}: {e}")
-                
+
         db.commit()
     except Exception as e:
         logger.error(f"Metric extraction failed: {e}")

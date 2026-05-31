@@ -2844,3 +2844,7 @@
 {"@timestamp": "2026-05-29T19:09:34.985510343Z", "event": {"kind": "event", "category": "process", "type": "start", "dataset": "ebpf.process", "action": "execve"}, "host": {"hostname": "semanticos-node", "os": {"platform": "linux", "family": "alpine"}}, "process": {"pid": 25123, "name": "containerd-shim", "executable": "/usr/bin/runc"}}
 {"@timestamp": "2026-05-29T19:09:34.997135468Z", "event": {"kind": "event", "category": "process", "type": "start", "dataset": "ebpf.process", "action": "execve"}, "host": {"hostname": "semanticos-node", "os": {"platform": "linux", "family": "alpine"}}, "process": {"pid": 25130, "name": "runc", "executable": "/proc/self/fd/6"}}
 {"@timestamp": "2026-05-29T19:09:35.028062551Z", "event": {"kind": "event", "category": "process", "type": "start", "dataset": "ebpf.process", "action": "execve"}, "host": {"hostname": "semanticos-node", "os": {"platform": "linux", "family": "alpine"}}, "process": {"pid": 25135, "name": "runc:[2:INIT]", "executable": "/usr/bin/wget"}}
+{"message": "test log line", "level": "INFO"}
+{"message": "test log line", "level": "INFO"}
+{"message": "test log line", "level": "INFO"}
+{"message": "test log line", "level": "INFO"}

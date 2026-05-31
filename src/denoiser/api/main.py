@@ -53,7 +53,15 @@ from denoiser.integrations.alert_router import (
     alert_router,
 )
 from denoiser.storage.clickhouse_store import ClickHouseStore
-from denoiser.storage.db import AnalysisRun, Incident, User, ServiceLevelObjective, SLODataPoint, get_db, init_db
+from denoiser.storage.db import (
+    AnalysisRun,
+    Incident,
+    ServiceLevelObjective,
+    SLODataPoint,
+    User,
+    get_db,
+    init_db,
+)
 from denoiser.telemetry.ebpf_collector import EBPFCollector
 from denoiser.telemetry.metrics_collector import MetricsCollector
 
@@ -63,6 +71,7 @@ ebpf_agent = EBPFCollector()
 clickhouse_store = ClickHouseStore()
 
 from aiokafka import AIOKafkaProducer
+
 kafka_producer = None
 
 app = FastAPI(title="SemanticOS — Enterprise Log Intelligence API", version="2.0.0")
@@ -81,15 +90,15 @@ app.add_middleware(CorrelationIDMiddleware)
 from denoiser.api.alerts import router as alerts_router
 from denoiser.api.audit import AuditMiddleware
 from denoiser.api.audit import router as audit_router
-from denoiser.api.tracing import router as tracing_router
-from denoiser.api.query import router as query_router
-from denoiser.api.slo import router as slo_router
-from denoiser.api.dashboards import router as dashboards_router
-from denoiser.api.metrics import router as metrics_router
 from denoiser.api.automation import router as automation_router
-from denoiser.api.runbooks import router as runbooks_router
-from denoiser.api.integrations import router as integrations_router
+from denoiser.api.dashboards import router as dashboards_router
 from denoiser.api.deployments import router as deployments_router
+from denoiser.api.integrations import router as integrations_router
+from denoiser.api.metrics import router as metrics_router
+from denoiser.api.query import router as query_router
+from denoiser.api.runbooks import router as runbooks_router
+from denoiser.api.slo import router as slo_router
+from denoiser.api.tracing import router as tracing_router
 
 app.add_middleware(AuditMiddleware)
 app.include_router(audit_router)
@@ -146,7 +155,7 @@ async def on_startup():
     metrics_agent.start()
     ebpf_agent.start()
     start_scheduler()
-    
+
     global kafka_producer
     try:
         kafka_producer = AIOKafkaProducer(
@@ -162,7 +171,7 @@ async def on_shutdown():
     metrics_agent.stop()
     ebpf_agent.stop()
     stop_scheduler()
-    
+
     global kafka_producer
     if kafka_producer:
         await kafka_producer.stop()
@@ -484,22 +493,22 @@ def get_slo_status(slo_id: int, db: Session = Depends(get_db), current_user: Use
     slo = db.query(ServiceLevelObjective).filter(ServiceLevelObjective.id == slo_id, ServiceLevelObjective.tenant_id == current_user.tenant_id).first()
     if not slo:
         raise HTTPException(status_code=404, detail="SLO not found")
-        
+
     points = db.query(SLODataPoint).filter(SLODataPoint.slo_id == slo.id).order_by(SLODataPoint.timestamp.desc()).limit(20).all()
     points.reverse()
-    
+
     current_val = points[-1].value if points else 100.0
     status_label = "HEALTHY"
     if current_val < slo.target_percentage:
         status_label = "BREACHED"
     elif current_val < slo.target_percentage + 0.1:
         status_label = "WARNING"
-        
+
     # Dummy error budget calc
     error_budget_total = 1000
     error_budget_remaining = int(error_budget_total * (current_val / 100.0))
     burn_rate = 1.0 if status_label == "HEALTHY" else (5.0 if status_label == "WARNING" else 20.0)
-    
+
     return {
         "status": status_label,
         "current_value": current_val,
@@ -1160,7 +1169,7 @@ def trigger_alert(alert: AlertPayload, db: Session = Depends(get_db)):
     """
     if alert.priority == "P0":
         from denoiser.automation.engine import process_incident
-        
+
         # Check if an incident already exists for this run or create one
         incident = db.query(Incident).filter(Incident.analysis_run_id == alert.run_id).first()
         if not incident:
@@ -1174,7 +1183,7 @@ def trigger_alert(alert: AlertPayload, db: Session = Depends(get_db)):
             db.add(incident)
             db.commit()
             db.refresh(incident)
-            
+
         process_incident(db, incident)
-        
+
     return {"status": "success", "alert_fingerprint": alert.fingerprint}

@@ -1,15 +1,15 @@
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from typing import List
 
-from denoiser.storage.db import get_db, ServiceLevelObjective
-from denoiser.api.auth import get_current_user, require_role, User
-from denoiser.slo.models import SLOCreateSchema, SLOSchema, SLOStatusSchema
+from denoiser.api.auth import User, require_role
 from denoiser.slo.engine import calculate_slo_status
+from denoiser.slo.models import SLOCreateSchema, SLOSchema, SLOStatusSchema
+from denoiser.storage.db import ServiceLevelObjective, get_db
 
 router = APIRouter(prefix="/slos", tags=["slo"])
 
-@router.get("", response_model=List[SLOSchema])
+@router.get("", response_model=list[SLOSchema])
 def list_slos(db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
     slos = db.query(ServiceLevelObjective).order_by(ServiceLevelObjective.created_at.desc()).all()
     return slos
@@ -42,5 +42,5 @@ def get_slo_status(slo_id: int, db: Session = Depends(get_db), current_user: Use
     slo = db.query(ServiceLevelObjective).filter(ServiceLevelObjective.id == slo_id).first()
     if not slo:
         raise HTTPException(status_code=404, detail="SLO not found")
-        
+
     return calculate_slo_status(db, slo)

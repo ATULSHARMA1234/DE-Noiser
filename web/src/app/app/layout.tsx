@@ -66,6 +66,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       // Command+Shift+R / Ctrl+Shift+R triggers analysis (Shift avoids browser reload)
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'r') {
         e.preventDefault();
+    // eslint-disable-next-line react-hooks/immutability
         fetchSources();
         setShowRunModal(true);
       }

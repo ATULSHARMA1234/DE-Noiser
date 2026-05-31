@@ -41,7 +41,7 @@ class ClickHouseStore:
                 ) ENGINE = MergeTree()
                 ORDER BY (tenant_id, source, timestamp)
             """)
-            
+
             self.client.command("""
                 CREATE TABLE IF NOT EXISTS semantic_traces (
                     tenant_id String,
@@ -59,7 +59,7 @@ class ClickHouseStore:
                 ) ENGINE = MergeTree()
                 ORDER BY (tenant_id, service_name, start_time)
             """)
-            
+
             logger.info(f"Connected to ClickHouse at {self.host}:{self.port}")
         except Exception as e:
             logger.error(f"Failed to connect to ClickHouse: {e}")
@@ -74,12 +74,12 @@ class ClickHouseStore:
         try:
             # Delete old logs
             self.client.command(f"""
-                ALTER TABLE semantic_logs 
+                ALTER TABLE semantic_logs
                 DELETE WHERE tenant_id = '{tenant_id}' AND timestamp < now() - INTERVAL {days_to_keep} DAY
             """)
             # Delete old traces
             self.client.command(f"""
-                ALTER TABLE semantic_traces 
+                ALTER TABLE semantic_traces
                 DELETE WHERE tenant_id = '{tenant_id}' AND start_time < now() - INTERVAL {days_to_keep} DAY
             """)
             logger.info(f"Cleaned up data older than {days_to_keep} days for tenant {tenant_id}")
@@ -98,10 +98,7 @@ class ClickHouseStore:
                 ts = log.get("timestamp", time.time())
                 # If timestamp is seconds, convert to datetime object
                 from datetime import datetime
-                if isinstance(ts, (int, float)):
-                    dt = datetime.fromtimestamp(ts, UTC)
-                else:
-                    dt = datetime.now(UTC)
+                dt = datetime.fromtimestamp(ts, UTC) if isinstance(ts, (int, float)) else datetime.now(UTC)
 
                 data.append((
                     tenant_id,
@@ -122,14 +119,14 @@ class ClickHouseStore:
         """Insert processed OTLP spans into ClickHouse"""
         if not self.client:
             return False
-            
+
         try:
             # Insert tenant_id to the beginning of each tuple
-            traces_data_with_tenant = [(tenant_id,) + row for row in traces_data]
-            
+            traces_data_with_tenant = [(tenant_id, *row) for row in traces_data]
+
             self.client.insert('semantic_traces', traces_data_with_tenant, column_names=[
-                'tenant_id', 'trace_id', 'span_id', 'parent_span_id', 'service_name', 
-                'operation_name', 'start_time', 'end_time', 'duration_ms', 
+                'tenant_id', 'trace_id', 'span_id', 'parent_span_id', 'service_name',
+                'operation_name', 'start_time', 'end_time', 'duration_ms',
                 'status_code', 'attributes', 'events'
             ])
             return True
@@ -141,25 +138,25 @@ class ClickHouseStore:
         """Execute a parsed Log Query Language (LQL) search against ClickHouse."""
         if not self.client:
             return []
-            
-        from denoiser.query.parser import parse_query, compile_to_sql
-        
+
+        from denoiser.query.parser import compile_to_sql, parse_query
+
         ast = parse_query(query_string)
         params = {}
         sql_where = compile_to_sql(ast, params)
-        
+
         if tenant_id:
             sql_where = f"tenant_id = {{tenant_id:String}} AND ({sql_where})"
             params['tenant_id'] = tenant_id
-                    
+
         sql = "SELECT * FROM semantic_logs"
         sql += f" WHERE {sql_where}"
-            
+
         sql += f" ORDER BY timestamp DESC LIMIT {limit}"
-        
+
         try:
             result = self.client.query(sql, parameters=params)
-            return [dict(zip(result.column_names, row)) for row in result.result_rows]
+            return [dict(zip(result.column_names, row, strict=False)) for row in result.result_rows]
         except Exception as e:
             logger.error(f"Failed to query ClickHouse: {e}")
             return []

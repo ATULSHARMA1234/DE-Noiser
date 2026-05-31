@@ -1,7 +1,9 @@
 import asyncio
 import json
 import os
+
 from aiokafka import AIOKafkaConsumer
+
 from denoiser.logging import get_logger
 from denoiser.storage.clickhouse_store import ClickHouseStore
 from denoiser.storage.db import SessionLocal
@@ -12,7 +14,7 @@ logger = get_logger(__name__)
 async def run_ingestion_worker():
     logger.info("Starting Hyperscale Ingestion Worker (Kafka Consumer)...")
     kafka_broker = os.getenv("KAFKA_BROKER", "localhost:9092")
-    
+
     # Initialize ClickHouse Store
     ch_store = ClickHouseStore()
 
@@ -26,36 +28,36 @@ async def run_ingestion_worker():
 
     await consumer.start()
     logger.info("Connected to Redpanda/Kafka.")
-    
+
     try:
         # Simple batching mechanism
         batch_logs = []
         batch_traces = []
         BATCH_SIZE = 1000
-        
+
         async for msg in consumer:
             topic = msg.topic
             try:
                 payload = json.loads(msg.value.decode('utf-8'))
                 tenant_id = payload.pop("_tenant_id", "default_tenant")
-                
+
                 if topic == "logs_topic":
                     # Attach tenant_id back if it's missing or handle it
                     batch_logs.append((payload, tenant_id))
-                    
+
                     if len(batch_logs) >= BATCH_SIZE:
                         # Flush logs
                         _flush_logs(ch_store, batch_logs)
                         batch_logs = []
-                
+
                 elif topic == "traces_topic":
                     batch_traces.append((payload, tenant_id))
-                    
+
                     if len(batch_traces) >= BATCH_SIZE:
                         # Flush traces
                         _flush_traces(batch_traces)
                         batch_traces = []
-                        
+
             except Exception as e:
                 logger.error(f"Failed to process message from {topic}: {e}")
 
@@ -74,7 +76,7 @@ def _flush_logs(ch_store, batch_logs):
         if t_id not in by_tenant:
             by_tenant[t_id] = []
         by_tenant[t_id].append(log)
-        
+
     for t_id, logs in by_tenant.items():
         try:
             ch_store.insert_logs(logs, tenant_id=t_id)

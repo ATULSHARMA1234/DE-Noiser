@@ -1,18 +1,20 @@
-from pydantic import BaseModel
-from typing import List, Dict, Any, Optional
 from datetime import datetime
+from typing import Any
+
+from pydantic import BaseModel
+
 
 class RunbookCreateSchema(BaseModel):
     name: str
-    trigger_condition: Dict[str, Any]
-    steps: List[Dict[str, Any]]
+    trigger_condition: dict[str, Any]
+    steps: list[dict[str, Any]]
     enabled: bool = True
 
 class RunbookSchema(BaseModel):
     id: int
     name: str
-    trigger_condition: Dict[str, Any]
-    steps: List[Dict[str, Any]]
+    trigger_condition: dict[str, Any]
+    steps: list[dict[str, Any]]
     enabled: bool
     created_at: datetime
 
@@ -24,7 +26,7 @@ class RunbookExecutionSchema(BaseModel):
     runbook_id: int
     incident_id: int
     status: str
-    logs: List[str]
+    logs: list[str]
     created_at: datetime
 
     class Config:

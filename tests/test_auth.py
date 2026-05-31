@@ -2,7 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from denoiser.api.auth import get_password_hash, verify_password, create_access_token
+from denoiser.api.auth import create_access_token, get_password_hash, verify_password
 from denoiser.storage.db import User
 
 
@@ -18,11 +18,12 @@ def test_password_hashing():
 def test_jwt_generation_and_decoding():
     """Test that access tokens can be issued and decoded successfully."""
     from jose import jwt
-    from denoiser.api.auth import SECRET_KEY, ALGORITHM
-    
+
+    from denoiser.api.auth import ALGORITHM, SECRET_KEY
+
     data = {"sub": "test@example.com"}
     token = create_access_token(data)
-    
+
     decoded = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
     assert decoded["sub"] == "test@example.com"
     assert "exp" in decoded
@@ -31,16 +32,16 @@ def test_jwt_generation_and_decoding():
 def test_auth_login_success(db_session: Session):
     """Test standard JSON auth login with correct credentials."""
     from denoiser.api.main import app
-    
+
     with TestClient(app) as client:
         # 1. Create a dummy analyst user
         email = "analyst@semanticos.io"
         password = "analystpassword"
-        
+
         # Clean up any existing user to ensure test runs successfully
         db_session.query(User).filter(User.email == email).delete()
         db_session.commit()
-        
+
         user = User(
             email=email,
             hashed_password=get_password_hash(password),
@@ -48,11 +49,11 @@ def test_auth_login_success(db_session: Session):
         )
         db_session.add(user)
         db_session.commit()
-        
+
         # 2. POST /auth/login
         response = client.post("/auth/login", json={"email": email, "password": password})
         assert response.status_code == 200
-        
+
         data = response.json()
         assert "access_token" in data
         assert data["token_type"] == "bearer"

@@ -10,8 +10,7 @@ import pytest
 from denoiser.clustering.models import Cluster
 from denoiser.config import AnomalyLabel
 from denoiser.detection.models import AnomalyResult
-from denoiser.detection.severity import SeverityScorer, P0_THRESHOLD, P1_THRESHOLD, P2_THRESHOLD
-
+from denoiser.detection.severity import P1_THRESHOLD, P2_THRESHOLD, SeverityScorer
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 

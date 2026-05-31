@@ -268,7 +268,7 @@ def init_db():
     try:
         admin_email = "admin@semanticos.io"
         exists = db.query(User).filter(User.email == admin_email).first()
-        
+
         # Create default tenant if not exists
         default_tenant = db.query(Tenant).filter(Tenant.name == "Default Workspace").first()
         if not default_tenant:
