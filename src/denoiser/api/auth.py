@@ -10,7 +10,14 @@ from sqlalchemy.orm import Session
 from denoiser.storage.db import User, get_db
 
 # Secret key and algorithm for JWT
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "semantic-os-super-secure-production-secret-key-1234567890")
+import sys
+is_testing = "pytest" in sys.modules or any("pytest" in arg for arg in sys.argv) or "PYTEST_CURRENT_TEST" in os.environ
+SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+if not SECRET_KEY:
+    if is_testing:
+        SECRET_KEY = "semantic-os-super-secure-production-secret-key-1234567890"
+    else:
+        raise ValueError("JWT_SECRET_KEY environment variable is mandatory in non-test mode.")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 1440  # 24 hours
 
@@ -67,6 +74,12 @@ def get_current_user(
     user = db.query(User).filter(User.email == email).first()
     if user is None:
         raise credentials_exception
+    if not getattr(user, "is_active", True):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User account is deactivated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     return user
 
 
@@ -83,3 +96,34 @@ def require_role(allowed_roles: list[str]):
             )
         return current_user
     return dependency
+
+
+from fastapi.security import APIKeyHeader
+
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+def verify_ingest_auth(
+    api_key: str | None = Depends(api_key_header),
+    token: str | None = Depends(oauth2_scheme),
+    db: Session = Depends(get_db)
+) -> str:
+    """Allow ingest if X-API-Key header matches static config, or if a valid JWT is present. Returns tenant_id."""
+    from denoiser.storage.db import Tenant
+    if api_key:
+        tenant = db.query(Tenant).filter(Tenant.api_key == api_key).first()
+        if tenant:
+            return tenant.id
+        # Fallback to default for local dev
+        static_key = os.getenv("INGEST_API_KEY", "semanticos-ingest-key-123")
+        if api_key == static_key:
+            return "default_tenant"
+
+    if token:
+        try:
+            user = get_current_user(token, db)
+            return user.tenant_id
+        except Exception:
+            pass
+
+    raise HTTPException(status_code=401, detail="Invalid API Key or JWT token")

@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { apiFetch } from '@/lib/api';
 import { useToast } from '@/context/ToastContext';
 import { Settings, Plus, Plug, CheckCircle2, Trash2, Cloud } from 'lucide-react';
+import { ConfirmModal } from '@/components/ConfirmModal';
 
 export default function IntegrationsPage() {
   const { toast } = useToast();
@@ -12,6 +13,11 @@ export default function IntegrationsPage() {
   
   const [showConfigModal, setShowConfigModal] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState('');
+
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmTitle, setConfirmTitle] = useState('');
+  const [confirmMessage, setConfirmMessage] = useState('');
+  const [confirmCallback, setConfirmCallback] = useState<(() => void) | null>(null);
   
   const MARKETPLACE = [
     { id: 'aws', name: 'AWS CloudWatch', icon: Cloud, color: 'text-orange-500', desc: 'Ingest logs and metrics from AWS services.' },
@@ -57,15 +63,19 @@ export default function IntegrationsPage() {
     }
   };
 
-  const disconnect = async (id: number) => {
-    if (!confirm('Disconnect this integration?')) return;
-    try {
-      await apiFetch(`/integrations/${id}`, { method: 'DELETE' });
-      toast({ title: 'Integration disconnected' });
-      fetchIntegrations();
-    } catch (e: any) {
-      toast({ title: 'Disconnection failed', type: 'error' });
-    }
+  const disconnect = (id: number) => {
+    setConfirmTitle('Disconnect Integration');
+    setConfirmMessage('Disconnect this integration?');
+    setConfirmCallback(() => async () => {
+      try {
+        await apiFetch(`/integrations/${id}`, { method: 'DELETE' });
+        toast({ title: 'Integration disconnected' });
+        fetchIntegrations();
+      } catch (e: any) {
+        toast({ title: 'Disconnection failed', type: 'error' });
+      }
+    });
+    setConfirmOpen(true);
   };
 
   const isConnected = (providerId: string) => {
@@ -167,6 +177,14 @@ export default function IntegrationsPage() {
           </div>
         </div>
       )}
+
+      <ConfirmModal
+        isOpen={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        onConfirm={confirmCallback || (() => {})}
+        title={confirmTitle}
+        message={confirmMessage}
+      />
     </div>
   );
 }

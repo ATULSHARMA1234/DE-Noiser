@@ -111,10 +111,19 @@ async def cleanup_database_records():
     finally:
         db.close()
 
+async def trigger_sso_s3_db_archival():
+    """Daily job to run S3ArchiverEngine.run_archival()"""
+    from denoiser.storage.archiver import S3ArchiverEngine
+    try:
+        S3ArchiverEngine.run_archival()
+    except Exception as e:
+        logger.error(f"S3ArchiverEngine background job failed: {e}")
+
 scheduler = AsyncIOScheduler()
-# Run nightly at 2:00 AM
+# Run nightly
 scheduler.add_job(archive_old_logs_to_s3, 'cron', hour=2, minute=0)
 scheduler.add_job(cleanup_database_records, 'cron', hour=3, minute=0)
+scheduler.add_job(trigger_sso_s3_db_archival, 'cron', hour=4, minute=0)
 
 def start_scheduler():
     if scheduler.running:

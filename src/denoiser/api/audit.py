@@ -36,11 +36,18 @@ class AuditMiddleware(BaseHTTPMiddleware):
                     if email:
                         db = SessionLocal()
                         user = db.query(User).filter(User.email == email).first()
-                        if user:
-                            user_id = user.id
-                        db.close()
             except Exception:
                 pass  # If decoding fails, user_id remains None
+
+            if user_id is None:
+                try:
+                    db = SessionLocal()
+                    sys_user = db.query(User).filter(User.email == "system-audit@semanticos.io").first()
+                    if sys_user:
+                        user_id = sys_user.id
+                    db.close()
+                except Exception:
+                    pass
 
             ip_address = request.client.host if request.client else None
 

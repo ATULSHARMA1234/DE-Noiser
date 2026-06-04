@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { apiFetch } from '@/lib/api';
 import { useToast } from '@/context/ToastContext';
 import { Activity, Plus, Trash2, LineChart, Server, Terminal, X } from 'lucide-react';
+import { ConfirmModal } from '@/components/ConfirmModal';
 
 export default function MetricsPage() {
   const { toast } = useToast();
@@ -20,6 +21,11 @@ export default function MetricsPage() {
 
   const [metricData, setMetricData] = useState<Record<number, any>>({});
   const [deployments, setDeployments] = useState<any[]>([]);
+
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmTitle, setConfirmTitle] = useState('');
+  const [confirmMessage, setConfirmMessage] = useState('');
+  const [confirmCallback, setConfirmCallback] = useState<(() => void) | null>(null);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/immutability
@@ -77,15 +83,19 @@ export default function MetricsPage() {
     }
   };
 
-  const deleteRule = async (id: number) => {
-    if (!confirm('Delete this metric rule?')) return;
-    try {
-      await apiFetch(`/metrics/rules/${id}`, { method: 'DELETE' });
-      toast({ title: 'Rule deleted' });
-      fetchRules();
-    } catch (e: any) {
-      toast({ title: 'Deletion failed', type: 'error' });
-    }
+  const deleteRule = (id: number) => {
+    setConfirmTitle('Delete Metric Rule');
+    setConfirmMessage('Delete this metric rule?');
+    setConfirmCallback(() => async () => {
+      try {
+        await apiFetch(`/metrics/rules/${id}`, { method: 'DELETE' });
+        toast({ title: 'Rule deleted' });
+        fetchRules();
+      } catch (e: any) {
+        toast({ title: 'Deletion failed', type: 'error' });
+      }
+    });
+    setConfirmOpen(true);
   };
 
   const renderSparkline = (dataPoints: any[]) => {
@@ -269,6 +279,14 @@ export default function MetricsPage() {
           </div>
         </div>
       )}
+
+      <ConfirmModal
+        isOpen={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        onConfirm={confirmCallback || (() => {})}
+        title={confirmTitle}
+        message={confirmMessage}
+      />
     </div>
   );
 }

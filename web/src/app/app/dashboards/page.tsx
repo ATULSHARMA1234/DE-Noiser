@@ -6,6 +6,7 @@ import { useToast } from '@/context/ToastContext';
 import { ShimmerCardList } from '@/components/ShimmerSkeleton';
 import { LayoutGrid, Plus, Edit2, Trash2, ArrowLeft, BarChart2, Activity, List, X } from 'lucide-react';
 import { Responsive, WidthProvider } from "react-grid-layout/legacy";
+import { ConfirmModal } from '@/components/ConfirmModal';
 
 const ResponsiveGridLayout = WidthProvider(Responsive);
 
@@ -19,6 +20,11 @@ export default function DashboardsPage() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newDashName, setNewDashName] = useState('');
   const [widgetDataCache, setWidgetDataCache] = useState<Record<string, any>>({});
+
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmTitle, setConfirmTitle] = useState('');
+  const [confirmMessage, setConfirmMessage] = useState('');
+  const [confirmCallback, setConfirmCallback] = useState<(() => void) | null>(null);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/immutability
@@ -72,18 +78,22 @@ export default function DashboardsPage() {
     }
   };
 
-  const deleteDashboard = async (id: number) => {
-    if (!confirm('Delete this dashboard?')) return;
-    try {
-      await apiFetch(`/dashboards/${id}`, { method: 'DELETE' });
-      toast({ title: 'Dashboard deleted' });
-      if (selectedDashboard?.id === id) {
-        setSelectedDashboard(null);
+  const deleteDashboard = (id: number) => {
+    setConfirmTitle('Delete Dashboard');
+    setConfirmMessage('Delete this dashboard?');
+    setConfirmCallback(() => async () => {
+      try {
+        await apiFetch(`/dashboards/${id}`, { method: 'DELETE' });
+        toast({ title: 'Dashboard deleted' });
+        if (selectedDashboard?.id === id) {
+          setSelectedDashboard(null);
+        }
+        fetchDashboards();
+      } catch (e: any) {
+        toast({ title: 'Deletion failed', type: 'error' });
       }
-      fetchDashboards();
-    } catch (e: any) {
-      toast({ title: 'Deletion failed', type: 'error' });
-    }
+    });
+    setConfirmOpen(true);
   };
 
   const addWidget = async (type: string) => {
@@ -395,6 +405,14 @@ export default function DashboardsPage() {
           </div>
         </div>
       )}
+
+      <ConfirmModal
+        isOpen={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        onConfirm={confirmCallback || (() => {})}
+        title={confirmTitle}
+        message={confirmMessage}
+      />
     </div>
   );
 }

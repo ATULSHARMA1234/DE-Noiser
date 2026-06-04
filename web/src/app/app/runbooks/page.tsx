@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { apiFetch } from '@/lib/api';
 import { useToast } from '@/context/ToastContext';
 import { Play, Plus, Trash2, Power, Terminal, Settings, Globe, ShieldAlert, X } from 'lucide-react';
+import { ConfirmModal } from '@/components/ConfirmModal';
 
 export default function RunbooksPage() {
   const { toast } = useToast();
@@ -21,6 +22,11 @@ export default function RunbooksPage() {
   });
 
   const [activeTab, setActiveTab] = useState('rules');
+
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmTitle, setConfirmTitle] = useState('');
+  const [confirmMessage, setConfirmMessage] = useState('');
+  const [confirmCallback, setConfirmCallback] = useState<(() => void) | null>(null);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/immutability
@@ -81,15 +87,19 @@ export default function RunbooksPage() {
     }
   };
 
-  const deleteRunbook = async (id: number) => {
-    if (!confirm('Delete this runbook?')) return;
-    try {
-      await apiFetch(`/runbooks/${id}`, { method: 'DELETE' });
-      toast({ title: 'Runbook deleted' });
-      fetchRunbooks();
-    } catch (e: any) {
-      toast({ title: 'Deletion failed', type: 'error' });
-    }
+  const deleteRunbook = (id: number) => {
+    setConfirmTitle('Delete Runbook');
+    setConfirmMessage('Delete this runbook?');
+    setConfirmCallback(() => async () => {
+      try {
+        await apiFetch(`/runbooks/${id}`, { method: 'DELETE' });
+        toast({ title: 'Runbook deleted' });
+        fetchRunbooks();
+      } catch (e: any) {
+        toast({ title: 'Deletion failed', type: 'error' });
+      }
+    });
+    setConfirmOpen(true);
   };
 
   return (
@@ -324,6 +334,14 @@ export default function RunbooksPage() {
           </div>
         </div>
       )}
+
+      <ConfirmModal
+        isOpen={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        onConfirm={confirmCallback || (() => {})}
+        title={confirmTitle}
+        message={confirmMessage}
+      />
     </div>
   );
 }

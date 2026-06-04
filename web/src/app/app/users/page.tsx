@@ -4,8 +4,8 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { apiFetch, apiPost, apiDelete } from '@/lib/api';
 import { Users, UserPlus, Trash2, Shield, ShieldCheck, ShieldAlert, Loader2, Sparkles, X } from 'lucide-react';
-
 import { useToast } from '@/context/ToastContext';
+import { ConfirmModal } from '@/components/ConfirmModal';
 
 type ManagedUser = {
   id: number;
@@ -24,6 +24,11 @@ export default function UserDirectoryPage() {
   const [role, setRole] = useState('VIEWER');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmTitle, setConfirmTitle] = useState('');
+  const [confirmMessage, setConfirmMessage] = useState('');
+  const [confirmCallback, setConfirmCallback] = useState<(() => void) | null>(null);
 
   const fetchUsers = async () => {
     setIsLoading(true);
@@ -62,15 +67,19 @@ export default function UserDirectoryPage() {
     }
   };
 
-  const handleDeleteUser = async (userId: number) => {
-    if (!confirm('Are you sure you want to delete this user?')) return;
-    try {
-      await apiDelete(`/users/${userId}`);
-      await fetchUsers();
-      toast.success('Operator deleted successfully.');
-    } catch (e: any) {
-      toast.error(`Delete failed: ${e.message}`);
-    }
+  const handleDeleteUser = (userId: number) => {
+    setConfirmTitle('Delete Operator');
+    setConfirmMessage('Are you sure you want to delete this user?');
+    setConfirmCallback(() => async () => {
+      try {
+        await apiDelete(`/users/${userId}`);
+        await fetchUsers();
+        toast.success('Operator deleted successfully.');
+      } catch (e: any) {
+        toast.error(`Delete failed: ${e.message}`);
+      }
+    });
+    setConfirmOpen(true);
   };
 
   if (currentUser?.role !== 'ADMIN') {
@@ -281,6 +290,13 @@ export default function UserDirectoryPage() {
           </div>
         </div>
       )}
+      <ConfirmModal
+        isOpen={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        onConfirm={confirmCallback || (() => {})}
+        title={confirmTitle}
+        message={confirmMessage}
+      />
     </div>
   );
 }

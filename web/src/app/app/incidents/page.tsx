@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { ShieldAlert, Database, Clock, CheckCircle2, X, Zap, AlertTriangle, Trash2 } from 'lucide-react';
 import { apiFetch, apiPut, apiDelete } from '@/lib/api';
 import { useToast } from '@/context/ToastContext';
+import { ConfirmModal } from '@/components/ConfirmModal';
 
 export default function IncidentMemoryPage() {
   const { toast } = useToast();
@@ -12,6 +13,11 @@ export default function IncidentMemoryPage() {
   const [selectedIncident, setSelectedIncident] = useState<any>(null);
   const [domainFilter, setDomainFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
+
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmTitle, setConfirmTitle] = useState('');
+  const [confirmMessage, setConfirmMessage] = useState('');
+  const [confirmCallback, setConfirmCallback] = useState<(() => void) | null>(null);
 
   const fetchIncidents = () => {
     setIsLoading(true);
@@ -41,16 +47,20 @@ export default function IncidentMemoryPage() {
     }
   };
 
-  const deleteIncident = async (id: number) => {
-    if (!confirm('Delete this incident permanently?')) return;
-    try {
-      await apiDelete(`/incidents/${id}`);
-      fetchIncidents();
-      if (selectedIncident?.id === id) setSelectedIncident(null);
-      toast.success('Incident deleted successfully.');
-    } catch (e: any) {
-      toast.error(`Delete failed: ${e.message}`);
-    }
+  const deleteIncident = (id: number) => {
+    setConfirmTitle('Delete Incident');
+    setConfirmMessage('Delete this incident permanently?');
+    setConfirmCallback(() => async () => {
+      try {
+        await apiDelete(`/incidents/${id}`);
+        fetchIncidents();
+        if (selectedIncident?.id === id) setSelectedIncident(null);
+        toast.success('Incident deleted successfully.');
+      } catch (e: any) {
+        toast.error(`Delete failed: ${e.message}`);
+      }
+    });
+    setConfirmOpen(true);
   };
 
   const domains = ['All', ...new Set(incidents.map(i => i.domain).filter(Boolean))];
@@ -296,6 +306,14 @@ export default function IncidentMemoryPage() {
           </div>
         </div>
       )}
+
+      <ConfirmModal
+        isOpen={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        onConfirm={confirmCallback || (() => {})}
+        title={confirmTitle}
+        message={confirmMessage}
+      />
     </div>
   );
 }

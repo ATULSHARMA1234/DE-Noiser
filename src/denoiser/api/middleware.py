@@ -9,11 +9,13 @@ Task 4: Rate limiting — prevents abuse of the /ingest endpoint.
 from __future__ import annotations
 
 import logging
+import os
 import time
 import uuid
 from collections.abc import Callable
 from contextvars import ContextVar
 
+import redis.asyncio as redis_asyncio
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -93,8 +95,8 @@ def register_exception_handlers(app: FastAPI) -> None:
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """
-    Simple in-memory rate limiter for the /ingest endpoint.
-    Limits to max_requests per window_seconds per client IP.
+    Redis-backed sliding window rate limiter for the /ingest endpoint.
+    Gracefully falls back to local in-memory dict if Redis is down.
     """
 
     def __init__(self, app, max_requests: int = 100, window_seconds: int = 60):
@@ -102,6 +104,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self.max_requests = max_requests
         self.window_seconds = window_seconds
         self._requests: dict[str, list[float]] = {}
+        redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+        self.redis = redis_asyncio.from_url(redis_url, decode_responses=True)
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         # Only rate-limit the /ingest endpoint
@@ -112,25 +116,58 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         now = time.time()
         cutoff = now - self.window_seconds
 
-        # Clean old entries and count recent ones
-        if client_ip not in self._requests:
-            self._requests[client_ip] = []
+        use_fallback = False
+        try:
+            key = f"rate_limit:{client_ip}"
+            async with self.redis.pipeline(transaction=True) as pipe:
+                # Add current request using timestamp as score and value
+                pipe.zadd(key, {str(now): now})
+                # Remove elements older than the cutoff window
+                pipe.zremrangebyscore(key, 0, cutoff)
+                # Count current requests in this sliding window
+                pipe.zcard(key)
+                # Set dynamic TTL on the sliding window
+                pipe.expire(key, self.window_seconds)
+                
+                results = await pipe.execute()
+                recent_requests_count = results[2]
 
-        self._requests[client_ip] = [
-            t for t in self._requests[client_ip] if t > cutoff
-        ]
+            if recent_requests_count > self.max_requests:
+                rid = request_id_ctx.get("no-request")
+                logger.warning("[%s] Redis rate limit exceeded for IP %s on /ingest", rid, client_ip)
+                return JSONResponse(
+                    status_code=429,
+                    content={
+                        "error": "Rate limit exceeded",
+                        "detail": f"Maximum {self.max_requests} requests per {self.window_seconds}s",
+                        "request_id": rid,
+                    },
+                )
+        except Exception as e:
+            logger.warning(f"Redis rate limiter failed, falling back to in-memory: {e}")
+            use_fallback = True
 
-        if len(self._requests[client_ip]) >= self.max_requests:
-            rid = request_id_ctx.get("no-request")
-            logger.warning("[%s] Rate limit exceeded for IP %s on /ingest", rid, client_ip)
-            return JSONResponse(
-                status_code=429,
-                content={
-                    "error": "Rate limit exceeded",
-                    "detail": f"Maximum {self.max_requests} requests per {self.window_seconds}s",
-                    "request_id": rid,
-                },
-            )
+        if use_fallback:
+            # Clean old entries and count recent ones locally
+            if client_ip not in self._requests:
+                self._requests[client_ip] = []
 
-        self._requests[client_ip].append(now)
+            self._requests[client_ip] = [
+                t for t in self._requests[client_ip] if t > cutoff
+            ]
+
+            if len(self._requests[client_ip]) >= self.max_requests:
+                rid = request_id_ctx.get("no-request")
+                logger.warning("[%s] In-memory rate limit exceeded for IP %s on /ingest", rid, client_ip)
+                return JSONResponse(
+                    status_code=429,
+                    content={
+                        "error": "Rate limit exceeded",
+                        "detail": f"Maximum {self.max_requests} requests per {self.window_seconds}s",
+                        "request_id": rid,
+                    },
+                )
+
+            self._requests[client_ip].append(now)
+
         return await call_next(request)

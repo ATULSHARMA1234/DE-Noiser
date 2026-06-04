@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Shield, Cpu, HardDrive, Save, Check, RefreshCw, Webhook, Plus, Trash2, TestTube2, Bell, CheckCircle2, XCircle, AlertTriangle, ChevronDown, Cloud } from 'lucide-react';
 import { apiFetch, apiPut, apiPost, apiDelete } from '@/lib/api';
 import { useToast } from '@/context/ToastContext';
+import { ConfirmModal } from '@/components/ConfirmModal';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -123,6 +124,11 @@ export default function SettingsPage() {
   const [addError, setAddError] = useState<string | null>(null);
   const [addLoading, setAddLoading] = useState(false);
 
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmTitle, setConfirmTitle] = useState('');
+  const [confirmMessage, setConfirmMessage] = useState('');
+  const [confirmCallback, setConfirmCallback] = useState<(() => void) | null>(null);
+
   const fetchWebhooks = useCallback(async () => {
     try { setWebhooks(await apiFetch('/webhooks') as WebhookDest[]); } catch {}
   }, []);
@@ -181,15 +187,19 @@ export default function SettingsPage() {
     } finally { setAddLoading(false); }
   };
 
-  const handleDeleteWebhook = async (id: string) => {
-    if (!confirm('Delete this alert destination?')) return;
-    try {
-      await apiDelete(`/webhooks/${id}`);
-      setWebhooks(prev => prev.filter(w => w.id !== id));
-      toast.success('Alert destination deleted');
-    } catch (e: unknown) { 
-      toast.error(`Delete failed: ${errorMessage(e)}`); 
-    }
+  const handleDeleteWebhook = (id: string) => {
+    setConfirmTitle('Delete Alert Destination');
+    setConfirmMessage('Delete this alert destination?');
+    setConfirmCallback(() => async () => {
+      try {
+        await apiDelete(`/webhooks/${id}`);
+        setWebhooks(prev => prev.filter(w => w.id !== id));
+        toast.success('Alert destination deleted');
+      } catch (e: unknown) { 
+        toast.error(`Delete failed: ${errorMessage(e)}`); 
+      }
+    });
+    setConfirmOpen(true);
   };
 
   const handleToggleWebhook = async (wh: WebhookDest) => {
@@ -530,6 +540,13 @@ export default function SettingsPage() {
         </div>
 
       </div>
+      <ConfirmModal
+        isOpen={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        onConfirm={confirmCallback || (() => {})}
+        title={confirmTitle}
+        message={confirmMessage}
+      />
     </div>
   );
 }
