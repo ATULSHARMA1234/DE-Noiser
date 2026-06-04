@@ -313,7 +313,25 @@ def init_db():
 
         if not exists:
             import bcrypt
-            hashed = bcrypt.hashpw(b"admin123", bcrypt.gensalt()).decode("utf-8")
+            import secrets
+            import sys
+
+            _is_testing = "pytest" in sys.modules or "PYTEST_CURRENT_TEST" in os.environ
+            admin_password = os.getenv("SEMANTICOS_ADMIN_PASSWORD")
+            if not admin_password:
+                if _is_testing:
+                    admin_password = "admin123"
+                else:
+                    # No default credential in production: generate a random one and
+                    # tell the operator. They must reset it via SEMANTICOS_ADMIN_PASSWORD.
+                    admin_password = secrets.token_urlsafe(24)
+                    import logging
+                    logging.getLogger("denoiser").warning(
+                        "No SEMANTICOS_ADMIN_PASSWORD set; seeded %s with a random "
+                        "password: %s — store it now and rotate via env.",
+                        admin_email, admin_password,
+                    )
+            hashed = bcrypt.hashpw(admin_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
             admin_user = User(
                 email=admin_email,
                 hashed_password=hashed,
@@ -331,7 +349,11 @@ def init_db():
         system_exists = db.query(User).filter(User.email == system_email).first()
         if not system_exists:
             import bcrypt
-            hashed = bcrypt.hashpw(b"system-audit-dummy-secret-password-123!", bcrypt.gensalt()).decode("utf-8")
+            import secrets
+            # The system-audit user is never used for interactive login (it only
+            # provides audit-log attribution), so it gets an unguessable, unusable
+            # random password rather than a hardcoded one.
+            hashed = bcrypt.hashpw(secrets.token_urlsafe(32).encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
             system_user = User(
                 email=system_email,
                 hashed_password=hashed,

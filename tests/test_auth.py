@@ -183,3 +183,26 @@ def test_audit_middleware_fallback(db_session: Session):
         sys_audit_user = db_session.query(User).filter(User.email == "system-audit@semanticos.io").first()
         assert sys_audit_user is not None
         assert audit_log.user_id == sys_audit_user.id
+
+
+def test_audit_middleware_attributes_authenticated_actor(db_session: Session):
+    """An authenticated mutating action must be attributed to the actual actor, not system-audit."""
+    from denoiser.api.main import app
+    from denoiser.storage.db import AuditLog
+
+    email = "audit-actor@semanticos.io"
+    password = "auditpassword"
+    db_session.query(User).filter(User.email == email).delete()
+    db_session.commit()
+    user = User(email=email, hashed_password=get_password_hash(password), role="ADMIN")
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+
+    with TestClient(app) as client:
+        token = client.post("/auth/login", json={"email": email, "password": password}).json()["access_token"]
+        client.put("/settings", json={"retention_days": 33}, headers={"Authorization": f"Bearer {token}"})
+
+        audit_log = db_session.query(AuditLog).order_by(AuditLog.id.desc()).first()
+        assert audit_log is not None
+        assert audit_log.user_id == user.id

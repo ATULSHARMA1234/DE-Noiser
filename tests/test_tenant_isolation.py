@@ -126,3 +126,26 @@ class TestTenantIsolation:
             assert resp_blocked.status_code in (403, 404)
 
         app.dependency_overrides.pop(get_current_user, None)
+
+    def test_cross_tenant_incident_access_blocked(self):
+        user_t1 = User(id=1, email="user1@tenant1.com", role="ADMIN", tenant_id=1)
+        app.dependency_overrides[get_current_user] = lambda: user_t1
+
+        with TestClient(app) as client:
+            # T1 user can read their own incident
+            resp_ok = client.get("/incidents/401")
+            assert resp_ok.status_code == 200
+
+            # T1 user cannot read, resolve, or delete a T2 incident by ID
+            assert client.get("/incidents/402").status_code in (403, 404)
+            assert client.put("/incidents/402/resolve", json={"resolved": True}).status_code in (403, 404)
+            assert client.delete("/incidents/402").status_code in (403, 404)
+
+            # Confirm the T2 incident is untouched (still OPEN)
+            user_t2 = User(id=2, email="user2@tenant2.com", role="ADMIN", tenant_id=2)
+            app.dependency_overrides[get_current_user] = lambda: user_t2
+            t2_view = client.get("/incidents/402")
+            assert t2_view.status_code == 200
+            assert t2_view.json()["status"] == "OPEN"
+
+        app.dependency_overrides.pop(get_current_user, None)

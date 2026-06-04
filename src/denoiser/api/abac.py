@@ -14,7 +14,13 @@ class ABACPolicyEngine:
         - Resource Attributes: resource_attrs.get("environment"), resource_attrs.get("contains_pii")
         - Action: read, write, delete
         """
-        # ADMIN role bypasses ABAC checks
+        # Rule 0: Tenant isolation — enforced for every role, including ADMIN.
+        # A resource belonging to a different tenant is never accessible.
+        resource_tenant = resource_attrs.get("tenant_id", None)
+        if resource_tenant is not None and resource_tenant != getattr(user, "tenant_id", None):
+            return False
+
+        # ADMIN role bypasses the remaining attribute checks (within their own tenant)
         if user.role == "ADMIN":
             return True
 
@@ -61,6 +67,7 @@ class require_abac:
                 incident_id = int(path_params["incident_id"])
                 incident = db.query(Incident).filter(Incident.id == incident_id).first()
                 if incident:
+                    resource_attrs["tenant_id"] = incident.tenant_id
                     # Map domains ending with .prod or containing prod to environment 'prod'
                     domain = incident.domain or ""
                     resource_attrs["environment"] = "prod" if "prod" in domain.lower() else "dev"
@@ -75,6 +82,7 @@ class require_abac:
                 run_id = path_params["run_id"]
                 run = db.query(AnalysisRun).filter(AnalysisRun.id == run_id).first()
                 if run:
+                    resource_attrs["tenant_id"] = run.tenant_id
                     # Analysis run source contains environment info
                     source = run.source or ""
                     resource_attrs["environment"] = "prod" if "prod" in source.lower() else "dev"

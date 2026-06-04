@@ -79,11 +79,19 @@ app = FastAPI(title="SemanticOS — Enterprise Log Intelligence API", version="2
 
 # ── Enterprise Middleware Stack (Tasks 1, 3, 4) ──────────────────────────────
 # Order matters: CORS first, then rate limiter, then correlation ID (outermost runs last)
+# Origins are an explicit allowlist (never "*" on a credentialed API). Configure
+# via CORS_ALLOWED_ORIGINS (comma-separated); defaults to local dev origins.
+_cors_origins = [
+    o.strip()
+    for o in os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",")
+    if o.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_cors_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_headers=["Authorization", "Content-Type", "X-API-Key"],
 )
 app.add_middleware(RateLimitMiddleware, max_requests=100, window_seconds=60)
 app.add_middleware(CorrelationIDMiddleware)
@@ -865,7 +873,7 @@ def get_incidents(db: Session = Depends(get_db), current_user: User = Depends(re
 
 @app.get("/incidents/{incident_id}")
 def get_incident_detail(incident_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_abac("read", "incident"))):
-    inc = db.query(Incident).filter(Incident.id == incident_id).first()
+    inc = db.query(Incident).filter(Incident.id == incident_id, Incident.tenant_id == current_user.tenant_id).first()
     if not inc:
         raise HTTPException(status_code=404, detail="Incident not found")
     return _incident_to_dict(inc)
@@ -873,7 +881,7 @@ def get_incident_detail(incident_id: int, db: Session = Depends(get_db), current
 
 @app.put("/incidents/{incident_id}/resolve")
 def resolve_incident(incident_id: int, body: ResolveRequest, db: Session = Depends(get_db), current_user: User = Depends(require_abac("write", "incident"))):
-    inc = db.query(Incident).filter(Incident.id == incident_id).first()
+    inc = db.query(Incident).filter(Incident.id == incident_id, Incident.tenant_id == current_user.tenant_id).first()
     if not inc:
         raise HTTPException(status_code=404, detail="Incident not found")
     inc.status = "RESOLVED" if body.resolved else "OPEN"
@@ -888,7 +896,7 @@ def resolve_incident(incident_id: int, body: ResolveRequest, db: Session = Depen
 
 @app.delete("/incidents/{incident_id}")
 def delete_incident(incident_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_abac("delete", "incident"))):
-    inc = db.query(Incident).filter(Incident.id == incident_id).first()
+    inc = db.query(Incident).filter(Incident.id == incident_id, Incident.tenant_id == current_user.tenant_id).first()
     if not inc:
         raise HTTPException(status_code=404, detail="Incident not found")
     db.delete(inc)
