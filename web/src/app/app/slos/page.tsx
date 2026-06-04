@@ -3,7 +3,8 @@
 import React, { useState, useEffect } from 'react';
 import { apiFetch } from '@/lib/api';
 import { useToast } from '@/context/ToastContext';
-import { Zap, Plus, Settings, AlertCircle, Activity, ShieldAlert, CheckCircle2 } from 'lucide-react';
+import { Zap, Plus, Settings, AlertCircle, Activity, ShieldAlert, CheckCircle2, X } from 'lucide-react';
+import { ConfirmModal } from '@/components/ConfirmModal';
 
 export default function SLOsPage() {
   const { toast } = useToast();
@@ -18,6 +19,11 @@ export default function SLOsPage() {
     target_percentage: 99.9,
     window_days: 30
   });
+
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmTitle, setConfirmTitle] = useState('');
+  const [confirmMessage, setConfirmMessage] = useState('');
+  const [confirmCallback, setConfirmCallback] = useState<(() => void) | null>(null);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/immutability
@@ -64,14 +70,18 @@ export default function SLOsPage() {
     }
   };
 
-  const deleteSLO = async (id: number) => {
-    if (!confirm('Are you sure you want to delete this SLO?')) return;
-    try {
-      await apiFetch(`/slos/${id}`, { method: 'DELETE' });
-      fetchSLOs();
-    } catch (e: any) {
-      toast({ title: 'Failed to delete SLO', type: 'error' });
-    }
+  const deleteSLO = (id: number) => {
+    setConfirmTitle('Delete SLO');
+    setConfirmMessage('Are you sure you want to delete this SLO?');
+    setConfirmCallback(() => async () => {
+      try {
+        await apiFetch(`/slos/${id}`, { method: 'DELETE' });
+        fetchSLOs();
+      } catch (e: any) {
+        toast({ title: 'Failed to delete SLO', type: 'error' });
+      }
+    });
+    setConfirmOpen(true);
   };
 
   // Very simple sparkline renderer
@@ -323,9 +333,14 @@ export default function SLOsPage() {
           </div>
         </div>
       )}
+
+      <ConfirmModal
+        isOpen={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        onConfirm={confirmCallback || (() => {})}
+        title={confirmTitle}
+        message={confirmMessage}
+      />
     </div>
   );
 }
-
-// Ensure lucide icon 'X' is imported, adding this explicitly to avoid the error on next build:
-import { X } from 'lucide-react';

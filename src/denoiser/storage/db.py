@@ -10,7 +10,7 @@ from __future__ import annotations
 import datetime
 import os
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, Float, Integer, String, create_engine
+from sqlalchemy import JSON, Boolean, Column, DateTime, Float, Integer, String, create_engine, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
@@ -63,6 +63,7 @@ class AnalysisRun(Base):
     __tablename__ = "analysis_runs"
 
     id = Column(String, primary_key=True, index=True)  # e.g. run_a1b2c3d4
+    tenant_id = Column(Integer, index=True, nullable=True)
     source = Column(String)
     status = Column(String)
     raw_lines = Column(Integer)
@@ -81,6 +82,9 @@ class User(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
     role = Column(String, default="VIEWER", nullable=False)  # ADMIN, ANALYST, VIEWER
+    is_active = Column(Boolean, default=True)
+    department = Column(String, default="Engineering", nullable=False)
+    environment_access = Column(JSON, default=list)
 
 
 class AuditLog(Base):
@@ -266,6 +270,36 @@ def init_db():
 
     db = SessionLocal()
     try:
+        try:
+            db.execute(text("SELECT is_active FROM users LIMIT 1"))
+        except Exception:
+            db.rollback()
+            try:
+                db.execute(text("ALTER TABLE users ADD COLUMN is_active BOOLEAN DEFAULT 1"))
+                db.commit()
+            except Exception:
+                db.rollback()
+
+        try:
+            db.execute(text("SELECT department FROM users LIMIT 1"))
+        except Exception:
+            db.rollback()
+            try:
+                db.execute(text("ALTER TABLE users ADD COLUMN department VARCHAR DEFAULT 'Engineering'"))
+                db.commit()
+            except Exception:
+                db.rollback()
+
+        try:
+            db.execute(text("SELECT environment_access FROM users LIMIT 1"))
+        except Exception:
+            db.rollback()
+            try:
+                db.execute(text("ALTER TABLE users ADD COLUMN environment_access JSON DEFAULT '[]'"))
+                db.commit()
+            except Exception:
+                db.rollback()
+
         admin_email = "admin@semanticos.io"
         exists = db.query(User).filter(User.email == admin_email).first()
 
@@ -278,15 +312,60 @@ def init_db():
             db.refresh(default_tenant)
 
         if not exists:
+            import secrets
+            import sys
+
             import bcrypt
-            hashed = bcrypt.hashpw(b"admin123", bcrypt.gensalt()).decode("utf-8")
+
+            _is_testing = "pytest" in sys.modules or "PYTEST_CURRENT_TEST" in os.environ
+            admin_password = os.getenv("SEMANTICOS_ADMIN_PASSWORD")
+            if not admin_password:
+                if _is_testing:
+                    admin_password = "admin123"
+                else:
+                    # No default credential in production: generate a random one and
+                    # tell the operator. They must reset it via SEMANTICOS_ADMIN_PASSWORD.
+                    admin_password = secrets.token_urlsafe(24)
+                    import logging
+                    logging.getLogger("denoiser").warning(
+                        "No SEMANTICOS_ADMIN_PASSWORD set; seeded %s with a random "
+                        "password: %s — store it now and rotate via env.",
+                        admin_email, admin_password,
+                    )
+            hashed = bcrypt.hashpw(admin_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
             admin_user = User(
                 email=admin_email,
                 hashed_password=hashed,
                 role="ADMIN",
-                tenant_id=default_tenant.id
+                tenant_id=default_tenant.id,
+                is_active=True,
+                department="Operations",
+                environment_access=["*"]
             )
             db.add(admin_user)
+            db.commit()
+
+        # Seed system-audit user
+        system_email = "system-audit@semanticos.io"
+        system_exists = db.query(User).filter(User.email == system_email).first()
+        if not system_exists:
+            import secrets
+
+            import bcrypt
+            # The system-audit user is never used for interactive login (it only
+            # provides audit-log attribution), so it gets an unguessable, unusable
+            # random password rather than a hardcoded one.
+            hashed = bcrypt.hashpw(secrets.token_urlsafe(32).encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+            system_user = User(
+                email=system_email,
+                hashed_password=hashed,
+                role="ADMIN",
+                tenant_id=default_tenant.id,
+                is_active=True,
+                department="Security",
+                environment_access=["*"]
+            )
+            db.add(system_user)
             db.commit()
     except Exception:
         db.rollback()

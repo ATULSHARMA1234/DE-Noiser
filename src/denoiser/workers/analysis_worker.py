@@ -299,8 +299,10 @@ def run_analysis_task(self, request_dict: dict):
     run_id = self.request.id or f"run_{uuid.uuid4().hex[:8]}"
     source_name = ", ".join(sources)
     try:
+        tenant_id = request_dict.get("tenant_id")
         db_run = AnalysisRun(
             id=run_id,
+            tenant_id=tenant_id,
             source=source_name,
             status="Completed",
             raw_lines=deduper.total_count,
@@ -313,7 +315,7 @@ def run_analysis_task(self, request_dict: dict):
 
         if llm_payload:
             new_incident = Incident(
-                tenant_id=1,
+                tenant_id=tenant_id,
                 title=llm_payload.get("failure_domain", "Unknown Failure"),
                 domain=llm_payload.get("failure_domain", "System"),
                 impact_score=min(1.0, len(clusters) / 10.0) if len(clusters) > 1 else 0.3,

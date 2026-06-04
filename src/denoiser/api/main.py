@@ -29,7 +29,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from denoiser.analysis.drift import ClusterSnapshot, DriftDetector
-from denoiser.api.auth import create_access_token, get_current_user, require_role, verify_password
+from denoiser.api.abac import require_abac
+from denoiser.api.auth import create_access_token, get_current_user, require_role, verify_ingest_auth, verify_password
 from denoiser.api.middleware import (
     CorrelationIDMiddleware,
     RateLimitMiddleware,
@@ -56,8 +57,6 @@ from denoiser.storage.clickhouse_store import ClickHouseStore
 from denoiser.storage.db import (
     AnalysisRun,
     Incident,
-    ServiceLevelObjective,
-    SLODataPoint,
     User,
     get_db,
     init_db,
@@ -78,11 +77,19 @@ app = FastAPI(title="SemanticOS — Enterprise Log Intelligence API", version="2
 
 # ── Enterprise Middleware Stack (Tasks 1, 3, 4) ──────────────────────────────
 # Order matters: CORS first, then rate limiter, then correlation ID (outermost runs last)
+# Origins are an explicit allowlist (never "*" on a credentialed API). Configure
+# via CORS_ALLOWED_ORIGINS (comma-separated); defaults to local dev origins.
+_cors_origins = [
+    o.strip()
+    for o in os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",")
+    if o.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_cors_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_headers=["Authorization", "Content-Type", "X-API-Key"],
 )
 app.add_middleware(RateLimitMiddleware, max_requests=100, window_seconds=60)
 app.add_middleware(CorrelationIDMiddleware)
@@ -95,9 +102,12 @@ from denoiser.api.dashboards import router as dashboards_router
 from denoiser.api.deployments import router as deployments_router
 from denoiser.api.integrations import router as integrations_router
 from denoiser.api.metrics import router as metrics_router
+from denoiser.api.otlp import router as otlp_router
 from denoiser.api.query import router as query_router
 from denoiser.api.runbooks import router as runbooks_router
 from denoiser.api.slo import router as slo_router
+from denoiser.api.sso import router as sso_router
+from denoiser.api.storage import router as storage_router
 from denoiser.api.tracing import router as tracing_router
 
 app.add_middleware(AuditMiddleware)
@@ -112,6 +122,9 @@ app.include_router(automation_router)
 app.include_router(runbooks_router)
 app.include_router(integrations_router)
 app.include_router(deployments_router)
+app.include_router(sso_router)
+app.include_router(otlp_router)
+app.include_router(storage_router)
 
 # Register global exception handlers (Task 3)
 register_exception_handlers(app)
@@ -129,10 +142,11 @@ DEFAULT_SETTINGS = {
     "sampling_threshold": 50000,
     "auto_analyze": False,
     "s3_enabled": False,
-    "s3_endpoint": "http://localhost:9000",
-    "s3_bucket": "semanticos-logs",
-    "s3_access_key": "admin",
-    "s3_secret_key": "password123",
+    "s3_endpoint": os.getenv("S3_ENDPOINT", "http://localhost:9000"),
+    "s3_bucket": os.getenv("S3_BUCKET", "semanticos-logs"),
+    # No credentials baked into source — supplied via env or the settings UI.
+    "s3_access_key": os.getenv("S3_ACCESS_KEY", ""),
+    "s3_secret_key": os.getenv("S3_SECRET_KEY", ""),
 }
 
 
@@ -165,6 +179,7 @@ async def on_startup():
         logger.info("Kafka Producer started")
     except Exception as e:
         logger.error(f"Failed to start Kafka Producer: {e}")
+        kafka_producer = None
 
 @app.on_event("shutdown")
 async def on_shutdown():
@@ -185,9 +200,13 @@ async def on_shutdown():
 
 @app.post("/auth/login", response_model=TokenResponse)
 def login(payload: UserLogin, db: Session = Depends(get_db)):
+    """Authenticate an operator and return an access token."""
     user = db.query(User).filter(User.email == payload.email).first()
     if not user or not verify_password(payload.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    if not getattr(user, "is_active", True):
+        raise HTTPException(status_code=401, detail="User account is deactivated")
 
     access_token = create_access_token(data={"sub": user.email})
     return {
@@ -199,16 +218,19 @@ def login(payload: UserLogin, db: Session = Depends(get_db)):
 
 @app.get("/auth/me", response_model=UserResponse)
 def get_me(current_user: User = Depends(get_current_user)):
+    """Retrieve the current authenticated user's profile."""
     return current_user
 
 
 @app.get("/users", response_model=list[UserResponse])
 def list_users(db: Session = Depends(get_db), current_user: User = Depends(require_role(["ADMIN"]))):
+    """List all registered operators."""
     return db.query(User).all()
 
 
 @app.post("/users", response_model=UserResponse, status_code=201)
 def create_user(payload: UserCreate, db: Session = Depends(get_db), current_user: User = Depends(require_role(["ADMIN"]))):
+    """Provision a new system operator."""
     exists = db.query(User).filter(User.email == payload.email).first()
     if exists:
         raise HTTPException(status_code=400, detail="User with this email already exists")
@@ -227,6 +249,7 @@ def create_user(payload: UserCreate, db: Session = Depends(get_db), current_user
 
 @app.delete("/users/{user_id}")
 def delete_user(user_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_role(["ADMIN"]))):
+    """Delete a system operator."""
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -239,10 +262,30 @@ def delete_user(user_id: int, db: Session = Depends(get_db), current_user: User 
     return {"status": "deleted", "id": user_id}
 
 
+@app.put("/users/{user_id}/deactivate")
+def deactivate_user(user_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_role(["ADMIN"]))):
+    """Deactivate a system operator (soft deactivation)."""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if user.email == current_user.email:
+        raise HTTPException(status_code=400, detail="Cannot deactivate currently logged in admin user")
+
+    if user.email == "system-audit@semanticos.io":
+        raise HTTPException(status_code=400, detail="Cannot deactivate the system-audit user")
+
+    user.is_active = False
+    db.commit()
+    db.refresh(user)
+    return {"status": "deactivated", "id": user_id, "is_active": user.is_active}
+
+
 # ─── HEALTH ───────────────────────────────────────────────────────────────────
 
 @app.get("/health")
 def health_check():
+    """Perform a system health check."""
     return {"status": "healthy", "version": "2.0.0"}
 
 
@@ -341,12 +384,19 @@ def list_sources(current_user: User = Depends(require_role(["VIEWER", "ANALYST",
 @app.post("/sources/upload")
 async def upload_source(file: UploadFile = File(...), current_user: User = Depends(require_role(["ANALYST", "ADMIN"]))):
     """Upload a log file to the data/ directory for analysis."""
-    dest = DATA_DIR / file.filename
+    # Reject path traversal: collapse to a bare filename and confirm the resolved
+    # destination stays directly inside DATA_DIR.
+    safe_name = os.path.basename(file.filename or "")
+    if not safe_name or safe_name in (".", ".."):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    dest = (DATA_DIR / safe_name).resolve()
+    if dest.parent != DATA_DIR.resolve():
+        raise HTTPException(status_code=400, detail="Invalid filename")
     content = await file.read()
     dest.write_bytes(content)
     stat = dest.stat()
     return {
-        "name": file.filename,
+        "name": safe_name,
         "path": str(dest),
         "size_bytes": stat.st_size,
         "size_human": _human_size(stat.st_size),
@@ -371,37 +421,7 @@ def delete_source(filename: str, current_user: User = Depends(require_role(["ADM
         raise HTTPException(status_code=500, detail=str(e))
 
 
-from fastapi.security import APIKeyHeader
-
-from denoiser.api.auth import oauth2_scheme
-
-api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
-
-
-def verify_ingest_auth(
-    api_key: str | None = Depends(api_key_header),
-    token: str | None = Depends(oauth2_scheme),
-    db: Session = Depends(get_db)
-) -> str:
-    """Allow ingest if X-API-Key header matches static config, or if a valid JWT is present. Returns tenant_id."""
-    from denoiser.storage.db import Tenant
-    if api_key:
-        tenant = db.query(Tenant).filter(Tenant.api_key == api_key).first()
-        if tenant:
-            return tenant.id
-        # Fallback to default for local dev
-        static_key = os.getenv("INGEST_API_KEY", "semanticos-ingest-key-123")
-        if api_key == static_key:
-            return "default_tenant"
-
-    if token:
-        try:
-            user = get_current_user(token, db)
-            return user.tenant_id
-        except Exception:
-            pass
-
-    raise HTTPException(status_code=401, detail="Invalid API Key or JWT token")
+# verify_ingest_auth is now imported from denoiser.api.auth
 
 
 @app.post("/ingest")
@@ -448,7 +468,7 @@ async def ingest_logs(payload: IngestPayload, tenant_id: str = Depends(verify_in
         try:
             for log_entry in body:
                 msg = json.dumps(log_entry) if isinstance(log_entry, dict) else str(log_entry)
-                await redis_client.publish("log_stream", msg)
+                await redis_client.publish(f"log_stream:{tenant_id}", msg)
         except Exception as re:
             logger.warning(f"Failed to publish ingest logs to Redis: {re}")
 
@@ -460,63 +480,7 @@ async def ingest_logs(payload: IngestPayload, tenant_id: str = Depends(verify_in
 
 # ─── SLO / SLI ENDPOINTS ──────────────────────────────────────────────────────────
 
-class SLOCreate(BaseModel):
-    name: str
-    service: str
-    sli_type: str
-    target_percentage: float
-    window_days: int = 30
 
-@app.get("/slos")
-def list_slos(db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
-    slos = db.query(ServiceLevelObjective).filter(ServiceLevelObjective.tenant_id == current_user.tenant_id).all()
-    return [{"id": s.id, "name": s.name, "service": s.service, "sli_type": s.sli_type, "target_percentage": s.target_percentage, "window_days": s.window_days} for s in slos]
-
-@app.post("/slos")
-def create_slo(slo: SLOCreate, db: Session = Depends(get_db), current_user: User = Depends(require_role(["ADMIN"]))):
-    db_slo = ServiceLevelObjective(**slo.dict(), tenant_id=current_user.tenant_id)
-    db.add(db_slo)
-    db.commit()
-    db.refresh(db_slo)
-    return {"id": db_slo.id, "name": db_slo.name}
-
-@app.delete("/slos/{slo_id}")
-def delete_slo(slo_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_role(["ADMIN"]))):
-    slo = db.query(ServiceLevelObjective).filter(ServiceLevelObjective.id == slo_id, ServiceLevelObjective.tenant_id == current_user.tenant_id).first()
-    if slo:
-        db.delete(slo)
-        db.commit()
-    return {"status": "deleted"}
-
-@app.get("/slos/{slo_id}/status")
-def get_slo_status(slo_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
-    slo = db.query(ServiceLevelObjective).filter(ServiceLevelObjective.id == slo_id, ServiceLevelObjective.tenant_id == current_user.tenant_id).first()
-    if not slo:
-        raise HTTPException(status_code=404, detail="SLO not found")
-
-    points = db.query(SLODataPoint).filter(SLODataPoint.slo_id == slo.id).order_by(SLODataPoint.timestamp.desc()).limit(20).all()
-    points.reverse()
-
-    current_val = points[-1].value if points else 100.0
-    status_label = "HEALTHY"
-    if current_val < slo.target_percentage:
-        status_label = "BREACHED"
-    elif current_val < slo.target_percentage + 0.1:
-        status_label = "WARNING"
-
-    # Dummy error budget calc
-    error_budget_total = 1000
-    error_budget_remaining = int(error_budget_total * (current_val / 100.0))
-    burn_rate = 1.0 if status_label == "HEALTHY" else (5.0 if status_label == "WARNING" else 20.0)
-
-    return {
-        "status": status_label,
-        "current_value": current_val,
-        "error_budget_remaining": error_budget_remaining,
-        "error_budget_total": error_budget_total,
-        "burn_rate": burn_rate,
-        "data_points": [{"timestamp": p.timestamp.isoformat(), "value": p.value} for p in points]
-    }
 
 
 class LogQuery(BaseModel):
@@ -784,16 +748,28 @@ def update_settings(new_settings: SettingsUpdate, current_user: User = Depends(r
 async def websocket_endpoint(websocket: WebSocket, token: str | None = None, db: Session = Depends(get_db)):
     await websocket.accept()
 
-    if token:
-        try:
-            get_current_user(token, db)
-        except Exception:
-            await websocket.close(code=4001, reason="Invalid token")
-            return
+    # Prefer the token from the Authorization header (keeps it out of URLs/proxy
+    # logs); fall back to the legacy query parameter for existing clients.
+    if not token:
+        auth_header = websocket.headers.get("authorization", "")
+        if auth_header.lower().startswith("bearer "):
+            token = auth_header.split(" ", 1)[1]
 
-    # Task 45: Redis Pub/Sub for WebSockets
+    if not token:
+        await websocket.close(code=4001, reason="Authentication token required")
+        return
+
+    try:
+        user = get_current_user(token, db)
+    except Exception:
+        await websocket.close(code=4001, reason="Invalid token")
+        return
+
+    # Task 45: Redis Pub/Sub for WebSockets — scoped per tenant so a subscriber
+    # only ever receives its own tenant's log stream.
+    channel = f"log_stream:{user.tenant_id}"
     pubsub = redis_client.pubsub()
-    await pubsub.subscribe("log_stream")
+    await pubsub.subscribe(channel)
 
     try:
         # We simulate the UI format expected by the frontend
@@ -835,11 +811,11 @@ async def websocket_endpoint(websocket: WebSocket, token: str | None = None, db:
                         "timestamp": time.time(),
                     })
     except WebSocketDisconnect:
-        await pubsub.unsubscribe("log_stream")
+        await pubsub.unsubscribe(channel)
         await pubsub.close()
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
-        await pubsub.unsubscribe("log_stream")
+        await pubsub.unsubscribe(channel)
         await pubsub.close()
 
 
@@ -860,6 +836,9 @@ async def run_analysis(request: AnalysisRequest, current_user: User = Depends(re
     from denoiser.workers.analysis_worker import run_analysis_task
 
     payload = request.model_dump()
+    # Scope the resulting run/incidents to the requesting user's tenant so they
+    # show up in the tenant-filtered /runs and /incidents views.
+    payload["tenant_id"] = current_user.tenant_id
 
     # If running inside pytest, force synchronous execution for test compatibility
     if "PYTEST_CURRENT_TEST" in os.environ:
@@ -911,16 +890,16 @@ def get_incidents(db: Session = Depends(get_db), current_user: User = Depends(re
 
 
 @app.get("/incidents/{incident_id}")
-def get_incident_detail(incident_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
-    inc = db.query(Incident).filter(Incident.id == incident_id).first()
+def get_incident_detail(incident_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_abac("read", "incident"))):
+    inc = db.query(Incident).filter(Incident.id == incident_id, Incident.tenant_id == current_user.tenant_id).first()
     if not inc:
         raise HTTPException(status_code=404, detail="Incident not found")
     return _incident_to_dict(inc)
 
 
 @app.put("/incidents/{incident_id}/resolve")
-def resolve_incident(incident_id: int, body: ResolveRequest, db: Session = Depends(get_db), current_user: User = Depends(require_role(["ANALYST", "ADMIN"]))):
-    inc = db.query(Incident).filter(Incident.id == incident_id).first()
+def resolve_incident(incident_id: int, body: ResolveRequest, db: Session = Depends(get_db), current_user: User = Depends(require_abac("write", "incident"))):
+    inc = db.query(Incident).filter(Incident.id == incident_id, Incident.tenant_id == current_user.tenant_id).first()
     if not inc:
         raise HTTPException(status_code=404, detail="Incident not found")
     inc.status = "RESOLVED" if body.resolved else "OPEN"
@@ -934,8 +913,8 @@ def resolve_incident(incident_id: int, body: ResolveRequest, db: Session = Depen
 
 
 @app.delete("/incidents/{incident_id}")
-def delete_incident(incident_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_role(["ADMIN"]))):
-    inc = db.query(Incident).filter(Incident.id == incident_id).first()
+def delete_incident(incident_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_abac("delete", "incident"))):
+    inc = db.query(Incident).filter(Incident.id == incident_id, Incident.tenant_id == current_user.tenant_id).first()
     if not inc:
         raise HTTPException(status_code=404, detail="Incident not found")
     db.delete(inc)
@@ -964,6 +943,7 @@ def _incident_to_dict(inc: Incident) -> dict:
 # ─── RUNS — History ──────────────────────────────────────────────────────────
 
 @app.get("/analysis/runs")
+@app.get("/runs")
 def list_analysis_runs(db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
     """List recent analysis runs."""
     runs = db.query(AnalysisRun).filter(AnalysisRun.tenant_id == current_user.tenant_id).order_by(AnalysisRun.created_at.desc()).all()
@@ -1014,7 +994,9 @@ def compare_runs(run_a: str, run_b: str, db: Session = Depends(get_db), current_
 
 
 @app.get("/analysis/runs/{run_id}")
-def get_run_details(run_id: str, db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
+@app.get("/runs/{run_id}")
+def get_run_details(run_id: str, db: Session = Depends(get_db), current_user: User = Depends(require_abac("read", "run"))):
+    """Retrieve full analysis run details by ID."""
     run = db.query(AnalysisRun).filter(AnalysisRun.id == run_id, AnalysisRun.tenant_id == current_user.tenant_id).first()
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -1023,6 +1005,7 @@ def get_run_details(run_id: str, db: Session = Depends(get_db), current_user: Us
 
 @app.delete("/runs/{run_id}")
 def delete_run(run_id: str, db: Session = Depends(get_db), current_user: User = Depends(require_role(["ADMIN"]))):
+    """Delete an analysis run by ID."""
     run = db.query(AnalysisRun).filter(AnalysisRun.id == run_id, AnalysisRun.tenant_id == current_user.tenant_id).first()
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -1162,7 +1145,7 @@ def get_delivery_log(limit: int = 50, current_user: User = Depends(require_role(
 # ─── ALERT TRIGGERS — Automated Runbooks ────────────────────────────────────
 
 @app.post("/alerts/trigger")
-def trigger_alert(alert: AlertPayload, db: Session = Depends(get_db)):
+def trigger_alert(alert: AlertPayload, db: Session = Depends(get_db), current_user: User = Depends(require_role(["ANALYST", "ADMIN"]))):
     """
     Receives an alert and triggers RunbookExecution if it's P0.
     In a real system, this could be triggered by internal analysis or external webhooks.

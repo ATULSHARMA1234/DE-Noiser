@@ -5,6 +5,7 @@ import { Plus, FileText, Upload, RefreshCw, HardDrive, Trash2, Play, Database, X
 import { apiFetch, API_BASE, apiDelete } from '@/lib/api';
 import { useRouter } from 'next/navigation';
 import { useToast } from '@/context/ToastContext';
+import { ConfirmModal } from '@/components/ConfirmModal';
  
 export default function SourcesPage() {
   const { toast } = useToast();
@@ -13,6 +14,11 @@ export default function SourcesPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
 
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmTitle, setConfirmTitle] = useState('');
+  const [confirmMessage, setConfirmMessage] = useState('');
+  const [confirmCallback, setConfirmCallback] = useState<(() => void) | null>(null);
+ 
   const [activeModal, setActiveModal] = useState<'k8s' | 'aws' | 'docker' | null>(null);
   const [k8sPods, setK8sPods] = useState<any[]>([]);
   const [awsGroups, setAwsGroups] = useState<any[]>([]);
@@ -159,15 +165,19 @@ export default function SourcesPage() {
 
   useEffect(() => { fetchSources(); }, []);
 
-  const handleDeleteSource = async (filename: string) => {
-    if (!confirm(`Are you sure you want to delete ${filename}? This action cannot be undone.`)) return;
-    try {
-      await apiDelete(`/sources/${filename}`);
-      toast.success('Log source deleted');
-      fetchSources();
-    } catch (e: any) {
-      toast.error(`Failed to delete file: ${e.message}`);
-    }
+  const handleDeleteSource = (filename: string) => {
+    setConfirmTitle('Delete Log Source');
+    setConfirmMessage(`Are you sure you want to delete ${filename}? This action cannot be undone.`);
+    setConfirmCallback(() => async () => {
+      try {
+        await apiDelete(`/sources/${filename}`);
+        toast.success('Log source deleted');
+        fetchSources();
+      } catch (e: any) {
+        toast.error(`Failed to delete file: ${e.message}`);
+      }
+    });
+    setConfirmOpen(true);
   };
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -646,7 +656,13 @@ export default function SourcesPage() {
           </div>
         </div>
       )}
-
+      <ConfirmModal
+        isOpen={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        onConfirm={confirmCallback || (() => {})}
+        title={confirmTitle}
+        message={confirmMessage}
+      />
     </div>
   );
 }

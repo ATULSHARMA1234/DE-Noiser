@@ -35,12 +35,26 @@ class AuditMiddleware(BaseHTTPMiddleware):
                     email = payload.get("sub")
                     if email:
                         db = SessionLocal()
-                        user = db.query(User).filter(User.email == email).first()
-                        if user:
-                            user_id = user.id
-                        db.close()
+                        try:
+                            user = db.query(User).filter(User.email == email).first()
+                            if user:
+                                # Attribute the action to the actual authenticated
+                                # actor — required for non-repudiation / SOC2.
+                                user_id = user.id
+                        finally:
+                            db.close()
             except Exception:
-                pass  # If decoding fails, user_id remains None
+                pass  # If decoding fails, user_id remains None (system-audit fallback)
+
+            if user_id is None:
+                try:
+                    db = SessionLocal()
+                    sys_user = db.query(User).filter(User.email == "system-audit@semanticos.io").first()
+                    if sys_user:
+                        user_id = sys_user.id
+                    db.close()
+                except Exception:
+                    pass
 
             ip_address = request.client.host if request.client else None
 

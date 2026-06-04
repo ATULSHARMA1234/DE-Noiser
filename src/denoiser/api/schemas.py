@@ -85,6 +85,10 @@ class SettingsUpdate(BaseModel):
     s3_bucket: str | None = None
     s3_access_key: str | None = None
     s3_secret_key: str | None = None
+    sso_provider: str | None = None
+    sso_client_id: str | None = None
+    sso_metadata_url: str | None = None
+    sso_enabled: bool | None = None
 
 
 # ── Ingestion ────────────────────────────────────────────────────────────────
@@ -141,6 +145,9 @@ class UserResponse(BaseModel):
     email: str
     role: str
     tenant_id: int | None = None
+    is_active: bool = True
+    department: str = "Engineering"
+    environment_access: list[str] = Field(default_factory=list)
 
     class Config:
         from_attributes = True
@@ -150,6 +157,8 @@ class UserCreate(BaseModel):
     email: str
     password: str
     role: str = "VIEWER"  # VIEWER, ANALYST, ADMIN
+    department: str = "Engineering"
+    environment_access: list[str] = []
 
 
 class TokenResponse(BaseModel):

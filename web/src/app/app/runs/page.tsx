@@ -5,6 +5,7 @@ import { CheckCircle2, Clock, XCircle, Trash2, RefreshCw, GitCompare } from 'luc
 import { apiFetch, apiDelete } from '@/lib/api';
 import { useRouter } from 'next/navigation';
 import { useToast } from '@/context/ToastContext';
+import { ConfirmModal } from '@/components/ConfirmModal';
 
 export default function AnalysisRunsPage() {
   const router = useRouter();
@@ -12,6 +13,11 @@ export default function AnalysisRunsPage() {
   const [runs, setRuns] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedRuns, setSelectedRuns] = useState<string[]>([]);
+
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmTitle, setConfirmTitle] = useState('');
+  const [confirmMessage, setConfirmMessage] = useState('');
+  const [confirmCallback, setConfirmCallback] = useState<(() => void) | null>(null);
 
   const fetchRuns = () => {
     setIsLoading(true);
@@ -29,15 +35,19 @@ export default function AnalysisRunsPage() {
 
   useEffect(() => { fetchRuns(); }, []);
 
-  const handleDelete = async (runId: string) => {
-    if (!confirm('Delete this analysis run?')) return;
-    try {
-      await apiDelete(`/runs/${runId}`);
-      fetchRuns();
-      toast.success('Analysis run deleted successfully.');
-    } catch (e: any) {
-      toast.error(`Delete failed: ${e.message}`);
-    }
+  const handleDelete = (runId: string) => {
+    setConfirmTitle('Delete Analysis Run');
+    setConfirmMessage('Delete this analysis run?');
+    setConfirmCallback(() => async () => {
+      try {
+        await apiDelete(`/runs/${runId}`);
+        fetchRuns();
+        toast.success('Analysis run deleted successfully.');
+      } catch (e: any) {
+        toast.error(`Delete failed: ${e.message}`);
+      }
+    });
+    setConfirmOpen(true);
   };
 
   const toggleSelection = (runId: string) => {
@@ -205,6 +215,13 @@ export default function AnalysisRunsPage() {
           </tbody>
         </table>
       </div>
+      <ConfirmModal
+        isOpen={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        onConfirm={confirmCallback || (() => {})}
+        title={confirmTitle}
+        message={confirmMessage}
+      />
     </div>
   );
 }
