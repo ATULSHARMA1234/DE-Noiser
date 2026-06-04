@@ -24,6 +24,9 @@ dependencies = [
     "polars>=1.0.0",
     # --- AI / ML ---
     "sentence-transformers>=3.0.0",
+    # torch is pulled in by sentence-transformers; declared explicitly so the
+    # CPU-only source below applies (avoids ~3GB of unused CUDA/NVIDIA wheels).
+    "torch>=2.0.0",
     "hdbscan>=0.8.38",
     "scikit-learn>=1.5.0",
     "numpy>=1.26.0",
@@ -72,6 +75,17 @@ dev = [
 
 [project.scripts]
 semantic-log = "denoiser.cli.main:app"
+
+# On Linux (the deployment target), pull torch from PyTorch's CPU-only index so
+# the image doesn't drag in ~3GB of unused CUDA/NVIDIA/Triton wheels. macOS keeps
+# resolving torch from PyPI (already CPU there) for local development.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
 
 [build-system]
 requires = ["hatchling"]

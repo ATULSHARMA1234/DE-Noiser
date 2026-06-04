@@ -4,8 +4,17 @@
  */
 const isDev = typeof window !== 'undefined' && window.location.port === '3000';
 const protocol = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss' : 'ws';
-export const API_BASE = isDev ? 'http://127.0.0.1:8000' : '/api';
-export const WS_BASE = isDev ? 'ws://127.0.0.1:8000' : `${protocol}://${typeof window !== 'undefined' ? window.location.host : 'localhost'}`;
+
+// When the frontend is hosted separately from the backend (e.g. the UI on Vercel
+// and the API on a VM), set NEXT_PUBLIC_API_BASE / NEXT_PUBLIC_WS_BASE to the
+// backend's public URL. When unset, fall back to same-origin (`/api` behind the
+// nginx proxy) for the all-in-one docker-compose deployment, and to localhost in
+// local dev.
+const ENV_API_BASE = process.env.NEXT_PUBLIC_API_BASE;
+const ENV_WS_BASE = process.env.NEXT_PUBLIC_WS_BASE;
+
+export const API_BASE = ENV_API_BASE || (isDev ? 'http://127.0.0.1:8000' : '/api');
+export const WS_BASE = ENV_WS_BASE || (isDev ? 'ws://127.0.0.1:8000' : `${protocol}://${typeof window !== 'undefined' ? window.location.host : 'localhost'}`);
 
 export async function apiFetch(path: string, options: RequestInit = {}) {
   const headers = new Headers(options.headers || {});

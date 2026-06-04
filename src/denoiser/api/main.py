@@ -836,6 +836,9 @@ async def run_analysis(request: AnalysisRequest, current_user: User = Depends(re
     from denoiser.workers.analysis_worker import run_analysis_task
 
     payload = request.model_dump()
+    # Scope the resulting run/incidents to the requesting user's tenant so they
+    # show up in the tenant-filtered /runs and /incidents views.
+    payload["tenant_id"] = current_user.tenant_id
 
     # If running inside pytest, force synchronous execution for test compatibility
     if "PYTEST_CURRENT_TEST" in os.environ:
