@@ -29,7 +29,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from denoiser.analysis.drift import ClusterSnapshot, DriftDetector
-from denoiser.api.auth import create_access_token, get_current_user, require_role, verify_password, verify_ingest_auth
+from denoiser.api.abac import require_abac
+from denoiser.api.auth import create_access_token, get_current_user, require_role, verify_ingest_auth, verify_password
 from denoiser.api.middleware import (
     CorrelationIDMiddleware,
     RateLimitMiddleware,
@@ -56,15 +57,12 @@ from denoiser.storage.clickhouse_store import ClickHouseStore
 from denoiser.storage.db import (
     AnalysisRun,
     Incident,
-    ServiceLevelObjective,
-    SLODataPoint,
     User,
     get_db,
     init_db,
 )
 from denoiser.telemetry.ebpf_collector import EBPFCollector
 from denoiser.telemetry.metrics_collector import MetricsCollector
-from denoiser.api.abac import require_abac
 
 # Background agents
 metrics_agent = MetricsCollector()
@@ -104,13 +102,13 @@ from denoiser.api.dashboards import router as dashboards_router
 from denoiser.api.deployments import router as deployments_router
 from denoiser.api.integrations import router as integrations_router
 from denoiser.api.metrics import router as metrics_router
+from denoiser.api.otlp import router as otlp_router
 from denoiser.api.query import router as query_router
 from denoiser.api.runbooks import router as runbooks_router
 from denoiser.api.slo import router as slo_router
-from denoiser.api.tracing import router as tracing_router
 from denoiser.api.sso import router as sso_router
-from denoiser.api.otlp import router as otlp_router
 from denoiser.api.storage import router as storage_router
+from denoiser.api.tracing import router as tracing_router
 
 app.add_middleware(AuditMiddleware)
 app.include_router(audit_router)

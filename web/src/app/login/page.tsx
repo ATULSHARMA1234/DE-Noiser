@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Cpu, Mail, Lock, ShieldAlert, Loader2, Sparkles } from 'lucide-react';
-import { apiPost } from '@/lib/api';
+import { apiPost, apiFetch } from '@/lib/api';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -18,7 +18,7 @@ export default function LoginPage() {
     if (code) {
       setIsLoading(true);
       setError(null);
-      apiPost(`/auth/sso/callback?code=${code}`)
+      apiFetch(`/auth/sso/callback?code=${encodeURIComponent(code)}`)
         .then((data) => {
           localStorage.setItem('token', data.access_token);
           localStorage.setItem('user', JSON.stringify(data.user));

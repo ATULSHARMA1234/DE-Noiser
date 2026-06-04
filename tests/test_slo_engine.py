@@ -1,9 +1,8 @@
-import pytest
-from unittest.mock import MagicMock, patch
 from datetime import datetime
+from unittest.mock import MagicMock, patch
 
-from denoiser.storage.db import ServiceLevelObjective
 from denoiser.slo.engine import calculate_slo_status
+from denoiser.storage.db import ServiceLevelObjective
 
 
 class TestSLOStatusCalculation:

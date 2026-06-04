@@ -83,8 +83,8 @@ def db_session():
 
 
 def test_user_deactivation_and_login_block(db_session: Session):
-    from denoiser.api.main import app
     from denoiser.api.auth import get_password_hash
+    from denoiser.api.main import app
 
     with TestClient(app) as client:
         # Create an analyst user
@@ -119,8 +119,8 @@ def test_user_deactivation_and_login_block(db_session: Session):
 
 
 def test_admin_deactivate_endpoint(db_session: Session):
-    from denoiser.api.main import app
     from denoiser.api.auth import get_password_hash
+    from denoiser.api.main import app
 
     with TestClient(app) as client:
         # Create admin and analyst

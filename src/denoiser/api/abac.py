@@ -1,9 +1,10 @@
+
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
-import re
 
 from denoiser.api.auth import get_current_user
-from denoiser.storage.db import User, get_db, Incident, AnalysisRun
+from denoiser.storage.db import AnalysisRun, Incident, User, get_db
+
 
 class ABACPolicyEngine:
     @staticmethod
@@ -16,7 +17,7 @@ class ABACPolicyEngine:
         """
         # Rule 0: Tenant isolation — enforced for every role, including ADMIN.
         # A resource belonging to a different tenant is never accessible.
-        resource_tenant = resource_attrs.get("tenant_id", None)
+        resource_tenant = resource_attrs.get("tenant_id")
         if resource_tenant is not None and resource_tenant != getattr(user, "tenant_id", None):
             return False
 
@@ -30,22 +31,17 @@ class ABACPolicyEngine:
         if resource_env and "*" not in user_envs and resource_env not in user_envs:
             return False
 
-        # Rule 2: Department-based write/delete restrictions
+        # Rule 2: Department-based write/delete restrictions — only Operations and
+        # Security departments may mutate incidents.
         user_dept = getattr(user, "department", "Engineering")
-        if action in ["write", "delete"] and resource_type == "incident":
-            # Only Operations and Security departments can mutate incidents
-            if user_dept not in ["Operations", "Security"]:
-                return False
-
-        # Rule 3: PII / Sensitivity policy
-        if action == "read" and resource_attrs.get("contains_pii") and user.role == "VIEWER":
-            # VIEWERS cannot read sensitive resources containing PII
+        if action in ["write", "delete"] and resource_type == "incident" and user_dept not in ["Operations", "Security"]:
             return False
 
-        return True
+        # Rule 3: PII / Sensitivity policy — VIEWERs cannot read PII-bearing resources.
+        return not (action == "read" and resource_attrs.get("contains_pii") and user.role == "VIEWER")
 
 
-class require_abac:
+class require_abac:  # noqa: N801 — intentionally function-styled FastAPI dependency
     def __init__(self, action: str, resource_type: str):
         self.action = action
         self.resource_type = resource_type

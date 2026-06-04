@@ -1,10 +1,12 @@
 import json
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from fastapi.testclient import TestClient
 
 from denoiser.api.main import app
 from denoiser.api.middleware import RateLimitMiddleware
+
 
 class TestRedisRateLimiter:
     """Tests for the Redis-backed sliding window rate limiter."""

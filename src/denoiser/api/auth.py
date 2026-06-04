@@ -1,4 +1,7 @@
 import os
+
+# Secret key and algorithm for JWT
+import sys
 from datetime import UTC, datetime, timedelta
 
 import bcrypt
@@ -9,8 +12,6 @@ from sqlalchemy.orm import Session
 
 from denoiser.storage.db import User, get_db
 
-# Secret key and algorithm for JWT
-import sys
 is_testing = "pytest" in sys.modules or any("pytest" in arg for arg in sys.argv) or "PYTEST_CURRENT_TEST" in os.environ
 SECRET_KEY = os.getenv("JWT_SECRET_KEY")
 if not SECRET_KEY:

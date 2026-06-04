@@ -1,12 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import RedirectResponse
-from sqlalchemy.orm import Session
 import os
 import sys
 
-from denoiser.storage.db import get_db, User, Tenant
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import RedirectResponse
+from sqlalchemy.orm import Session
+
 from denoiser.api.auth import create_access_token
 from denoiser.api.schemas import TokenResponse
+from denoiser.storage.db import Tenant, User, get_db
 
 router = APIRouter(prefix="/auth/sso", tags=["SSO"])
 
@@ -23,10 +24,31 @@ def _mock_sso_enabled() -> bool:
     return os.getenv("SSO_ALLOW_MOCK", "false").lower() in ("1", "true", "yes")
 
 
+def _allowed_redirect_origins() -> list[str]:
+    """Origins the SSO flow may redirect back to (reuses the CORS allowlist)."""
+    raw = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")
+    return [o.strip().rstrip("/") for o in raw.split(",") if o.strip()]
+
+
 def _is_safe_redirect(uri: str) -> bool:
-    """Only permit same-origin relative paths to avoid open-redirect/token leak."""
-    # Reject absolute URLs, scheme-relative ("//host"), and backslash tricks.
-    return uri.startswith("/") and not uri.startswith("//") and "\\" not in uri
+    """
+    Prevent open-redirect / token leak. Permit either a same-origin relative path,
+    or an absolute URL whose origin is on the configured allowlist (the frontend
+    legitimately passes its own origin when API and UI are on different ports).
+    """
+    if "\\" in uri:
+        return False
+    # Relative path (but not scheme-relative "//host").
+    if uri.startswith("/") and not uri.startswith("//"):
+        return True
+    # Absolute URL: allow only if its scheme://host[:port] is allowlisted.
+    from urllib.parse import urlparse
+
+    parsed = urlparse(uri)
+    if not parsed.scheme or not parsed.netloc:
+        return False
+    origin = f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
+    return origin in _allowed_redirect_origins()
 
 
 @router.get("/login")
@@ -86,9 +108,10 @@ def sso_callback(
     user = db.query(User).filter(User.email == sso_email).first()
     if not user:
         # Create user
-        from denoiser.api.auth import get_password_hash
         # SSO users don't use local password, we set a strong random one
         import uuid
+
+        from denoiser.api.auth import get_password_hash
         dummy_pwd = get_password_hash(str(uuid.uuid4()))
         user = User(
             email=sso_email,

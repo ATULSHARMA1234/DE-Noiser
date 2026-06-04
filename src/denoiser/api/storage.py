@@ -1,10 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
-from denoiser.storage.db import get_db, User
 from denoiser.api.auth import require_role
 from denoiser.storage.archiver import S3ArchiverEngine
+from denoiser.storage.db import User
 
 router = APIRouter(prefix="/storage/archive", tags=["Storage"])
 

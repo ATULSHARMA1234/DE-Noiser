@@ -2,9 +2,9 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from denoiser.api.main import app
-from denoiser.storage.db import User, Incident, Tenant, SessionLocal, init_db
 from denoiser.api.auth import get_password_hash
+from denoiser.api.main import app
+from denoiser.storage.db import Incident, SessionLocal, Tenant, User, init_db
 
 
 @pytest.fixture(scope="module", autouse=True)

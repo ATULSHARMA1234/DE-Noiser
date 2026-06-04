@@ -1,13 +1,12 @@
+from datetime import UTC, datetime, timedelta
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
-import json
-import os
-from datetime import datetime, timedelta, UTC
 
-from denoiser.api.main import app, _load_settings, _save_settings
-from denoiser.storage.db import Span, SessionLocal, User, init_db
 from denoiser.api.auth import get_password_hash
+from denoiser.api.main import _load_settings, _save_settings, app
+from denoiser.storage.db import SessionLocal, Span, User, init_db
 
 
 @pytest.fixture(scope="module", autouse=True)

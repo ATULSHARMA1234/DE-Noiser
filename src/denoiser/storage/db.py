@@ -312,9 +312,10 @@ def init_db():
             db.refresh(default_tenant)
 
         if not exists:
-            import bcrypt
             import secrets
             import sys
+
+            import bcrypt
 
             _is_testing = "pytest" in sys.modules or "PYTEST_CURRENT_TEST" in os.environ
             admin_password = os.getenv("SEMANTICOS_ADMIN_PASSWORD")
@@ -348,8 +349,9 @@ def init_db():
         system_email = "system-audit@semanticos.io"
         system_exists = db.query(User).filter(User.email == system_email).first()
         if not system_exists:
-            import bcrypt
             import secrets
+
+            import bcrypt
             # The system-audit user is never used for interactive login (it only
             # provides audit-log attribution), so it gets an unguessable, unusable
             # random password rather than a hardcoded one.

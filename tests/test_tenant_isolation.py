@@ -3,8 +3,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from denoiser.api.main import app
 from denoiser.api.auth import get_current_user
+from denoiser.api.main import app
 from denoiser.storage.db import (
     AnalysisRun,
     Base,

@@ -1,14 +1,13 @@
-from sqlalchemy.orm import Session
-from datetime import datetime, UTC, timedelta
-import json
-import os
 import gzip
-import boto3
+import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+
+import boto3
 from botocore.client import Config
 
-from denoiser.storage.db import Span, AuditLog, get_db, SessionLocal
 from denoiser.logging import get_logger
+from denoiser.storage.db import SessionLocal, Span
 
 logger = get_logger(__name__)
 

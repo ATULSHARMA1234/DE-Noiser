@@ -1,11 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy.orm import Session
 import json
 import time
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 
-from denoiser.storage.db import get_db, Span
+from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy.orm import Session
+
 from denoiser.api.auth import verify_ingest_auth
+from denoiser.storage.db import Span, get_db
 
 router = APIRouter(prefix="/v1", tags=["OTLP"])
 

@@ -1,8 +1,9 @@
 import json
+from unittest.mock import MagicMock, patch
+
 import pytest
 import respx
 from httpx import Response
-from unittest.mock import MagicMock, patch
 
 from denoiser.integrations.alert_router import (
     AlertPayload,
