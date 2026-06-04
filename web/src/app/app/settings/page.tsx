@@ -107,8 +107,8 @@ export default function SettingsPage() {
     s3_enabled: false,
     s3_endpoint: 'http://localhost:9000',
     s3_bucket: 'semanticos-logs',
-    s3_access_key: 'admin',
-    s3_secret_key: 'password123',
+    s3_access_key: '',
+    s3_secret_key: '',
   });
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(true);

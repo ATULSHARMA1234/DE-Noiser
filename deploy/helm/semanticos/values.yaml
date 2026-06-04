@@ -28,8 +28,13 @@ ingress:
 postgres:
   host: "postgres-db"
   user: "postgres"
-  password: "password"
   db: "semanticos"
+  # Never commit a real password here. Provide it at install time via
+  #   helm install ... --set postgres.password=$PGPASS
+  # or, preferably, set existingSecret to the name of a Secret (with key
+  # `database-url`) managed by your secrets store (Vault / Sealed Secrets / ESO).
+  password: ""
+  existingSecret: ""
 
 redis:
   url: "redis://redis-master:6379/0"

@@ -144,10 +144,11 @@ DEFAULT_SETTINGS = {
     "sampling_threshold": 50000,
     "auto_analyze": False,
     "s3_enabled": False,
-    "s3_endpoint": "http://localhost:9000",
-    "s3_bucket": "semanticos-logs",
-    "s3_access_key": "admin",
-    "s3_secret_key": "password123",
+    "s3_endpoint": os.getenv("S3_ENDPOINT", "http://localhost:9000"),
+    "s3_bucket": os.getenv("S3_BUCKET", "semanticos-logs"),
+    # No credentials baked into source — supplied via env or the settings UI.
+    "s3_access_key": os.getenv("S3_ACCESS_KEY", ""),
+    "s3_secret_key": os.getenv("S3_SECRET_KEY", ""),
 }
 
 
