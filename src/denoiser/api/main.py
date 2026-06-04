@@ -385,12 +385,19 @@ def list_sources(current_user: User = Depends(require_role(["VIEWER", "ANALYST",
 @app.post("/sources/upload")
 async def upload_source(file: UploadFile = File(...), current_user: User = Depends(require_role(["ANALYST", "ADMIN"]))):
     """Upload a log file to the data/ directory for analysis."""
-    dest = DATA_DIR / file.filename
+    # Reject path traversal: collapse to a bare filename and confirm the resolved
+    # destination stays directly inside DATA_DIR.
+    safe_name = os.path.basename(file.filename or "")
+    if not safe_name or safe_name in (".", ".."):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    dest = (DATA_DIR / safe_name).resolve()
+    if dest.parent != DATA_DIR.resolve():
+        raise HTTPException(status_code=400, detail="Invalid filename")
     content = await file.read()
     dest.write_bytes(content)
     stat = dest.stat()
     return {
-        "name": file.filename,
+        "name": safe_name,
         "path": str(dest),
         "size_bytes": stat.st_size,
         "size_human": _human_size(stat.st_size),
@@ -462,7 +469,7 @@ async def ingest_logs(payload: IngestPayload, tenant_id: str = Depends(verify_in
         try:
             for log_entry in body:
                 msg = json.dumps(log_entry) if isinstance(log_entry, dict) else str(log_entry)
-                await redis_client.publish("log_stream", msg)
+                await redis_client.publish(f"log_stream:{tenant_id}", msg)
         except Exception as re:
             logger.warning(f"Failed to publish ingest logs to Redis: {re}")
 
@@ -742,19 +749,28 @@ def update_settings(new_settings: SettingsUpdate, current_user: User = Depends(r
 async def websocket_endpoint(websocket: WebSocket, token: str | None = None, db: Session = Depends(get_db)):
     await websocket.accept()
 
+    # Prefer the token from the Authorization header (keeps it out of URLs/proxy
+    # logs); fall back to the legacy query parameter for existing clients.
+    if not token:
+        auth_header = websocket.headers.get("authorization", "")
+        if auth_header.lower().startswith("bearer "):
+            token = auth_header.split(" ", 1)[1]
+
     if not token:
         await websocket.close(code=4001, reason="Authentication token required")
         return
 
     try:
-        get_current_user(token, db)
+        user = get_current_user(token, db)
     except Exception:
         await websocket.close(code=4001, reason="Invalid token")
         return
 
-    # Task 45: Redis Pub/Sub for WebSockets
+    # Task 45: Redis Pub/Sub for WebSockets — scoped per tenant so a subscriber
+    # only ever receives its own tenant's log stream.
+    channel = f"log_stream:{user.tenant_id}"
     pubsub = redis_client.pubsub()
-    await pubsub.subscribe("log_stream")
+    await pubsub.subscribe(channel)
 
     try:
         # We simulate the UI format expected by the frontend
@@ -796,11 +812,11 @@ async def websocket_endpoint(websocket: WebSocket, token: str | None = None, db:
                         "timestamp": time.time(),
                     })
     except WebSocketDisconnect:
-        await pubsub.unsubscribe("log_stream")
+        await pubsub.unsubscribe(channel)
         await pubsub.close()
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
-        await pubsub.unsubscribe("log_stream")
+        await pubsub.unsubscribe(channel)
         await pubsub.close()
 
 

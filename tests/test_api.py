@@ -144,3 +144,28 @@ class TestCorrelationIDMiddleware:
     def test_custom_request_id_is_echoed(self, client):
         response = client.get("/health", headers={"X-Request-ID": "test-123"})
         assert response.headers["x-request-id"] == "test-123"
+
+
+class TestUploadPathTraversal:
+    """Uploads must not be able to escape the data/ directory."""
+
+    def test_traversal_filename_is_contained(self, client):
+        resp = client.post(
+            "/sources/upload",
+            files={"file": ("../../escape.log", b"pwned", "text/plain")},
+        )
+        # The traversal is collapsed to a bare filename inside data/, never above it.
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "escape.log"
+        path = resp.json()["path"]
+        assert ".." not in path
+        assert path.endswith("/data/escape.log") or path.endswith("\\data\\escape.log")
+        import os
+        os.remove(path)
+
+    def test_dotdot_only_filename_rejected(self, client):
+        resp = client.post(
+            "/sources/upload",
+            files={"file": ("..", b"pwned", "text/plain")},
+        )
+        assert resp.status_code == 400

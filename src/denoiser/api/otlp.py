@@ -69,7 +69,7 @@ async def ingest_otlp_logs(request: Request, tenant_id: str = Depends(verify_ing
     # Publish to Redis
     try:
         for log in extracted_logs:
-            await redis_client.publish("log_stream", json.dumps(log))
+            await redis_client.publish(f"log_stream:{tenant_id}", json.dumps(log))
     except Exception:
         pass
 

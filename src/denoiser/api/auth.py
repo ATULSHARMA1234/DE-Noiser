@@ -114,9 +114,13 @@ def verify_ingest_auth(
         tenant = db.query(Tenant).filter(Tenant.api_key == api_key).first()
         if tenant:
             return tenant.id
-        # Fallback to default for local dev
-        static_key = os.getenv("INGEST_API_KEY", "semanticos-ingest-key-123")
-        if api_key == static_key:
+        # Optional static key for unattended ingest. No hardcoded production
+        # default — it must be set via INGEST_API_KEY (a dev default is allowed
+        # only under tests so the suite can exercise the path).
+        static_key = os.getenv("INGEST_API_KEY")
+        if not static_key and is_testing:
+            static_key = "semanticos-ingest-key-123"
+        if static_key and api_key == static_key:
             return "default_tenant"
 
     if token:
