@@ -31,6 +31,43 @@ warning) and log in as `admin@semanticos.io` with the password the script printe
 To remove the browser warning, point a domain at the VM and swap the self-signed
 cert in `nginx/certs/` for a real one (see "Real TLS" below).
 
+### Free option: Oracle Cloud (OCI) Always Free ARM
+
+OCI's **Ampere A1 (ARM)** Always Free shape gives **4 OCPU / 24 GB RAM free
+forever** — enough to run the whole stack at no cost. The entire stack is already
+arm64-compatible (the app images build native arm64, and all infra images —
+Postgres, Redis, nginx, MinIO, ClickHouse, Redpanda — plus CPU-only torch have
+aarch64 builds), so `deploy/bootstrap.sh` works unchanged.
+
+**1. Create the instance**
+- Shape: **VM.Standard.A1.Flex**, **4 OCPU / 24 GB RAM** (the ARM "Always Free" shape — *not* the AMD E2.1.Micro, which is too small).
+- Image: **Ubuntu 24.04** (aarch64). Boot volume: default (~47 GB) is fine.
+- Add your SSH key.
+- ⚠️ Free A1 capacity is in high demand — if you get "Out of host capacity",
+  try a different Availability Domain or a less busy region and retry.
+
+**2. Open ports — OCI locks them in TWO places (people miss the second):**
+- *Cloud firewall:* in the instance's VCN → Security List (or an NSG), add
+  ingress rules allowing TCP **80** and **443** from `0.0.0.0/0`.
+- *Instance firewall:* OCI's Ubuntu image ships with restrictive iptables that
+  block everything but 22. On the box:
+  ```bash
+  sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 80  -j ACCEPT
+  sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 443 -j ACCEPT
+  sudo netfilter-persistent save        # persist across reboots
+  ```
+  (Do **not** open 8123/9092 — those are bound to localhost by design.)
+
+**3. Install Docker, clone, launch:**
+```bash
+curl -fsSL https://get.docker.com | sh
+git clone https://<YOUR_GH_TOKEN>@github.com/ATULSHARMA1234/DE-Noiser.git
+cd DE-Noiser
+./deploy/bootstrap.sh        # first build is ~15-20 min on 4 ARM cores (compiles hdbscan)
+```
+
+Then open `https://<public-ip>` and log in with the printed admin password.
+
 ---
 
 ## Option B — Frontend on Vercel + backend on a VM
