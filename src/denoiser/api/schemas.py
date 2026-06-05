@@ -36,6 +36,7 @@ class ClusterResponse(BaseModel):
     representative_template: str
     anomaly_label: str = "known"
     anomaly_score: float = 0.0
+    projection_2d: list[list[float]] | None = None
 
 
 class AnalysisResponse(BaseModel):

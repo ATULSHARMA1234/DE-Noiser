@@ -16,6 +16,9 @@ x-backend-env: &id001
   CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost,https://localhost}
   OMP_NUM_THREADS: '2'
   MKL_NUM_THREADS: '2'
+  SLD_LLM_API_KEY: ${SLD_LLM_API_KEY:-}
+  SLD_LLM_MODEL: ${SLD_LLM_MODEL:-}
+  SLD_LLM_BASE_URL: ${SLD_LLM_BASE_URL:-}
 services:
   web:
     build:

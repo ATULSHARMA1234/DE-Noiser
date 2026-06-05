@@ -84,8 +84,17 @@ class LogClusterer:
         else:
             labels = self._hdbscan_cluster(vectors, n_samples)
 
+        try:
+            import umap
+            logger.info("Computing UMAP 2D projections for Neural Topology...")
+            reducer = umap.UMAP(n_components=2, n_neighbors=15, min_dist=0.1, random_state=42)
+            projections = reducer.fit_transform(vectors)
+        except Exception as e:
+            logger.warning(f"Failed to compute UMAP projections: {e}")
+            projections = np.zeros((n_samples, 2))
+
         return self._build_clusters(
-            labels, unique_templates, vectors, template_to_records, template_to_counts
+            labels, unique_templates, vectors, template_to_records, template_to_counts, projections
         )
 
     # ------------------------------------------------------------------
@@ -186,6 +195,7 @@ class LogClusterer:
         vectors: np.ndarray,
         template_to_records: dict[str, list[LogRecord]],
         template_to_counts: dict[str, int],
+        projections: np.ndarray,
     ) -> list[Cluster]:
         """Convert raw labels into rich Cluster objects."""
         unique_labels = set(labels)
@@ -220,6 +230,12 @@ class LogClusterer:
             # Total raw log lines across all templates in this cluster
             total_size = sum(template_to_counts.get(t, 0) for t in cluster_templates)
 
+            cluster_projections = projections[mask]
+            proj_list = [
+                [float(row[0]), float(row[1])]
+                for row in cluster_projections[:50]
+            ]
+
             clusters.append(
                 Cluster(
                     cluster_id=int(cluster_id),
@@ -231,6 +247,7 @@ class LogClusterer:
                     representative_line=representative_line,
                     representative_timestamp_ms=representative_timestamp_ms,
                     templates=cluster_templates,
+                    projection_2d=proj_list,
                 )
             )
 

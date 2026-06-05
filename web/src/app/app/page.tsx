@@ -239,15 +239,15 @@ export default function CommandCenter() {
     if (data?.clusters) {
       const scatterData: any[] = [];
       data.clusters.forEach((c: any, idx: number) => {
-        const count = Math.min(c.size, 50);
-        for (let i = 0; i < count; i++) {
-          const pointIndex = idx * 50 + i;
-          scatterData.push([
-            seededValue(pointIndex, 5) * 8 + idx * 2,
-            seededValue(pointIndex, 6) * 8,
-            seededValue(pointIndex, 7) * 3 + 2,
-            c.cluster_id === -1 ? 'Noise' : `C${c.cluster_id}`
-          ]);
+        if (c.projection_2d && c.projection_2d.length > 0) {
+          c.projection_2d.forEach((point: [number, number], i: number) => {
+            scatterData.push([
+              point[0],
+              point[1],
+              c.size > 50 ? 5 + (c.size / 50) : 3 + (c.size / 10), // Base symbol size on cluster size
+              c.cluster_id === -1 ? 'Noise' : `C${c.cluster_id}`
+            ]);
+          });
         }
       });
       const groups = [...new Set(scatterData.map(d => d[3]))];
