@@ -12,12 +12,6 @@ const seededValue = (index: number, seed: number) => {
   return x - Math.floor(x);
 };
 
-const INITIAL_METRICS = Array.from({ length: 60 }, (_, i) => ({
-  time: `05:${i.toString().padStart(2, '0')}`,
-  cpu: i > 25 && i < 35 ? seededValue(i, 1) * 0.1 + 0.85 : seededValue(i, 2) * 0.2 + 0.3,
-  mem: i > 26 ? seededValue(i, 3) * 0.1 + 0.8 : seededValue(i, 4) * 0.1 + 0.4,
-  anomaly: (i === 26 || i === 28) ? 0.9 : null,
-}));
 
 function Sparkline({ data, dataKey, color }: { data: any[], dataKey: string, color: string }) {
   return (
@@ -49,8 +43,60 @@ export default function CommandCenter() {
       .catch(() => null);
   }, []);
 
-  // Mock time series data for the metrics chart
-  const [metrics] = useState<any[]>(INITIAL_METRICS);
+  // Real-time metrics data for the Metrics & Anomalies chart
+  const [metrics, setMetrics] = useState<any[]>([]);
+
+  useEffect(() => {
+    const fetchMetrics = async () => {
+      try {
+        const res = await apiFetch('/metrics/stream?limit=60');
+        if (res?.entries?.length) {
+          const mapped = res.entries.map((e: any) => {
+            const ts = e.timestamp ? new Date(e.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
+            const cpu = e.cpu_percent ?? 0;
+            const mem = e.memory_percent ?? 0;
+            return {
+              time: ts,
+              cpu: cpu / 100,
+              mem: mem / 100,
+              anomaly: (cpu > 85 || mem > 90) ? Math.max(cpu, mem) / 100 : null,
+            };
+          });
+          setMetrics(mapped);
+        }
+      } catch {
+        // Keep previous metrics if backend is unavailable
+      }
+    };
+    fetchMetrics();
+    const id = setInterval(fetchMetrics, 5000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Auto-load latest analysis run on mount
+  useEffect(() => {
+    const loadLatestRun = async () => {
+      try {
+        const runs = await apiFetch('/analysis/runs');
+        if (runs?.length > 0) {
+          const latest = runs[0];
+          // Reconstruct data from the saved run snapshot
+          if (latest.clusters_snapshot?.length) {
+            setData({
+              run_id: latest.id,
+              clusters: latest.clusters_snapshot,
+              total_logs: latest.raw_lines,
+              intelligence: latest.intelligence || null,
+              status: 'loaded_from_history',
+            });
+          }
+        }
+      } catch {
+        // No previous runs available, dashboard starts empty
+      }
+    };
+    loadLatestRun();
+  }, []);
 
   // Real-time sparkline data (Task 16)
   const [vitals, setVitals] = useState<any[]>(
@@ -128,8 +174,9 @@ export default function CommandCenter() {
     }
     setSearchLoading(true);
     try {
-      const res = await apiFetch('/logs/query', {
+      const res = await apiFetch('/v1/logs/query', {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query: searchQuery, limit: 100 })
       });
       setSearchResults(res.results || []);
@@ -140,35 +187,52 @@ export default function CommandCenter() {
     }
   };
 
-  const getMetricOption = () => ({
-    backgroundColor: 'transparent',
-    tooltip: { trigger: 'axis' },
-    legend: { 
-      data: ['CPU', 'Memory', 'Anomalies'], 
-      bottom: 0, 
-      textStyle: { color: '#71717a', fontSize: 10 },
-      icon: 'circle'
-    },
-    grid: { top: 20, bottom: 40, left: 30, right: 10 },
-    xAxis: { 
-      type: 'category', 
-      data: metrics.filter((_, i) => i % 3 === 0).map(m => m.time),
-      axisLabel: { color: '#52525b', fontSize: 9 },
-      axisLine: { lineStyle: { color: '#27272a' } },
-      axisTick: { show: false }
-    },
-    yAxis: { 
-      type: 'value', 
-      min: 0, max: 1,
-      splitLine: { lineStyle: { color: '#27272a', type: 'dashed' } },
-      axisLabel: { color: '#52525b', fontSize: 9 }
-    },
-    series: [
-      { name: 'CPU', type: 'line', smooth: true, data: metrics.map(m => m.cpu), itemStyle: { color: '#3b82f6' }, symbol: 'circle', symbolSize: 4, areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(59, 130, 246, 0.3)' }, { offset: 1, color: 'rgba(59, 130, 246, 0)' }]) } },
-      { name: 'Memory', type: 'line', smooth: true, data: metrics.map(m => m.mem), itemStyle: { color: '#10b981' }, symbol: 'circle', symbolSize: 4, areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(16, 185, 129, 0.3)' }, { offset: 1, color: 'rgba(16, 185, 129, 0)' }]) } },
-      { name: 'Anomalies', type: 'scatter', data: metrics.map(m => m.anomaly), itemStyle: { color: '#d946ef' }, symbolSize: 8 }
-    ]
-  });
+  const getMetricOption = () => {
+    const chartData = metrics.length > 0 ? metrics : Array.from({ length: 20 }, () => ({ time: '', cpu: 0, mem: 0, anomaly: null }));
+    const xLabels = chartData.filter((_, i) => i % 3 === 0).map(m => m.time);
+    return {
+      backgroundColor: 'transparent',
+      tooltip: {
+        trigger: 'axis',
+        formatter: (params: any) => {
+          if (!params?.length) return '';
+          let html = `<div style="font-size:11px">${params[0].axisValue}</div>`;
+          params.forEach((p: any) => {
+            if (p.value != null) {
+              const val = p.seriesName === 'Anomalies' ? `${(p.value * 100).toFixed(1)}%` : `${(p.value * 100).toFixed(1)}%`;
+              html += `<div>${p.marker} ${p.seriesName}: <b>${val}</b></div>`;
+            }
+          });
+          return html;
+        }
+      },
+      legend: {
+        data: ['CPU', 'Memory', 'Anomalies'],
+        bottom: 0,
+        textStyle: { color: '#71717a', fontSize: 10 },
+        icon: 'circle'
+      },
+      grid: { top: 20, bottom: 40, left: 40, right: 10 },
+      xAxis: {
+        type: 'category',
+        data: xLabels,
+        axisLabel: { color: '#52525b', fontSize: 9 },
+        axisLine: { lineStyle: { color: '#27272a' } },
+        axisTick: { show: false }
+      },
+      yAxis: {
+        type: 'value',
+        min: 0, max: 1,
+        splitLine: { lineStyle: { color: '#27272a', type: 'dashed' } },
+        axisLabel: { color: '#52525b', fontSize: 9, formatter: (v: number) => `${(v * 100).toFixed(0)}%` }
+      },
+      series: [
+        { name: 'CPU', type: 'line', smooth: true, data: chartData.map(m => m.cpu), itemStyle: { color: '#3b82f6' }, symbol: 'circle', symbolSize: 4, areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(59, 130, 246, 0.3)' }, { offset: 1, color: 'rgba(59, 130, 246, 0)' }]) } },
+        { name: 'Memory', type: 'line', smooth: true, data: chartData.map(m => m.mem), itemStyle: { color: '#10b981' }, symbol: 'circle', symbolSize: 4, areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(16, 185, 129, 0.3)' }, { offset: 1, color: 'rgba(16, 185, 129, 0)' }]) } },
+        { name: 'Anomalies', type: 'scatter', data: chartData.map(m => m.anomaly), itemStyle: { color: '#d946ef' }, symbolSize: 8 }
+      ]
+    };
+  };
 
   const getTopologyOption = () => {
     // Use real cluster data if available

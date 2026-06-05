@@ -489,26 +489,33 @@ def evaluate_slos():
                         logger.error(f"Failed to execute runbook on SLO breach: {auto_err}")
 
                 else:
-                    # Evaluate Predictive AI / Anomaly Forecasting
-                    # Fetch last 10 data points
-                    recent_points = db.query(SLODataPoint).filter(SLODataPoint.slo_id == slo.id).order_by(SLODataPoint.timestamp.desc()).limit(10).all()
-                    if len(recent_points) >= 5:
+                    # Evaluate Predictive AI / Anomaly Forecasting using Holt-Winters
+                    # Fetch last 30 data points for better forecasting
+                    recent_points = db.query(SLODataPoint).filter(SLODataPoint.slo_id == slo.id).order_by(SLODataPoint.timestamp.desc()).limit(30).all()
+                    if len(recent_points) >= 10:
                         recent_points.reverse() # chronological
 
-                        # Calculate slope (value change per minute)
-                        # For simplicity, X is index 0 to N-1
-                        x_mean = sum(range(len(recent_points))) / len(recent_points)
-                        y_mean = sum(p.value for p in recent_points) / len(recent_points)
+                        import numpy as np
+                        from statsmodels.tsa.holtwinters import ExponentialSmoothing
 
-                        numerator = sum((i - x_mean) * (p.value - y_mean) for i, p in enumerate(recent_points))
-                        denominator = sum((i - x_mean) ** 2 for i in range(len(recent_points)))
-                        slope = numerator / denominator if denominator != 0 else 0
+                        y_values = [p.value for p in recent_points]
 
-                        # Only trigger if the trend is downwards
-                        if slope < -0.05:
-                            # minutes to target = (value - target) / |slope|
-                            minutes_to_depletion = (recent_points[-1].value - slo.target_percentage) / abs(slope)
-                            if minutes_to_depletion < 240 and minutes_to_depletion > 0: # < 4 hours
+                        try:
+                            # Fit Holt-Winters model (no seasonality since we have limited data points, just trend)
+                            model = ExponentialSmoothing(y_values, trend="add", initialization_method="estimated")
+                            fit_model = model.fit()
+
+                            # Forecast next 240 minutes (assuming 1 datapoint = 1 minute based on cron)
+                            forecast = fit_model.forecast(240)
+
+                            # Find when forecast dips below target
+                            minutes_to_depletion = -1
+                            for i, f_val in enumerate(forecast):
+                                if f_val < slo.target_percentage:
+                                    minutes_to_depletion = i + 1
+                                    break
+
+                            if minutes_to_depletion > 0: # Depletes within 4 hours
                                 forecasted_time = datetime.now(UTC) + timedelta(minutes=minutes_to_depletion)
                                 from denoiser.storage.db import Incident
 
@@ -525,7 +532,7 @@ def evaluate_slos():
                                         title=f"Predictive Warning: {slo.name} will breach soon",
                                         domain=slo.service,
                                         impact_score=0.8,
-                                        summary=f"Predictive AI foresees SLO '{slo.name}' for service '{slo.service}' will breach its target of {slo.target_percentage}% in approx {int(minutes_to_depletion)} minutes.",
+                                        summary=f"Predictive AI (Holt-Winters) foresees SLO '{slo.name}' for service '{slo.service}' will breach its target of {slo.target_percentage}% in approx {int(minutes_to_depletion)} minutes.",
                                         remediation_hints=["Investigate current trend", "Rollback recent deployment"],
                                         source="SLO Evaluator",
                                         is_predictive=True,
@@ -540,6 +547,8 @@ def evaluate_slos():
                                         process_incident(db, incident)
                                     except Exception as auto_err:
                                         logger.error(f"Failed to execute runbook on predictive SLO breach: {auto_err}")
+                        except Exception as e:
+                            logger.error(f"Holt-Winters forecasting failed for SLO {slo.id}: {e}")
 
             except Exception as e:
                 logger.error(f"Failed to evaluate SLO {slo.id}: {e}")

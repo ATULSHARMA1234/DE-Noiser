@@ -947,7 +947,7 @@ def _incident_to_dict(inc: Incident) -> dict:
 def list_analysis_runs(db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
     """List recent analysis runs."""
     runs = db.query(AnalysisRun).filter(AnalysisRun.tenant_id == current_user.tenant_id).order_by(AnalysisRun.created_at.desc()).all()
-    return [_run_to_dict(r) for r in runs]
+    return [_run_to_dict(r, db) for r in runs]
 
 
 @app.get("/analysis/compare")
@@ -1000,7 +1000,7 @@ def get_run_details(run_id: str, db: Session = Depends(get_db), current_user: Us
     run = db.query(AnalysisRun).filter(AnalysisRun.id == run_id, AnalysisRun.tenant_id == current_user.tenant_id).first()
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
-    return _run_to_dict(run)
+    return _run_to_dict(run, db)
 
 
 @app.delete("/runs/{run_id}")
@@ -1014,8 +1014,8 @@ def delete_run(run_id: str, db: Session = Depends(get_db), current_user: User = 
     return {"status": "deleted", "id": run_id}
 
 
-def _run_to_dict(run: AnalysisRun) -> dict:
-    return {
+def _run_to_dict(run: AnalysisRun, db: Session = None) -> dict:
+    data = {
         "id": run.id,
         "source": run.source,
         "status": run.status,
@@ -1024,7 +1024,17 @@ def _run_to_dict(run: AnalysisRun) -> dict:
         "reduction_ratio": run.reduction_ratio,
         "duration_sec": run.duration_sec,
         "created_at": run.created_at.isoformat() if run.created_at else None,
+        "clusters_snapshot": run.clusters_snapshot,
     }
+    if db:
+        incident = db.query(Incident).filter(Incident.run_id == run.id).first()
+        if incident:
+            data["intelligence"] = {
+                "failure_domain": incident.title,
+                "incident_summary": incident.summary,
+                "root_cause_hints": incident.remediation_hints,
+            }
+    return data
 
 
 if __name__ == "__main__":

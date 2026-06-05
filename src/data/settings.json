@@ -1,0 +1,14 @@
+{
+  "store_raw_logs": true,
+  "redact_pii": true,
+  "llm_model": "llama-3.3-70b",
+  "confidence_threshold": 70,
+  "retention_days": 30,
+  "sampling_threshold": 50000,
+  "auto_analyze": false,
+  "s3_enabled": false,
+  "s3_endpoint": "http://localhost:9000",
+  "s3_bucket": "semanticos-logs",
+  "s3_access_key": "admin",
+  "s3_secret_key": "password123"
+}

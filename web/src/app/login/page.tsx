@@ -42,7 +42,7 @@ export default function LoginPage() {
       const data = { token: "demo", user: { id: "1", email: "admin@semanticos.io" } }; // await apiPost('/auth/login', { email, password });
       
       // Store auth session
-      localStorage.setItem('token', data.access_token);
+      localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
 
       // Redirect to main command center

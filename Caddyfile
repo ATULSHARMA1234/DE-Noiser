@@ -1,5 +1,5 @@
 {
-    auto_https off
+    email admin@semanticos.io
 }
 
 :80 {
@@ -9,7 +9,7 @@
     reverse_proxy * web:3000
 }
 
-*.nip.io {
+20.2.90.156.nip.io {
     # Automatic HTTPS using Let's Encrypt for magic DNS
     tls admin@semanticos.io
     
