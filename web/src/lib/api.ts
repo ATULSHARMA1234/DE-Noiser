@@ -18,6 +18,7 @@ export const WS_BASE = ENV_WS_BASE || (isDev ? 'ws://127.0.0.1:8000' : `${protoc
 
 export async function apiFetch(path: string, options: RequestInit = {}) {
   const headers = new Headers(options.headers || {});
+  headers.set('Bypass-Tunnel-Reminder', 'true');
   
   if (typeof window !== 'undefined') {
     const token = localStorage.getItem('token');
