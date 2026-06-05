@@ -1,0 +1,27 @@
+{
+    auto_https off
+}
+
+:80 {
+    # Default non-HTTPS endpoint just in case
+    reverse_proxy /api/* api:8000
+    reverse_proxy /stream* api:8000
+    reverse_proxy * web:3000
+}
+
+*.nip.io {
+    # Automatic HTTPS using Let's Encrypt for magic DNS
+    tls admin@semanticos.io
+    
+    handle_path /api/* {
+        reverse_proxy api:8000
+    }
+    
+    handle_path /stream* {
+        reverse_proxy api:8000
+    }
+    
+    handle /* {
+        reverse_proxy web:3000
+    }
+}
