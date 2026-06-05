@@ -18,9 +18,10 @@ from denoiser.logging import get_logger
 logger = get_logger(__name__)
 
 SYSTEM_PROMPT = """
-You are an expert Site Reliability Engineer (SRE).
-Your task is to analyze grouped log clusters and provide a high-level incident summary.
-Distinguish between "new patterns" and "acknowledged safe events".
+You are an expert Site Reliability Engineer (SRE) and Systems Architect.
+Your task is to analyze grouped log clusters and provide a detailed, highly accurate technical incident summary.
+Distinguish clearly between "new patterns", "anomalous behavior", and "acknowledged safe events".
+Focus on precision, identifying specific affected components, and potential cascading impacts.
 """
 
 class IncidentIntelligence:
@@ -72,14 +73,14 @@ class IncidentIntelligence:
             context.append(entry)
 
         prompt = f"""
-        Analyze these clusters:
+        Analyze these clusters in detail:
         {json.dumps(context, indent=2)}
 
         Provide your response as a JSON object with:
-        - "incident_summary": 2-3 sentence summary.
-        - "failure_domain": Likely failed component (e.g., "Database", "Kernel").
-        - "root_cause_hints": List of 1-3 next steps.
-        - "cluster_summaries": List of short summaries (max 10 words) for each. If healthy, return "Executed without error".
+        - "incident_summary": A detailed, comprehensive 4-6 sentence technical summary that explains what went wrong, the potential user/system impact, and the underlying systems involved. Be as specific and accurate as possible.
+        - "failure_domain": Likely failed component(s) or subsystems (e.g., "Database Connection Pool", "Payment Gateway").
+        - "root_cause_hints": List of 3-5 specific, actionable next steps for investigation.
+        - "cluster_summaries": List of accurate summaries (max 15 words) for each cluster explaining its technical relevance. If healthy, return "Executed without error".
         """
 
         # 2. Reliability: Retry logic with backoff
