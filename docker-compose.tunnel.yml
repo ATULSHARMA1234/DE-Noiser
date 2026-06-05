@@ -1,0 +1,19 @@
+# Free public HTTPS for the backend API via a Cloudflare Quick Tunnel.
+# No Cloudflare account, no domain, no credit card required.
+#
+# Run it alongside the main stack:
+#   docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up -d
+# or just use the helper:  ./deploy/tunnel.sh
+#
+# The tunnel points straight at the api container (not nginx), so the Vercel
+# frontend talks to the API directly over the public https://<x>.trycloudflare.com
+# URL — no TLS/redirect juggling. WebSockets (/stream) work through it too.
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: semanticos-tunnel
+    command: tunnel --no-autoupdate --url http://api:8000
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
