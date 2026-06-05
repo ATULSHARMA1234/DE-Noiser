@@ -24,8 +24,8 @@ export default function AuditLogsPage() {
   const fetchLogs = async () => {
     setLoading(true);
     try {
-      const res = await apiFetch("/audit?limit=100");
-      setLogs(res.data);
+      const res = await apiFetch("/audit/?limit=100");
+      setLogs(res?.data ?? []);
     } catch (err: any) {
       toast.error(err.message || "Failed to fetch audit logs");
     } finally {

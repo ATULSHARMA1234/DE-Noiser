@@ -34,9 +34,10 @@ export default function UserDirectoryPage() {
     setIsLoading(true);
     try {
       const data = await apiFetch('/users');
-      setUsers(data);
+      setUsers(Array.isArray(data) ? data : []);
     } catch (e: any) {
       console.error('Failed to load users:', e);
+      toast.error(`Failed to load users: ${e.message}`);
     } finally {
       setIsLoading(false);
     }

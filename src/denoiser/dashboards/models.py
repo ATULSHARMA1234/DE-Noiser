@@ -25,7 +25,7 @@ class DashboardUpdateSchema(BaseModel):
 class DashboardSchema(BaseModel):
     id: int
     name: str
-    user_id: int
+    tenant_id: int | None = None
     layout: list[dict[str, Any]]
     widgets: list[WidgetSchema]
     is_shared: bool

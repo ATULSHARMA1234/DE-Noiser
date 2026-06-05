@@ -12,6 +12,7 @@ export default function AnalysisRunsPage() {
   const { toast } = useToast();
   const [runs, setRuns] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [selectedRuns, setSelectedRuns] = useState<string[]>([]);
 
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -21,14 +22,16 @@ export default function AnalysisRunsPage() {
 
   const fetchRuns = () => {
     setIsLoading(true);
+    setError(null);
     apiFetch('/runs')
       .then(data => {
-        setRuns(data);
+        setRuns(Array.isArray(data) ? data : []);
         setSelectedRuns([]);
         setIsLoading(false);
       })
       .catch(e => {
         console.error(e);
+        setError(e.message || 'Failed to load analysis runs.');
         setIsLoading(false);
       });
   };
@@ -154,6 +157,12 @@ export default function AnalysisRunsPage() {
                   <td className="p-5 text-right"><div className="shimmer-bg h-4 w-8 rounded ml-auto" /></td>
                 </tr>
               ))
+            ) : error ? (
+              <tr>
+                <td colSpan={7} className="p-8 text-center text-red-400">
+                  {error}
+                </td>
+              </tr>
             ) : runs.length === 0 ? (
               <tr>
                 <td colSpan={7} className="p-8 text-center text-[var(--text-muted)]">

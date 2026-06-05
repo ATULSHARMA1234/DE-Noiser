@@ -13,10 +13,9 @@ router = APIRouter(prefix="/dashboards", tags=["dashboards"])
 
 @router.get("", response_model=list[DashboardSchema])
 def list_dashboards(db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
-    # Only show shared dashboards or user's own dashboards
+    # Dashboards are scoped per tenant (the model has no per-user owner column).
     dashboards = db.query(DBDashboard).filter(
-        DBDashboard.tenant_id == current_user.tenant_id,
-        ((DBDashboard.is_shared) | (DBDashboard.user_id == current_user.id))
+        DBDashboard.tenant_id == current_user.tenant_id
     ).all()
     return dashboards
 
@@ -26,7 +25,7 @@ def get_dashboard(dashboard_id: int, db: Session = Depends(get_db), current_user
     if not dashboard:
         raise HTTPException(status_code=404, detail="Dashboard not found")
 
-    if not dashboard.is_shared and dashboard.user_id != current_user.id:
+    if dashboard.tenant_id != current_user.tenant_id:
         raise HTTPException(status_code=403, detail="Not authorized to view this dashboard")
 
     return dashboard
@@ -36,7 +35,6 @@ def create_dashboard(payload: DashboardCreateSchema, db: Session = Depends(get_d
     # For some reason, pydantic dicts come through directly sometimes, but let's ensure json safety
     db_dash = DBDashboard(
         name=payload.name,
-        user_id=current_user.id,
         tenant_id=current_user.tenant_id,
         layout=[layout_item for layout_item in payload.layout],
         widgets=[w.dict() for w in payload.widgets],
@@ -53,7 +51,7 @@ def update_dashboard(dashboard_id: int, payload: DashboardUpdateSchema, db: Sess
     if not dashboard:
         raise HTTPException(status_code=404, detail="Dashboard not found")
 
-    if dashboard.user_id != current_user.id and current_user.role != "ADMIN":
+    if dashboard.tenant_id != current_user.tenant_id:
         raise HTTPException(status_code=403, detail="Not authorized to update this dashboard")
 
     if payload.name is not None:
@@ -75,7 +73,7 @@ def delete_dashboard(dashboard_id: int, db: Session = Depends(get_db), current_u
     if not dashboard:
         raise HTTPException(status_code=404, detail="Dashboard not found")
 
-    if dashboard.user_id != current_user.id and current_user.role != "ADMIN":
+    if dashboard.tenant_id != current_user.tenant_id:
         raise HTTPException(status_code=403, detail="Not authorized to delete this dashboard")
 
     db.delete(dashboard)

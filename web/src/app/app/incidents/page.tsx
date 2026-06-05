@@ -10,6 +10,7 @@ export default function IncidentMemoryPage() {
   const { toast } = useToast();
   const [incidents, setIncidents] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [selectedIncident, setSelectedIncident] = useState<any>(null);
   const [domainFilter, setDomainFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
@@ -21,13 +22,15 @@ export default function IncidentMemoryPage() {
 
   const fetchIncidents = () => {
     setIsLoading(true);
+    setError(null);
     apiFetch('/incidents')
       .then(data => {
-        setIncidents(data);
+        setIncidents(Array.isArray(data) ? data : []);
         setIsLoading(false);
       })
       .catch(e => {
         console.error(e);
+        setError(e.message || 'Failed to load incidents.');
         setIsLoading(false);
       });
   };
@@ -127,6 +130,12 @@ export default function IncidentMemoryPage() {
                   <td className="p-5"><div className="shimmer-bg h-4 w-12 rounded" /></td>
                 </tr>
               ))
+            ) : error ? (
+              <tr>
+                <td colSpan={6} className="p-8 text-center text-red-400">
+                  {error}
+                </td>
+              </tr>
             ) : filteredIncidents.length === 0 ? (
               <tr>
                 <td colSpan={6} className="p-8 text-center text-[var(--text-muted)]">

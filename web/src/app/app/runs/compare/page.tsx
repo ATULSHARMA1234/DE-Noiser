@@ -46,7 +46,7 @@ function CompareView() {
       return;
     }
 
-    apiFetch(`/runs/compare?run_a=${runA}&run_b=${runB}`)
+    apiFetch(`/analysis/compare?run_a=${runA}&run_b=${runB}`)
       .then(data => {
         setReport(data);
         setLoading(false);

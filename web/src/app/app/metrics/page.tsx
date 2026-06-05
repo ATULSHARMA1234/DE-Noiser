@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, apiPost } from '@/lib/api';
 import { useToast } from '@/context/ToastContext';
 import { Activity, Plus, Trash2, LineChart, Server, Terminal, X } from 'lucide-react';
 import { ConfirmModal } from '@/components/ConfirmModal';
@@ -70,10 +70,7 @@ export default function MetricsPage() {
   const createRule = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await apiFetch('/metrics/rules', {
-        method: 'POST',
-        body: JSON.stringify(formData)
-      });
+      await apiPost('/metrics/rules', formData);
       toast({ title: 'Metric Rule created' });
       setShowCreateModal(false);
       setFormData({ name: '', query: '', aggregation: 'count', window_seconds: 60 });

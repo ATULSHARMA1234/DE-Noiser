@@ -27,15 +27,16 @@ export default function ExplorePage() {
     }
   };
 
-  const handleSearch = async (e?: React.FormEvent) => {
+  const handleSearch = async (e?: React.FormEvent, overrideQuery?: string) => {
     if (e) e.preventDefault();
-    if (!query.trim()) return;
+    const activeQuery = (overrideQuery ?? query).trim();
+    if (!activeQuery) return;
 
     setLoading(true);
     try {
       const data = await apiFetch('/query', {
         method: 'POST',
-        body: JSON.stringify({ query, limit: 100 })
+        body: JSON.stringify({ query: activeQuery, limit: 100 })
       });
       setResults(data.logs || []);
       setEngine(data.engine || 'in-memory');
@@ -208,7 +209,7 @@ export default function ExplorePage() {
                   <div key={sq.id} className="group flex flex-col p-2 rounded hover:bg-[var(--bg-app)] border border-transparent hover:border-[var(--border)] transition-colors">
                     <div className="flex justify-between items-start">
                       <button 
-                        onClick={() => { setQuery(sq.query_text); handleSearch(); }}
+                        onClick={() => { setQuery(sq.query_text); handleSearch(undefined, sq.query_text); }}
                         className="text-sm font-medium text-[var(--text-primary)] hover:text-blue-400 text-left"
                       >
                         {sq.name}

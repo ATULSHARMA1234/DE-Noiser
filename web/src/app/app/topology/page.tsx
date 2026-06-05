@@ -125,8 +125,9 @@ export default function ServiceTopology() {
   useEffect(() => {
     apiFetch('/sources')
       .then((data) => {
-        setSources(data);
-        if (data.length > 0) setSelectedSource(data[0].path);
+        const list = Array.isArray(data) ? data : [];
+        setSources(list);
+        if (list.length > 0) setSelectedSource(list[0].path);
       })
       .catch(console.error);
 

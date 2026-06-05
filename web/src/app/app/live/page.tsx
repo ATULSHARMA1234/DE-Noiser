@@ -30,12 +30,14 @@ export default function LivePulsePage() {
   const [levelFilter, setLevelFilter] = useState('ALL');
   const [serviceFilter, setServiceFilter] = useState('');
   const [totalReceived, setTotalReceived] = useState(0);
+  const [connected, setConnected] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
     if (isPaused) {
       wsRef.current?.close();
+      setConnected(false);
       return;
     }
 
@@ -43,15 +45,21 @@ export default function LivePulsePage() {
     const url = token ? `${WS_BASE}/stream?token=${encodeURIComponent(token)}` : `${WS_BASE}/stream`;
     const ws = new WebSocket(url);
     wsRef.current = ws;
-    
+
     ws.onopen = () => {
+      setConnected(true);
       // Tell the backend we want to tail the live ingestion stream
       // If the file doesn't exist yet, it will safely fall back to the demo stream
       ws.send(JSON.stringify({ file: 'data/live_stream.log' }));
     };
-    
+
     ws.onmessage = (event) => {
-      const log: LogEntry = JSON.parse(event.data);
+      let log: LogEntry;
+      try {
+        log = JSON.parse(event.data);
+      } catch {
+        return; // ignore malformed frames
+      }
       log.levelColor = LEVEL_COLORS[log.level] || 'text-[var(--text-muted)]';
       setTotalReceived(prev => prev + 1);
       setLogs(prev => [...prev, log].slice(-500)); // Keep last 500 logs
@@ -59,6 +67,11 @@ export default function LivePulsePage() {
 
     ws.onerror = () => {
       // Silently handle — might not have websockets installed
+      setConnected(false);
+    };
+
+    ws.onclose = () => {
+      setConnected(false);
     };
 
     return () => ws.close();
@@ -108,9 +121,13 @@ export default function LivePulsePage() {
             <span className="text-[10px] font-bold uppercase tracking-wider text-orange-400 bg-orange-400/10 px-2 py-1 rounded border border-orange-500/20 flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-orange-500"></span> PAUSED
             </span>
-          ) : (
+          ) : connected ? (
             <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-400/10 px-2 py-1 rounded border border-emerald-500/20 flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> STREAMING
+            </span>
+          ) : (
+            <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] bg-[var(--bg-surface)] px-2 py-1 rounded border border-[var(--border-subtle)] flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-[var(--text-muted)] animate-pulse"></span> CONNECTING
             </span>
           )}
           <span className="text-[10px] text-[var(--text-muted)] font-mono">{totalReceived} events received</span>

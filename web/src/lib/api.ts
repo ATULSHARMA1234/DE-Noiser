@@ -10,7 +10,7 @@ const protocol = typeof window !== 'undefined' && window.location.protocol === '
 // backend's public URL. When unset, fall back to same-origin (`/api` behind the
 // nginx proxy) for the all-in-one docker-compose deployment, and to localhost in
 // local dev.
-const ENV_API_BASE = 'https://empty-pants-follow.loca.lt';
+const ENV_API_BASE = process.env.NEXT_PUBLIC_API_BASE;
 const ENV_WS_BASE = process.env.NEXT_PUBLIC_WS_BASE;
 
 export const API_BASE = ENV_API_BASE || (isDev ? 'http://127.0.0.1:8000' : '/api');

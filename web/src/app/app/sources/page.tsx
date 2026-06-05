@@ -2,7 +2,7 @@
  
 import React, { useState, useEffect, useRef } from 'react';
 import { Plus, FileText, Upload, RefreshCw, HardDrive, Trash2, Play, Database, X, Cpu } from 'lucide-react';
-import { apiFetch, API_BASE, apiDelete } from '@/lib/api';
+import { apiFetch, apiDelete } from '@/lib/api';
 import { useRouter } from 'next/navigation';
 import { useToast } from '@/context/ToastContext';
 import { ConfirmModal } from '@/components/ConfirmModal';
@@ -89,14 +89,11 @@ export default function SourcesPage() {
       formData.append('namespace', selectedK8sPod.namespace);
       formData.append('pod_name', selectedK8sPod.name);
 
-      const res = await fetch(`${API_BASE}/connectors/k8s/fetch`, {
+      const result = await apiFetch('/connectors/k8s/fetch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: formData.toString()
       });
-
-      if (!res.ok) throw new Error('Failed to fetch pod logs');
-      const result = await res.json();
       toast.success(`Successfully ingested ${result.lines} log lines from ${selectedK8sPod.name}!`);
       setActiveModal(null);
       fetchSources();
@@ -114,14 +111,11 @@ export default function SourcesPage() {
       const formData = new URLSearchParams();
       formData.append('log_group', selectedAwsGroup.name);
 
-      const res = await fetch(`${API_BASE}/connectors/aws/fetch`, {
+      const result = await apiFetch('/connectors/aws/fetch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: formData.toString()
       });
-
-      if (!res.ok) throw new Error('Failed to fetch CloudWatch logs');
-      const result = await res.json();
       toast.success(`Successfully ingested ${result.lines} log lines from CloudWatch log group!`);
       setActiveModal(null);
       fetchSources();
@@ -139,14 +133,11 @@ export default function SourcesPage() {
       const formData = new URLSearchParams();
       formData.append('container_name', selectedDockerContainer.name);
 
-      const res = await fetch(`${API_BASE}/connectors/docker/fetch`, {
+      const result = await apiFetch('/connectors/docker/fetch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: formData.toString()
       });
-
-      if (!res.ok) throw new Error('Failed to fetch Docker logs');
-      const result = await res.json();
       toast.success(`Successfully ingested ${result.lines} log lines from Docker container ${selectedDockerContainer.name}!`);
       setActiveModal(null);
       fetchSources();
@@ -159,8 +150,11 @@ export default function SourcesPage() {
 
   const fetchSources = () => {
     apiFetch('/sources')
-      .then(data => setSources(data))
-      .catch(console.error);
+      .then(data => setSources(Array.isArray(data) ? data : []))
+      .catch((e: any) => {
+        console.error(e);
+        toast.error(`Failed to load sources: ${e.message}`);
+      });
   };
 
   useEffect(() => { fetchSources(); }, []);
@@ -188,14 +182,12 @@ export default function SourcesPage() {
     try {
       const formData = new FormData();
       formData.append('file', file);
-      
-      const res = await fetch(`${API_BASE}/sources/upload`, {
+
+      await apiFetch('/sources/upload', {
         method: 'POST',
         body: formData,
       });
-      
-      if (!res.ok) throw new Error('Upload failed');
-      
+
       toast.success(`File ${file.name} uploaded successfully`);
       fetchSources();
     } catch (err: any) {

@@ -25,8 +25,8 @@ export default function AlertsHistoryPage() {
   const fetchLogs = async () => {
     setLoading(true);
     try {
-      const res = await apiFetch("/alerts?limit=100");
-      setLogs(res.data);
+      const res = await apiFetch("/alerts/?limit=100");
+      setLogs(res?.data ?? []);
     } catch (err: any) {
       toast.error(err.message || "Failed to fetch alert logs");
     } finally {

@@ -2,7 +2,7 @@
 
 SemanticOS is a privacy-first, hyperscale, on-premise log analysis and observability platform. It uses semantic clustering (HDBSCAN), a causal proximity scorer, and a local LLM to automatically denoise millions of logs, find root causes, and trigger automated runbooks — all without your data ever leaving your infrastructure.
 
-![Command Center Dashboard](https://via.placeholder.com/1200x600?text=SemanticOS+Command+Center)
+![Command Center Dashboard](assets/semanticos_dashboard_mockup.png)
 
 ## Why SemanticOS?
 Modern enterprise observability tools (like Datadog, Splunk, or New Relic) are expensive and require you to send sensitive PII and infrastructure data to third-party clouds. SemanticOS provides the same advanced AIOps features for free, running entirely on your own hardware.
