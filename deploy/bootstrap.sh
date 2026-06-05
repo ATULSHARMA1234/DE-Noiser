@@ -55,6 +55,20 @@ else
   echo "→ Using existing .env"
 fi
 
+# Generate a self-signed TLS cert for nginx if one isn't present. The certs are
+# not committed (a private key must never be in git), so a fresh clone needs this
+# or nginx fails to start.
+CERT_DIR="nginx/certs"
+if [[ ! -f "$CERT_DIR/localhost.crt" || ! -f "$CERT_DIR/localhost.key" ]]; then
+  echo "→ Generating self-signed TLS certificate for nginx..."
+  mkdir -p "$CERT_DIR"
+  openssl req -x509 -newkey rsa:2048 -nodes -days 825 \
+    -keyout "$CERT_DIR/localhost.key" -out "$CERT_DIR/localhost.crt" \
+    -subj "/CN=semanticos" \
+    -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" >/dev/null 2>&1
+  echo "→ Wrote $CERT_DIR/localhost.{crt,key} (self-signed — browsers warn; accept to proceed)"
+fi
+
 echo "→ Building and starting the stack (this is slow on first run — ML deps)..."
 docker compose up -d --build
 
