@@ -97,6 +97,39 @@ then `docker compose up -d` to apply.
 
 ---
 
+## Option C — Vercel frontend + free backend via Cloudflare Tunnel (no card, no domain)
+
+When you can't pay for a VM (and a cloud free tier wants a credit card), run the
+backend on your own machine and expose it on a free public HTTPS URL with a
+**Cloudflare Quick Tunnel** — no Cloudflare account, no domain, no card.
+
+```bash
+./deploy/bootstrap.sh     # start the stack (once, if not already running)
+./deploy/tunnel.sh        # opens a public https://<random>.trycloudflare.com URL to the API
+```
+
+`tunnel.sh` prints the public URL and the exact values to set in Vercel:
+- `NEXT_PUBLIC_API_BASE = https://<random>.trycloudflare.com`
+- `NEXT_PUBLIC_WS_BASE  = wss://<random>.trycloudflare.com`
+
+Then add your Vercel origin to CORS and apply it:
+```bash
+# in .env:
+CORS_ALLOWED_ORIGINS=https://<your-app>.vercel.app
+docker compose up -d api
+```
+
+Trade-offs:
+- The backend is live **only while your machine + tunnel are running**.
+- Quick-tunnel URLs **change on every restart**. For a stable URL, create a
+  **named tunnel** with a free Cloudflare account (`cloudflared tunnel login`,
+  `cloudflared tunnel create`, route a hostname) — see Cloudflare's docs.
+
+GitHub Codespaces is an alternative free, no-card host: open the repo in a
+Codespace, `./deploy/bootstrap.sh`, and make the forwarded port public.
+
+---
+
 ## Real TLS (for a public domain)
 
 The bundled nginx ships a self-signed `localhost` cert. For a real domain, the
