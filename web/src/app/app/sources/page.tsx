@@ -2,7 +2,7 @@
  
 import React, { useState, useEffect, useRef } from 'react';
 import { Plus, FileText, Upload, RefreshCw, HardDrive, Trash2, Play, Database, X, Cpu } from 'lucide-react';
-import { apiFetch, apiDelete } from '@/lib/api';
+import { apiFetch, apiDelete, runAnalysis } from '@/lib/api';
 import { useRouter } from 'next/navigation';
 import { useToast } from '@/context/ToastContext';
 import { ConfirmModal } from '@/components/ConfirmModal';
@@ -32,6 +32,25 @@ export default function SourcesPage() {
   const [selectedK8sPod, setSelectedK8sPod] = useState<any | null>(null);
   const [selectedAwsGroup, setSelectedAwsGroup] = useState<any | null>(null);
   const [selectedDockerContainer, setSelectedDockerContainer] = useState<any | null>(null);
+
+  const [analyzingPath, setAnalyzingPath] = useState<string | null>(null);
+
+  // Run a real analysis on the clicked source (clustering + anomaly detection),
+  // then jump to the Runs tab to see the result.
+  const handleAnalyze = async (src: any) => {
+    if (analyzingPath) return;
+    setAnalyzingPath(src.path);
+    toast.success(`Analysis started for ${src.name}…`);
+    try {
+      await runAnalysis({ source: src.path, intelligence: true });
+      toast.success(`Analysis complete for ${src.name}`);
+      router.push('/app/runs');
+    } catch (err: any) {
+      toast.error(`Analysis failed: ${err.message}`);
+    } finally {
+      setAnalyzingPath(null);
+    }
+  };
 
   const openK8sConnector = async () => {
     setActiveModal('k8s');
@@ -283,11 +302,16 @@ export default function SourcesPage() {
             </div>
             <div className="mt-auto flex items-center justify-between pt-3 border-t border-[var(--border-subtle)]">
               <span className="text-[10px] text-[var(--text-dimmed)]">Modified: {new Date(src.modified * 1000).toLocaleDateString()}</span>
-              <button 
-                onClick={() => router.push('/app')}
-                className="text-[10px] font-bold text-fuchsia-500 hover:text-fuchsia-400 transition-colors uppercase tracking-widest flex items-center gap-1 cursor-pointer bg-transparent border-none"
+              <button
+                onClick={() => handleAnalyze(src)}
+                disabled={!!analyzingPath}
+                className="text-[10px] font-bold text-fuchsia-500 hover:text-fuchsia-400 disabled:opacity-50 transition-colors uppercase tracking-widest flex items-center gap-1 cursor-pointer bg-transparent border-none"
               >
-                <Play size={10} fill="currentColor" /> Analyze
+                {analyzingPath === src.path ? (
+                  <><RefreshCw size={10} className="animate-spin" /> Analyzing…</>
+                ) : (
+                  <><Play size={10} fill="currentColor" /> Analyze</>
+                )}
               </button>
             </div>
           </div>
