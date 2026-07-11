@@ -76,7 +76,15 @@ def delete_runbook(runbook_id: int, db: Session = Depends(get_db), current_user:
 
 @router.get("/executions", response_model=list[dict])
 def list_executions(db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
-    executions = db.query(RunbookExecution).join(Runbook).filter(Runbook.tenant_id == current_user.tenant_id).order_by(RunbookExecution.created_at.desc()).limit(100).all()
+    executions = (
+        db.query(RunbookExecution)
+        .select_from(RunbookExecution)
+        .join(Runbook, Runbook.id == RunbookExecution.runbook_id)
+        .filter(Runbook.tenant_id == current_user.tenant_id)
+        .order_by(RunbookExecution.created_at.desc())
+        .limit(100)
+        .all()
+    )
 
     return [
         {

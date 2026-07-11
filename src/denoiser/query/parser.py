@@ -114,3 +114,40 @@ def compile_to_sql(node: QueryNode, params: dict[str, Any]) -> str:
         return f"({left_sql} OR {right_sql})"
 
     return "1=1"
+
+def parse_plain_text_log(line: str) -> dict[str, Any] | None:
+    """Attempt to parse common plain-text log formats into a structured dictionary."""
+    line = line.strip()
+    if not line:
+        return None
+        
+    # Format: 2026-05-29T10:15:00Z INFO [service-name] message...
+    # Or: 2026-05-17 17:15:00 [info]: message
+    import re
+    from datetime import datetime, UTC
+    
+    # Try ISO8601 with level and source
+    # Regex for: 2026-05-08T21:23:59.516165Z INFO  [API Gateway] 200 OK GET...
+    # Regex for: 2026-05-29T10:15:00Z INFO [acme-payment-gateway] Payment request received.
+    iso_match = re.match(r'^([\d-]+\w[\d:.]+Z?)\s+(\w+)\s+\[(.*?)\]\s+(.*)', line)
+    if iso_match:
+        ts_str, level, source, msg = iso_match.groups()
+        try:
+            # Handle Python 3.11+ fromisoformat
+            if ts_str.endswith('Z'):
+                ts_str = ts_str[:-1] + '+00:00'
+            dt = datetime.fromisoformat(ts_str)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=UTC)
+            ts = dt.timestamp()
+        except ValueError:
+            ts = None
+            
+        return {
+            "timestamp": ts,
+            "level": level.upper(),
+            "source": source,
+            "message": msg
+        }
+        
+    return {"message": line}

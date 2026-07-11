@@ -1,0 +1,3283 @@
+[
+  {
+    "trace_id": "7c62144e1759420190a2ebe38c403f5c",
+    "root_service": "api-gateway",
+    "root_operation": "POST /api/checkout",
+    "start_time": "2026-07-10T14:26:47.843477+00:00",
+    "duration_ms": 54.65,
+    "span_count": 8,
+    "error_count": 2,
+    "spans": [
+      {
+        "trace_id": "7c62144e1759420190a2ebe38c403f5c",
+        "span_id": "21bdb7f915f6401d",
+        "parent_span_id": null,
+        "service_name": "api-gateway",
+        "operation_name": "POST /api/checkout",
+        "start_time": "2026-07-10T14:26:47.843477+00:00",
+        "end_time": "2026-07-10T14:26:47.898122+00:00",
+        "duration_ms": 54.65,
+        "status_code": "ERROR",
+        "attributes": {
+          "http.method": "POST",
+          "http.url": "/api/checkout",
+          "http.status_code": 500,
+          "net.peer.ip": "10.0.2.105"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "7c62144e1759420190a2ebe38c403f5c",
+        "span_id": "1cdb8b3571c94967",
+        "parent_span_id": "21bdb7f915f6401d",
+        "service_name": "payment-gateway",
+        "operation_name": "refundTransaction",
+        "start_time": "2026-07-10T14:26:47.852803+00:00",
+        "end_time": "2026-07-10T14:26:47.871676+00:00",
+        "duration_ms": 18.87,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "payment-gateway",
+          "rpc.method": "refundTransaction"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "7c62144e1759420190a2ebe38c403f5c",
+        "span_id": "603875f408744575",
+        "parent_span_id": "1cdb8b3571c94967",
+        "service_name": "order-service",
+        "operation_name": "updateOrderStatus",
+        "start_time": "2026-07-10T14:26:47.854215+00:00",
+        "end_time": "2026-07-10T14:26:47.860568+00:00",
+        "duration_ms": 6.35,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "order-service",
+          "rpc.method": "updateOrderStatus"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "7c62144e1759420190a2ebe38c403f5c",
+        "span_id": "09ed12b3d0b84618",
+        "parent_span_id": "21bdb7f915f6401d",
+        "service_name": "inventory-db",
+        "operation_name": "bulkLookup",
+        "start_time": "2026-07-10T14:26:47.873183+00:00",
+        "end_time": "2026-07-10T14:26:47.891774+00:00",
+        "duration_ms": 18.59,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "inventory-db",
+          "rpc.method": "bulkLookup",
+          "db.system": "postgresql"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "7c62144e1759420190a2ebe38c403f5c",
+        "span_id": "8ac14c8114664b10",
+        "parent_span_id": "21bdb7f915f6401d",
+        "service_name": "auth-service",
+        "operation_name": "checkPermissions",
+        "start_time": "2026-07-10T14:26:47.894513+00:00",
+        "end_time": "2026-07-10T14:26:47.906537+00:00",
+        "duration_ms": 12.02,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "checkPermissions"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "7c62144e1759420190a2ebe38c403f5c",
+        "span_id": "bdd29074674a4da2",
+        "parent_span_id": "8ac14c8114664b10",
+        "service_name": "order-service",
+        "operation_name": "updateOrderStatus",
+        "start_time": "2026-07-10T14:26:47.896514+00:00",
+        "end_time": "2026-07-10T14:26:47.901169+00:00",
+        "duration_ms": 4.66,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "order-service",
+          "rpc.method": "updateOrderStatus"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "7c62144e1759420190a2ebe38c403f5c",
+        "span_id": "c54550e470694db6",
+        "parent_span_id": "21bdb7f915f6401d",
+        "service_name": "order-service",
+        "operation_name": "validateCart",
+        "start_time": "2026-07-10T14:26:47.914682+00:00",
+        "end_time": "2026-07-10T14:26:47.941587+00:00",
+        "duration_ms": 26.91,
+        "status_code": "ERROR",
+        "attributes": {
+          "rpc.service": "order-service",
+          "rpc.method": "validateCart"
+        },
+        "events": [
+          {
+            "name": "exception",
+            "timestamp": "2026-07-10T14:26:47.941587+00:00",
+            "attributes": {
+              "exception.message": "Connection refused to order-service",
+              "exception.type": "ConnectionError"
+            }
+          }
+        ]
+      },
+      {
+        "trace_id": "7c62144e1759420190a2ebe38c403f5c",
+        "span_id": "53d35459e0064750",
+        "parent_span_id": "c54550e470694db6",
+        "service_name": "inventory-db",
+        "operation_name": "updateQuantity",
+        "start_time": "2026-07-10T14:26:47.919063+00:00",
+        "end_time": "2026-07-10T14:26:47.924841+00:00",
+        "duration_ms": 5.78,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "inventory-db",
+          "rpc.method": "updateQuantity"
+        },
+        "events": []
+      }
+    ]
+  },
+  {
+    "trace_id": "52dd921100274a87930b2c47e9997d34",
+    "root_service": "api-gateway",
+    "root_operation": "POST /api/auth/login",
+    "start_time": "2026-07-10T14:16:31.901218+00:00",
+    "duration_ms": 517.49,
+    "span_count": 4,
+    "error_count": 2,
+    "spans": [
+      {
+        "trace_id": "52dd921100274a87930b2c47e9997d34",
+        "span_id": "78d0dda44473410a",
+        "parent_span_id": null,
+        "service_name": "api-gateway",
+        "operation_name": "POST /api/auth/login",
+        "start_time": "2026-07-10T14:16:31.901218+00:00",
+        "end_time": "2026-07-10T14:16:32.418711+00:00",
+        "duration_ms": 517.49,
+        "status_code": "ERROR",
+        "attributes": {
+          "http.method": "POST",
+          "http.url": "/api/auth/login",
+          "http.status_code": 500,
+          "net.peer.ip": "10.0.3.183"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "52dd921100274a87930b2c47e9997d34",
+        "span_id": "ec38e1986d4a4db0",
+        "parent_span_id": "78d0dda44473410a",
+        "service_name": "order-service",
+        "operation_name": "updateOrderStatus",
+        "start_time": "2026-07-10T14:16:31.904391+00:00",
+        "end_time": "2026-07-10T14:16:31.929180+00:00",
+        "duration_ms": 24.79,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "order-service",
+          "rpc.method": "updateOrderStatus"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "52dd921100274a87930b2c47e9997d34",
+        "span_id": "fa79ea934c1a4c6a",
+        "parent_span_id": "ec38e1986d4a4db0",
+        "service_name": "auth-service",
+        "operation_name": "validateToken",
+        "start_time": "2026-07-10T14:16:31.906472+00:00",
+        "end_time": "2026-07-10T14:16:31.912807+00:00",
+        "duration_ms": 6.34,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "validateToken"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "52dd921100274a87930b2c47e9997d34",
+        "span_id": "43f66d69e4924e1e",
+        "parent_span_id": "78d0dda44473410a",
+        "service_name": "inventory-db",
+        "operation_name": "bulkLookup",
+        "start_time": "2026-07-10T14:16:31.930509+00:00",
+        "end_time": "2026-07-10T14:16:32.041933+00:00",
+        "duration_ms": 111.42,
+        "status_code": "ERROR",
+        "attributes": {
+          "rpc.service": "inventory-db",
+          "rpc.method": "bulkLookup",
+          "db.system": "postgresql"
+        },
+        "events": [
+          {
+            "name": "exception",
+            "timestamp": "2026-07-10T14:16:32.041933+00:00",
+            "attributes": {
+              "exception.message": "Connection refused to inventory-db",
+              "exception.type": "ConnectionError"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "trace_id": "6a2fe3068d8a4b3cb5df224788371d44",
+    "root_service": "api-gateway",
+    "root_operation": "GET /api/orders",
+    "start_time": "2026-07-10T14:01:52.873981+00:00",
+    "duration_ms": 153.9,
+    "span_count": 5,
+    "error_count": 0,
+    "spans": [
+      {
+        "trace_id": "6a2fe3068d8a4b3cb5df224788371d44",
+        "span_id": "2b65cd8c6e7b4906",
+        "parent_span_id": null,
+        "service_name": "api-gateway",
+        "operation_name": "GET /api/orders",
+        "start_time": "2026-07-10T14:01:52.873981+00:00",
+        "end_time": "2026-07-10T14:01:53.027878+00:00",
+        "duration_ms": 153.9,
+        "status_code": "OK",
+        "attributes": {
+          "http.method": "GET",
+          "http.url": "/api/orders",
+          "http.status_code": 200,
+          "net.peer.ip": "10.0.5.113"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "6a2fe3068d8a4b3cb5df224788371d44",
+        "span_id": "0760d9eb3b1e4b3e",
+        "parent_span_id": "2b65cd8c6e7b4906",
+        "service_name": "order-service",
+        "operation_name": "validateCart",
+        "start_time": "2026-07-10T14:01:52.879087+00:00",
+        "end_time": "2026-07-10T14:01:52.901687+00:00",
+        "duration_ms": 22.6,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "order-service",
+          "rpc.method": "validateCart"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "6a2fe3068d8a4b3cb5df224788371d44",
+        "span_id": "23ec870122cf43ba",
+        "parent_span_id": "2b65cd8c6e7b4906",
+        "service_name": "inventory-db",
+        "operation_name": "reserveItems",
+        "start_time": "2026-07-10T14:01:52.904730+00:00",
+        "end_time": "2026-07-10T14:01:52.960083+00:00",
+        "duration_ms": 55.35,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "inventory-db",
+          "rpc.method": "reserveItems",
+          "db.system": "postgresql"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "6a2fe3068d8a4b3cb5df224788371d44",
+        "span_id": "89f52c8e286140fa",
+        "parent_span_id": "23ec870122cf43ba",
+        "service_name": "auth-service",
+        "operation_name": "checkPermissions",
+        "start_time": "2026-07-10T14:01:52.908095+00:00",
+        "end_time": "2026-07-10T14:01:52.925680+00:00",
+        "duration_ms": 17.59,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "checkPermissions"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "6a2fe3068d8a4b3cb5df224788371d44",
+        "span_id": "1db9180bbcf04159",
+        "parent_span_id": "2b65cd8c6e7b4906",
+        "service_name": "payment-gateway",
+        "operation_name": "createCharge",
+        "start_time": "2026-07-10T14:01:52.967579+00:00",
+        "end_time": "2026-07-10T14:01:52.988465+00:00",
+        "duration_ms": 20.89,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "payment-gateway",
+          "rpc.method": "createCharge"
+        },
+        "events": []
+      }
+    ]
+  },
+  {
+    "trace_id": "264a49f8150f4cada39aff0e997d9b84",
+    "root_service": "api-gateway",
+    "root_operation": "POST /api/auth/login",
+    "start_time": "2026-07-10T13:40:10.085822+00:00",
+    "duration_ms": 408.57,
+    "span_count": 5,
+    "error_count": 1,
+    "spans": [
+      {
+        "trace_id": "264a49f8150f4cada39aff0e997d9b84",
+        "span_id": "7944b4ac53e54649",
+        "parent_span_id": null,
+        "service_name": "api-gateway",
+        "operation_name": "POST /api/auth/login",
+        "start_time": "2026-07-10T13:40:10.085822+00:00",
+        "end_time": "2026-07-10T13:40:10.494389+00:00",
+        "duration_ms": 408.57,
+        "status_code": "OK",
+        "attributes": {
+          "http.method": "POST",
+          "http.url": "/api/auth/login",
+          "http.status_code": 200,
+          "net.peer.ip": "10.0.2.137"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "264a49f8150f4cada39aff0e997d9b84",
+        "span_id": "ff914c70b3304630",
+        "parent_span_id": "7944b4ac53e54649",
+        "service_name": "auth-service",
+        "operation_name": "refreshSession",
+        "start_time": "2026-07-10T13:40:10.094397+00:00",
+        "end_time": "2026-07-10T13:40:10.144359+00:00",
+        "duration_ms": 49.96,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "refreshSession"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "264a49f8150f4cada39aff0e997d9b84",
+        "span_id": "10a2c4772a844a46",
+        "parent_span_id": "ff914c70b3304630",
+        "service_name": "inventory-db",
+        "operation_name": "getProductDetails",
+        "start_time": "2026-07-10T13:40:10.097714+00:00",
+        "end_time": "2026-07-10T13:40:10.102031+00:00",
+        "duration_ms": 4.32,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "inventory-db",
+          "rpc.method": "getProductDetails"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "264a49f8150f4cada39aff0e997d9b84",
+        "span_id": "ad2e6d052b714ace",
+        "parent_span_id": "7944b4ac53e54649",
+        "service_name": "inventory-db",
+        "operation_name": "reserveItems",
+        "start_time": "2026-07-10T13:40:10.149227+00:00",
+        "end_time": "2026-07-10T13:40:10.290169+00:00",
+        "duration_ms": 140.94,
+        "status_code": "ERROR",
+        "attributes": {
+          "rpc.service": "inventory-db",
+          "rpc.method": "reserveItems",
+          "db.system": "postgresql"
+        },
+        "events": [
+          {
+            "name": "exception",
+            "timestamp": "2026-07-10T13:40:10.290169+00:00",
+            "attributes": {
+              "exception.message": "Connection refused to inventory-db",
+              "exception.type": "ConnectionError"
+            }
+          }
+        ]
+      },
+      {
+        "trace_id": "264a49f8150f4cada39aff0e997d9b84",
+        "span_id": "2d82978edbf84016",
+        "parent_span_id": "ad2e6d052b714ace",
+        "service_name": "auth-service",
+        "operation_name": "checkPermissions",
+        "start_time": "2026-07-10T13:40:10.154074+00:00",
+        "end_time": "2026-07-10T13:40:10.164725+00:00",
+        "duration_ms": 10.65,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "checkPermissions"
+        },
+        "events": []
+      }
+    ]
+  },
+  {
+    "trace_id": "d1f95bf9cfd94200ae8817739e19b545",
+    "root_service": "api-gateway",
+    "root_operation": "GET /api/products",
+    "start_time": "2026-07-10T12:49:47.014845+00:00",
+    "duration_ms": 457.67,
+    "span_count": 8,
+    "error_count": 0,
+    "spans": [
+      {
+        "trace_id": "d1f95bf9cfd94200ae8817739e19b545",
+        "span_id": "e6e6efb306af4f43",
+        "parent_span_id": null,
+        "service_name": "api-gateway",
+        "operation_name": "GET /api/products",
+        "start_time": "2026-07-10T12:49:47.014845+00:00",
+        "end_time": "2026-07-10T12:49:47.472516+00:00",
+        "duration_ms": 457.67,
+        "status_code": "OK",
+        "attributes": {
+          "http.method": "GET",
+          "http.url": "/api/products",
+          "http.status_code": 200,
+          "net.peer.ip": "10.0.2.134"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "d1f95bf9cfd94200ae8817739e19b545",
+        "span_id": "93829cecfa7343fa",
+        "parent_span_id": "e6e6efb306af4f43",
+        "service_name": "payment-gateway",
+        "operation_name": "refundTransaction",
+        "start_time": "2026-07-10T12:49:47.019624+00:00",
+        "end_time": "2026-07-10T12:49:47.206565+00:00",
+        "duration_ms": 186.94,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "payment-gateway",
+          "rpc.method": "refundTransaction"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "d1f95bf9cfd94200ae8817739e19b545",
+        "span_id": "f542b2d96db44172",
+        "parent_span_id": "93829cecfa7343fa",
+        "service_name": "auth-service",
+        "operation_name": "refreshSession",
+        "start_time": "2026-07-10T12:49:47.020752+00:00",
+        "end_time": "2026-07-10T12:49:47.083014+00:00",
+        "duration_ms": 62.26,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "refreshSession"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "d1f95bf9cfd94200ae8817739e19b545",
+        "span_id": "66da1b45d3bb444f",
+        "parent_span_id": "e6e6efb306af4f43",
+        "service_name": "auth-service",
+        "operation_name": "refreshSession",
+        "start_time": "2026-07-10T12:49:47.216282+00:00",
+        "end_time": "2026-07-10T12:49:47.467991+00:00",
+        "duration_ms": 251.71,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "refreshSession"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "d1f95bf9cfd94200ae8817739e19b545",
+        "span_id": "c2a3eca487384e9f",
+        "parent_span_id": "66da1b45d3bb444f",
+        "service_name": "order-service",
+        "operation_name": "getOrderById",
+        "start_time": "2026-07-10T12:49:47.218998+00:00",
+        "end_time": "2026-07-10T12:49:47.307286+00:00",
+        "duration_ms": 88.29,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "order-service",
+          "rpc.method": "getOrderById"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "d1f95bf9cfd94200ae8817739e19b545",
+        "span_id": "165112d2b5b640e8",
+        "parent_span_id": "e6e6efb306af4f43",
+        "service_name": "order-service",
+        "operation_name": "createOrder",
+        "start_time": "2026-07-10T12:49:47.472965+00:00",
+        "end_time": "2026-07-10T12:49:47.588711+00:00",
+        "duration_ms": 115.75,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "order-service",
+          "rpc.method": "createOrder"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "d1f95bf9cfd94200ae8817739e19b545",
+        "span_id": "79bae21762c041ed",
+        "parent_span_id": "165112d2b5b640e8",
+        "service_name": "auth-service",
+        "operation_name": "checkPermissions",
+        "start_time": "2026-07-10T12:49:47.477408+00:00",
+        "end_time": "2026-07-10T12:49:47.513226+00:00",
+        "duration_ms": 35.82,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "checkPermissions"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "d1f95bf9cfd94200ae8817739e19b545",
+        "span_id": "7a1bf8e25cb54e88",
+        "parent_span_id": "e6e6efb306af4f43",
+        "service_name": "inventory-db",
+        "operation_name": "checkStock",
+        "start_time": "2026-07-10T12:49:47.598695+00:00",
+        "end_time": "2026-07-10T12:49:47.757593+00:00",
+        "duration_ms": 158.9,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "inventory-db",
+          "rpc.method": "checkStock",
+          "db.system": "postgresql"
+        },
+        "events": []
+      }
+    ]
+  },
+  {
+    "trace_id": "3326eb8c972c4cd0b4f6cbef2425a434",
+    "root_service": "api-gateway",
+    "root_operation": "GET /api/products",
+    "start_time": "2026-07-10T12:48:54.491775+00:00",
+    "duration_ms": 515.64,
+    "span_count": 7,
+    "error_count": 3,
+    "spans": [
+      {
+        "trace_id": "3326eb8c972c4cd0b4f6cbef2425a434",
+        "span_id": "5a501b29cde346e3",
+        "parent_span_id": null,
+        "service_name": "api-gateway",
+        "operation_name": "GET /api/products",
+        "start_time": "2026-07-10T12:48:54.491775+00:00",
+        "end_time": "2026-07-10T12:48:55.007414+00:00",
+        "duration_ms": 515.64,
+        "status_code": "ERROR",
+        "attributes": {
+          "http.method": "GET",
+          "http.url": "/api/products",
+          "http.status_code": 500,
+          "net.peer.ip": "10.0.7.203"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "3326eb8c972c4cd0b4f6cbef2425a434",
+        "span_id": "1f32b87bc9904244",
+        "parent_span_id": "5a501b29cde346e3",
+        "service_name": "auth-service",
+        "operation_name": "generateJWT",
+        "start_time": "2026-07-10T12:48:54.498218+00:00",
+        "end_time": "2026-07-10T12:48:54.675873+00:00",
+        "duration_ms": 177.66,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "generateJWT"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "3326eb8c972c4cd0b4f6cbef2425a434",
+        "span_id": "9250ba0a600d4994",
+        "parent_span_id": "5a501b29cde346e3",
+        "service_name": "inventory-db",
+        "operation_name": "reserveItems",
+        "start_time": "2026-07-10T12:48:54.684294+00:00",
+        "end_time": "2026-07-10T12:48:54.906114+00:00",
+        "duration_ms": 221.82,
+        "status_code": "ERROR",
+        "attributes": {
+          "rpc.service": "inventory-db",
+          "rpc.method": "reserveItems",
+          "db.system": "postgresql"
+        },
+        "events": [
+          {
+            "name": "exception",
+            "timestamp": "2026-07-10T12:48:54.906114+00:00",
+            "attributes": {
+              "exception.message": "Connection refused to inventory-db",
+              "exception.type": "ConnectionError"
+            }
+          }
+        ]
+      },
+      {
+        "trace_id": "3326eb8c972c4cd0b4f6cbef2425a434",
+        "span_id": "6aa2624daf86400f",
+        "parent_span_id": "9250ba0a600d4994",
+        "service_name": "payment-gateway",
+        "operation_name": "verifyCard",
+        "start_time": "2026-07-10T12:48:54.686738+00:00",
+        "end_time": "2026-07-10T12:48:54.708794+00:00",
+        "duration_ms": 22.06,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "payment-gateway",
+          "rpc.method": "verifyCard"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "3326eb8c972c4cd0b4f6cbef2425a434",
+        "span_id": "6ac43a7b308748d9",
+        "parent_span_id": "5a501b29cde346e3",
+        "service_name": "payment-gateway",
+        "operation_name": "refundTransaction",
+        "start_time": "2026-07-10T12:48:54.912556+00:00",
+        "end_time": "2026-07-10T12:48:55.172697+00:00",
+        "duration_ms": 260.14,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "payment-gateway",
+          "rpc.method": "refundTransaction"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "3326eb8c972c4cd0b4f6cbef2425a434",
+        "span_id": "3ad4a11a5f804340",
+        "parent_span_id": "5a501b29cde346e3",
+        "service_name": "order-service",
+        "operation_name": "getOrderById",
+        "start_time": "2026-07-10T12:48:55.174559+00:00",
+        "end_time": "2026-07-10T12:48:55.348018+00:00",
+        "duration_ms": 173.46,
+        "status_code": "ERROR",
+        "attributes": {
+          "rpc.service": "order-service",
+          "rpc.method": "getOrderById"
+        },
+        "events": [
+          {
+            "name": "exception",
+            "timestamp": "2026-07-10T12:48:55.348018+00:00",
+            "attributes": {
+              "exception.message": "Connection refused to order-service",
+              "exception.type": "ConnectionError"
+            }
+          }
+        ]
+      },
+      {
+        "trace_id": "3326eb8c972c4cd0b4f6cbef2425a434",
+        "span_id": "48952e9fe3ce4c32",
+        "parent_span_id": "3ad4a11a5f804340",
+        "service_name": "auth-service",
+        "operation_name": "checkPermissions",
+        "start_time": "2026-07-10T12:48:55.178889+00:00",
+        "end_time": "2026-07-10T12:48:55.262108+00:00",
+        "duration_ms": 83.22,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "checkPermissions"
+        },
+        "events": []
+      }
+    ]
+  },
+  {
+    "trace_id": "f80a2f8dad9e4a7fb4ac12dac1c8c42b",
+    "root_service": "api-gateway",
+    "root_operation": "POST /api/checkout",
+    "start_time": "2026-07-10T12:20:00.204827+00:00",
+    "duration_ms": 739.57,
+    "span_count": 6,
+    "error_count": 0,
+    "spans": [
+      {
+        "trace_id": "f80a2f8dad9e4a7fb4ac12dac1c8c42b",
+        "span_id": "53c5b2a309534918",
+        "parent_span_id": null,
+        "service_name": "api-gateway",
+        "operation_name": "POST /api/checkout",
+        "start_time": "2026-07-10T12:20:00.204827+00:00",
+        "end_time": "2026-07-10T12:20:00.944402+00:00",
+        "duration_ms": 739.57,
+        "status_code": "OK",
+        "attributes": {
+          "http.method": "POST",
+          "http.url": "/api/checkout",
+          "http.status_code": 200,
+          "net.peer.ip": "10.0.1.190"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "f80a2f8dad9e4a7fb4ac12dac1c8c42b",
+        "span_id": "e8fb05dc67ae4329",
+        "parent_span_id": "53c5b2a309534918",
+        "service_name": "inventory-db",
+        "operation_name": "bulkLookup",
+        "start_time": "2026-07-10T12:20:00.212513+00:00",
+        "end_time": "2026-07-10T12:20:00.373627+00:00",
+        "duration_ms": 161.11,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "inventory-db",
+          "rpc.method": "bulkLookup",
+          "db.system": "postgresql"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "f80a2f8dad9e4a7fb4ac12dac1c8c42b",
+        "span_id": "76cfb45d975747a7",
+        "parent_span_id": "e8fb05dc67ae4329",
+        "service_name": "auth-service",
+        "operation_name": "validateToken",
+        "start_time": "2026-07-10T12:20:00.215955+00:00",
+        "end_time": "2026-07-10T12:20:00.257841+00:00",
+        "duration_ms": 41.89,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "validateToken"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "f80a2f8dad9e4a7fb4ac12dac1c8c42b",
+        "span_id": "53a8a455eaa641d6",
+        "parent_span_id": "53c5b2a309534918",
+        "service_name": "payment-gateway",
+        "operation_name": "verifyCard",
+        "start_time": "2026-07-10T12:20:00.377692+00:00",
+        "end_time": "2026-07-10T12:20:00.554122+00:00",
+        "duration_ms": 176.43,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "payment-gateway",
+          "rpc.method": "verifyCard"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "f80a2f8dad9e4a7fb4ac12dac1c8c42b",
+        "span_id": "a729e104de694b7e",
+        "parent_span_id": "53c5b2a309534918",
+        "service_name": "auth-service",
+        "operation_name": "validateToken",
+        "start_time": "2026-07-10T12:20:00.562441+00:00",
+        "end_time": "2026-07-10T12:20:01.004925+00:00",
+        "duration_ms": 442.48,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "validateToken"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "f80a2f8dad9e4a7fb4ac12dac1c8c42b",
+        "span_id": "6dba18e3f5324b8f",
+        "parent_span_id": "53c5b2a309534918",
+        "service_name": "order-service",
+        "operation_name": "getOrderById",
+        "start_time": "2026-07-10T12:20:01.013265+00:00",
+        "end_time": "2026-07-10T12:20:01.277441+00:00",
+        "duration_ms": 264.18,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "order-service",
+          "rpc.method": "getOrderById"
+        },
+        "events": []
+      }
+    ]
+  },
+  {
+    "trace_id": "319f1925969b4984837531959d931be9",
+    "root_service": "api-gateway",
+    "root_operation": "POST /api/auth/login",
+    "start_time": "2026-07-10T11:30:35.904547+00:00",
+    "duration_ms": 497.67,
+    "span_count": 5,
+    "error_count": 2,
+    "spans": [
+      {
+        "trace_id": "319f1925969b4984837531959d931be9",
+        "span_id": "ea9f5bcda2534ce0",
+        "parent_span_id": null,
+        "service_name": "api-gateway",
+        "operation_name": "POST /api/auth/login",
+        "start_time": "2026-07-10T11:30:35.904547+00:00",
+        "end_time": "2026-07-10T11:30:36.402212+00:00",
+        "duration_ms": 497.67,
+        "status_code": "ERROR",
+        "attributes": {
+          "http.method": "POST",
+          "http.url": "/api/auth/login",
+          "http.status_code": 500,
+          "net.peer.ip": "10.0.5.68"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "319f1925969b4984837531959d931be9",
+        "span_id": "4a75939a670842bf",
+        "parent_span_id": "ea9f5bcda2534ce0",
+        "service_name": "auth-service",
+        "operation_name": "checkPermissions",
+        "start_time": "2026-07-10T11:30:35.907888+00:00",
+        "end_time": "2026-07-10T11:30:36.149247+00:00",
+        "duration_ms": 241.36,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "checkPermissions"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "319f1925969b4984837531959d931be9",
+        "span_id": "706d1a03e22b45a3",
+        "parent_span_id": "ea9f5bcda2534ce0",
+        "service_name": "inventory-db",
+        "operation_name": "checkStock",
+        "start_time": "2026-07-10T11:30:36.156832+00:00",
+        "end_time": "2026-07-10T11:30:36.370725+00:00",
+        "duration_ms": 213.89,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "inventory-db",
+          "rpc.method": "checkStock",
+          "db.system": "postgresql"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "319f1925969b4984837531959d931be9",
+        "span_id": "1b734e7064fa4615",
+        "parent_span_id": "ea9f5bcda2534ce0",
+        "service_name": "payment-gateway",
+        "operation_name": "refundTransaction",
+        "start_time": "2026-07-10T11:30:36.374534+00:00",
+        "end_time": "2026-07-10T11:30:36.659437+00:00",
+        "duration_ms": 284.9,
+        "status_code": "ERROR",
+        "attributes": {
+          "rpc.service": "payment-gateway",
+          "rpc.method": "refundTransaction"
+        },
+        "events": [
+          {
+            "name": "exception",
+            "timestamp": "2026-07-10T11:30:36.659437+00:00",
+            "attributes": {
+              "exception.message": "Connection refused to payment-gateway",
+              "exception.type": "ConnectionError"
+            }
+          }
+        ]
+      },
+      {
+        "trace_id": "319f1925969b4984837531959d931be9",
+        "span_id": "8b7ecb09996b46fb",
+        "parent_span_id": "1b734e7064fa4615",
+        "service_name": "auth-service",
+        "operation_name": "validateToken",
+        "start_time": "2026-07-10T11:30:36.376223+00:00",
+        "end_time": "2026-07-10T11:30:36.497879+00:00",
+        "duration_ms": 121.66,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "validateToken"
+        },
+        "events": []
+      }
+    ]
+  },
+  {
+    "trace_id": "fd494cb1f5e146eea4ff24593144ad30",
+    "root_service": "api-gateway",
+    "root_operation": "GET /api/orders",
+    "start_time": "2026-07-10T10:56:59.094750+00:00",
+    "duration_ms": 80.98,
+    "span_count": 7,
+    "error_count": 0,
+    "spans": [
+      {
+        "trace_id": "fd494cb1f5e146eea4ff24593144ad30",
+        "span_id": "83400d0b37514126",
+        "parent_span_id": null,
+        "service_name": "api-gateway",
+        "operation_name": "GET /api/orders",
+        "start_time": "2026-07-10T10:56:59.094750+00:00",
+        "end_time": "2026-07-10T10:56:59.175734+00:00",
+        "duration_ms": 80.98,
+        "status_code": "OK",
+        "attributes": {
+          "http.method": "GET",
+          "http.url": "/api/orders",
+          "http.status_code": 200,
+          "net.peer.ip": "10.0.2.234"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "fd494cb1f5e146eea4ff24593144ad30",
+        "span_id": "52ecebe63ce54d34",
+        "parent_span_id": "83400d0b37514126",
+        "service_name": "payment-gateway",
+        "operation_name": "createCharge",
+        "start_time": "2026-07-10T10:56:59.096861+00:00",
+        "end_time": "2026-07-10T10:56:59.103300+00:00",
+        "duration_ms": 6.44,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "payment-gateway",
+          "rpc.method": "createCharge"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "fd494cb1f5e146eea4ff24593144ad30",
+        "span_id": "64bb173196a44043",
+        "parent_span_id": "52ecebe63ce54d34",
+        "service_name": "auth-service",
+        "operation_name": "validateToken",
+        "start_time": "2026-07-10T10:56:59.098458+00:00",
+        "end_time": "2026-07-10T10:56:59.101623+00:00",
+        "duration_ms": 3.17,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "validateToken"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "fd494cb1f5e146eea4ff24593144ad30",
+        "span_id": "7c79525815e64c4c",
+        "parent_span_id": "83400d0b37514126",
+        "service_name": "order-service",
+        "operation_name": "getOrderById",
+        "start_time": "2026-07-10T10:56:59.110088+00:00",
+        "end_time": "2026-07-10T10:56:59.145260+00:00",
+        "duration_ms": 35.17,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "order-service",
+          "rpc.method": "getOrderById"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "fd494cb1f5e146eea4ff24593144ad30",
+        "span_id": "6d1e0a653bc64489",
+        "parent_span_id": "7c79525815e64c4c",
+        "service_name": "auth-service",
+        "operation_name": "refreshSession",
+        "start_time": "2026-07-10T10:56:59.113871+00:00",
+        "end_time": "2026-07-10T10:56:59.118111+00:00",
+        "duration_ms": 4.24,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "refreshSession"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "fd494cb1f5e146eea4ff24593144ad30",
+        "span_id": "34c474713e534507",
+        "parent_span_id": "83400d0b37514126",
+        "service_name": "auth-service",
+        "operation_name": "validateToken",
+        "start_time": "2026-07-10T10:56:59.153621+00:00",
+        "end_time": "2026-07-10T10:56:59.161843+00:00",
+        "duration_ms": 8.22,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "validateToken"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "fd494cb1f5e146eea4ff24593144ad30",
+        "span_id": "7c9fdec661f9431a",
+        "parent_span_id": "34c474713e534507",
+        "service_name": "inventory-db",
+        "operation_name": "updateQuantity",
+        "start_time": "2026-07-10T10:56:59.156566+00:00",
+        "end_time": "2026-07-10T10:56:59.159712+00:00",
+        "duration_ms": 3.15,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "inventory-db",
+          "rpc.method": "updateQuantity"
+        },
+        "events": []
+      }
+    ]
+  },
+  {
+    "trace_id": "827b46b066c746358fdd9cf24f9d0e49",
+    "root_service": "api-gateway",
+    "root_operation": "POST /api/checkout",
+    "start_time": "2026-07-10T10:45:35.551701+00:00",
+    "duration_ms": 653.45,
+    "span_count": 4,
+    "error_count": 0,
+    "spans": [
+      {
+        "trace_id": "827b46b066c746358fdd9cf24f9d0e49",
+        "span_id": "2b4c586e152142f1",
+        "parent_span_id": null,
+        "service_name": "api-gateway",
+        "operation_name": "POST /api/checkout",
+        "start_time": "2026-07-10T10:45:35.551701+00:00",
+        "end_time": "2026-07-10T10:45:36.205154+00:00",
+        "duration_ms": 653.45,
+        "status_code": "OK",
+        "attributes": {
+          "http.method": "POST",
+          "http.url": "/api/checkout",
+          "http.status_code": 200,
+          "net.peer.ip": "10.0.1.142"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "827b46b066c746358fdd9cf24f9d0e49",
+        "span_id": "09b3a61dc1794882",
+        "parent_span_id": "2b4c586e152142f1",
+        "service_name": "auth-service",
+        "operation_name": "refreshSession",
+        "start_time": "2026-07-10T10:45:35.554335+00:00",
+        "end_time": "2026-07-10T10:45:35.876178+00:00",
+        "duration_ms": 321.84,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "refreshSession"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "827b46b066c746358fdd9cf24f9d0e49",
+        "span_id": "446058745fcf4e50",
+        "parent_span_id": "2b4c586e152142f1",
+        "service_name": "inventory-db",
+        "operation_name": "bulkLookup",
+        "start_time": "2026-07-10T10:45:35.885107+00:00",
+        "end_time": "2026-07-10T10:45:36.155945+00:00",
+        "duration_ms": 270.84,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "inventory-db",
+          "rpc.method": "bulkLookup",
+          "db.system": "postgresql"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "827b46b066c746358fdd9cf24f9d0e49",
+        "span_id": "be6b6b54202d4ead",
+        "parent_span_id": "2b4c586e152142f1",
+        "service_name": "order-service",
+        "operation_name": "validateCart",
+        "start_time": "2026-07-10T10:45:36.164207+00:00",
+        "end_time": "2026-07-10T10:45:36.368105+00:00",
+        "duration_ms": 203.9,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "order-service",
+          "rpc.method": "validateCart"
+        },
+        "events": []
+      }
+    ]
+  },
+  {
+    "trace_id": "837092d8ed2d47aab3e182819e40bdf6",
+    "root_service": "api-gateway",
+    "root_operation": "GET /api/users/{id}",
+    "start_time": "2026-07-10T10:40:16.088837+00:00",
+    "duration_ms": 353.83,
+    "span_count": 6,
+    "error_count": 0,
+    "spans": [
+      {
+        "trace_id": "837092d8ed2d47aab3e182819e40bdf6",
+        "span_id": "facee0ab1011457e",
+        "parent_span_id": null,
+        "service_name": "api-gateway",
+        "operation_name": "GET /api/users/{id}",
+        "start_time": "2026-07-10T10:40:16.088837+00:00",
+        "end_time": "2026-07-10T10:40:16.442670+00:00",
+        "duration_ms": 353.83,
+        "status_code": "OK",
+        "attributes": {
+          "http.method": "GET",
+          "http.url": "/api/users/{id}",
+          "http.status_code": 200,
+          "net.peer.ip": "10.0.7.155"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "837092d8ed2d47aab3e182819e40bdf6",
+        "span_id": "c8ba67fd2dd24340",
+        "parent_span_id": "facee0ab1011457e",
+        "service_name": "payment-gateway",
+        "operation_name": "refundTransaction",
+        "start_time": "2026-07-10T10:40:16.098097+00:00",
+        "end_time": "2026-07-10T10:40:16.112747+00:00",
+        "duration_ms": 14.65,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "payment-gateway",
+          "rpc.method": "refundTransaction"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "837092d8ed2d47aab3e182819e40bdf6",
+        "span_id": "83f50c51bb504ed7",
+        "parent_span_id": "c8ba67fd2dd24340",
+        "service_name": "auth-service",
+        "operation_name": "generateJWT",
+        "start_time": "2026-07-10T10:40:16.100319+00:00",
+        "end_time": "2026-07-10T10:40:16.105804+00:00",
+        "duration_ms": 5.48,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "generateJWT"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "837092d8ed2d47aab3e182819e40bdf6",
+        "span_id": "cd745e9f9b074cf3",
+        "parent_span_id": "facee0ab1011457e",
+        "service_name": "auth-service",
+        "operation_name": "generateJWT",
+        "start_time": "2026-07-10T10:40:16.120697+00:00",
+        "end_time": "2026-07-10T10:40:16.213068+00:00",
+        "duration_ms": 92.37,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "generateJWT"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "837092d8ed2d47aab3e182819e40bdf6",
+        "span_id": "b9a2d888d7a043e8",
+        "parent_span_id": "facee0ab1011457e",
+        "service_name": "inventory-db",
+        "operation_name": "checkStock",
+        "start_time": "2026-07-10T10:40:16.219727+00:00",
+        "end_time": "2026-07-10T10:40:16.376786+00:00",
+        "duration_ms": 157.06,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "inventory-db",
+          "rpc.method": "checkStock",
+          "db.system": "postgresql"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "837092d8ed2d47aab3e182819e40bdf6",
+        "span_id": "74ddc3c34e49449b",
+        "parent_span_id": "facee0ab1011457e",
+        "service_name": "order-service",
+        "operation_name": "updateOrderStatus",
+        "start_time": "2026-07-10T10:40:16.386032+00:00",
+        "end_time": "2026-07-10T10:40:16.502034+00:00",
+        "duration_ms": 116.0,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "order-service",
+          "rpc.method": "updateOrderStatus"
+        },
+        "events": []
+      }
+    ]
+  },
+  {
+    "trace_id": "f98b9cfd04994ae7911a41a00c2f4684",
+    "root_service": "api-gateway",
+    "root_operation": "POST /api/auth/login",
+    "start_time": "2026-07-10T10:20:20.241178+00:00",
+    "duration_ms": 520.91,
+    "span_count": 6,
+    "error_count": 0,
+    "spans": [
+      {
+        "trace_id": "f98b9cfd04994ae7911a41a00c2f4684",
+        "span_id": "ffefec6850ce405a",
+        "parent_span_id": null,
+        "service_name": "api-gateway",
+        "operation_name": "POST /api/auth/login",
+        "start_time": "2026-07-10T10:20:20.241178+00:00",
+        "end_time": "2026-07-10T10:20:20.762086+00:00",
+        "duration_ms": 520.91,
+        "status_code": "OK",
+        "attributes": {
+          "http.method": "POST",
+          "http.url": "/api/auth/login",
+          "http.status_code": 200,
+          "net.peer.ip": "10.0.1.156"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "f98b9cfd04994ae7911a41a00c2f4684",
+        "span_id": "f42285118d714479",
+        "parent_span_id": "ffefec6850ce405a",
+        "service_name": "payment-gateway",
+        "operation_name": "createCharge",
+        "start_time": "2026-07-10T10:20:20.250234+00:00",
+        "end_time": "2026-07-10T10:20:20.306854+00:00",
+        "duration_ms": 56.62,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "payment-gateway",
+          "rpc.method": "createCharge"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "f98b9cfd04994ae7911a41a00c2f4684",
+        "span_id": "af19ac6ed1b5410e",
+        "parent_span_id": "ffefec6850ce405a",
+        "service_name": "inventory-db",
+        "operation_name": "getProductDetails",
+        "start_time": "2026-07-10T10:20:20.308980+00:00",
+        "end_time": "2026-07-10T10:20:20.466370+00:00",
+        "duration_ms": 157.39,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "inventory-db",
+          "rpc.method": "getProductDetails",
+          "db.system": "postgresql"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "f98b9cfd04994ae7911a41a00c2f4684",
+        "span_id": "77ff1dd30c5b4930",
+        "parent_span_id": "af19ac6ed1b5410e",
+        "service_name": "order-service",
+        "operation_name": "validateCart",
+        "start_time": "2026-07-10T10:20:20.313618+00:00",
+        "end_time": "2026-07-10T10:20:20.323855+00:00",
+        "duration_ms": 10.24,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "order-service",
+          "rpc.method": "validateCart"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "f98b9cfd04994ae7911a41a00c2f4684",
+        "span_id": "a25bd7d2ad8b41a7",
+        "parent_span_id": "ffefec6850ce405a",
+        "service_name": "auth-service",
+        "operation_name": "generateJWT",
+        "start_time": "2026-07-10T10:20:20.467511+00:00",
+        "end_time": "2026-07-10T10:20:20.509778+00:00",
+        "duration_ms": 42.27,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "generateJWT"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "f98b9cfd04994ae7911a41a00c2f4684",
+        "span_id": "9a1c89db56c94cdf",
+        "parent_span_id": "a25bd7d2ad8b41a7",
+        "service_name": "inventory-db",
+        "operation_name": "getProductDetails",
+        "start_time": "2026-07-10T10:20:20.469934+00:00",
+        "end_time": "2026-07-10T10:20:20.483250+00:00",
+        "duration_ms": 13.32,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "inventory-db",
+          "rpc.method": "getProductDetails"
+        },
+        "events": []
+      }
+    ]
+  },
+  {
+    "trace_id": "f4c2ba8ebe184364bc39a619c73b8d61",
+    "root_service": "api-gateway",
+    "root_operation": "POST /api/auth/login",
+    "start_time": "2026-07-10T06:42:54.170161+00:00",
+    "duration_ms": 724.93,
+    "span_count": 7,
+    "error_count": 0,
+    "spans": [
+      {
+        "trace_id": "f4c2ba8ebe184364bc39a619c73b8d61",
+        "span_id": "d25741a80cf8453f",
+        "parent_span_id": null,
+        "service_name": "api-gateway",
+        "operation_name": "POST /api/auth/login",
+        "start_time": "2026-07-10T06:42:54.170161+00:00",
+        "end_time": "2026-07-10T06:42:54.895095+00:00",
+        "duration_ms": 724.93,
+        "status_code": "OK",
+        "attributes": {
+          "http.method": "POST",
+          "http.url": "/api/auth/login",
+          "http.status_code": 200,
+          "net.peer.ip": "10.0.7.249"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "f4c2ba8ebe184364bc39a619c73b8d61",
+        "span_id": "a15887d60a484c66",
+        "parent_span_id": "d25741a80cf8453f",
+        "service_name": "inventory-db",
+        "operation_name": "getProductDetails",
+        "start_time": "2026-07-10T06:42:54.174921+00:00",
+        "end_time": "2026-07-10T06:42:54.607159+00:00",
+        "duration_ms": 432.24,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "inventory-db",
+          "rpc.method": "getProductDetails",
+          "db.system": "postgresql"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "f4c2ba8ebe184364bc39a619c73b8d61",
+        "span_id": "b58332425a194938",
+        "parent_span_id": "a15887d60a484c66",
+        "service_name": "payment-gateway",
+        "operation_name": "refundTransaction",
+        "start_time": "2026-07-10T06:42:54.176308+00:00",
+        "end_time": "2026-07-10T06:42:54.320648+00:00",
+        "duration_ms": 144.34,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "payment-gateway",
+          "rpc.method": "refundTransaction"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "f4c2ba8ebe184364bc39a619c73b8d61",
+        "span_id": "d182a2a46ff34deb",
+        "parent_span_id": "d25741a80cf8453f",
+        "service_name": "payment-gateway",
+        "operation_name": "refundTransaction",
+        "start_time": "2026-07-10T06:42:54.616766+00:00",
+        "end_time": "2026-07-10T06:42:54.838578+00:00",
+        "duration_ms": 221.81,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "payment-gateway",
+          "rpc.method": "refundTransaction"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "f4c2ba8ebe184364bc39a619c73b8d61",
+        "span_id": "77c2770d1197497b",
+        "parent_span_id": "d25741a80cf8453f",
+        "service_name": "order-service",
+        "operation_name": "updateOrderStatus",
+        "start_time": "2026-07-10T06:42:54.840003+00:00",
+        "end_time": "2026-07-10T06:42:55.007892+00:00",
+        "duration_ms": 167.89,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "order-service",
+          "rpc.method": "updateOrderStatus"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "f4c2ba8ebe184364bc39a619c73b8d61",
+        "span_id": "0e85b95e7f6149d3",
+        "parent_span_id": "77c2770d1197497b",
+        "service_name": "payment-gateway",
+        "operation_name": "createCharge",
+        "start_time": "2026-07-10T06:42:54.841078+00:00",
+        "end_time": "2026-07-10T06:42:54.921453+00:00",
+        "duration_ms": 80.38,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "payment-gateway",
+          "rpc.method": "createCharge"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "f4c2ba8ebe184364bc39a619c73b8d61",
+        "span_id": "02ed82e1e7944924",
+        "parent_span_id": "d25741a80cf8453f",
+        "service_name": "auth-service",
+        "operation_name": "refreshSession",
+        "start_time": "2026-07-10T06:42:55.010934+00:00",
+        "end_time": "2026-07-10T06:42:55.326256+00:00",
+        "duration_ms": 315.32,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "refreshSession"
+        },
+        "events": []
+      }
+    ]
+  },
+  {
+    "trace_id": "0cfe839b5e3840908bf075553949f3fa",
+    "root_service": "api-gateway",
+    "root_operation": "POST /api/auth/login",
+    "start_time": "2026-07-10T06:10:46.825790+00:00",
+    "duration_ms": 671.1,
+    "span_count": 6,
+    "error_count": 0,
+    "spans": [
+      {
+        "trace_id": "0cfe839b5e3840908bf075553949f3fa",
+        "span_id": "750345cbc7744596",
+        "parent_span_id": null,
+        "service_name": "api-gateway",
+        "operation_name": "POST /api/auth/login",
+        "start_time": "2026-07-10T06:10:46.825790+00:00",
+        "end_time": "2026-07-10T06:10:47.496886+00:00",
+        "duration_ms": 671.1,
+        "status_code": "OK",
+        "attributes": {
+          "http.method": "POST",
+          "http.url": "/api/auth/login",
+          "http.status_code": 200,
+          "net.peer.ip": "10.0.1.250"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "0cfe839b5e3840908bf075553949f3fa",
+        "span_id": "8449f30b7d33486e",
+        "parent_span_id": "750345cbc7744596",
+        "service_name": "auth-service",
+        "operation_name": "refreshSession",
+        "start_time": "2026-07-10T06:10:46.829494+00:00",
+        "end_time": "2026-07-10T06:10:46.941406+00:00",
+        "duration_ms": 111.91,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "refreshSession"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "0cfe839b5e3840908bf075553949f3fa",
+        "span_id": "d16d277ee34c4349",
+        "parent_span_id": "750345cbc7744596",
+        "service_name": "payment-gateway",
+        "operation_name": "verifyCard",
+        "start_time": "2026-07-10T06:10:46.950506+00:00",
+        "end_time": "2026-07-10T06:10:47.017195+00:00",
+        "duration_ms": 66.69,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "payment-gateway",
+          "rpc.method": "verifyCard"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "0cfe839b5e3840908bf075553949f3fa",
+        "span_id": "9bcf2f5e59fe4fee",
+        "parent_span_id": "750345cbc7744596",
+        "service_name": "inventory-db",
+        "operation_name": "bulkLookup",
+        "start_time": "2026-07-10T06:10:47.019818+00:00",
+        "end_time": "2026-07-10T06:10:47.290089+00:00",
+        "duration_ms": 270.27,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "inventory-db",
+          "rpc.method": "bulkLookup",
+          "db.system": "postgresql"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "0cfe839b5e3840908bf075553949f3fa",
+        "span_id": "d555f04e90fb490c",
+        "parent_span_id": "9bcf2f5e59fe4fee",
+        "service_name": "order-service",
+        "operation_name": "calculateTotal",
+        "start_time": "2026-07-10T06:10:47.023262+00:00",
+        "end_time": "2026-07-10T06:10:47.080120+00:00",
+        "duration_ms": 56.86,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "order-service",
+          "rpc.method": "calculateTotal"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "0cfe839b5e3840908bf075553949f3fa",
+        "span_id": "26af3f74208f4118",
+        "parent_span_id": "750345cbc7744596",
+        "service_name": "order-service",
+        "operation_name": "updateOrderStatus",
+        "start_time": "2026-07-10T06:10:47.298287+00:00",
+        "end_time": "2026-07-10T06:10:47.672904+00:00",
+        "duration_ms": 374.62,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "order-service",
+          "rpc.method": "updateOrderStatus"
+        },
+        "events": []
+      }
+    ]
+  },
+  {
+    "trace_id": "311a4506fe704d8285dba3792d339ab1",
+    "root_service": "api-gateway",
+    "root_operation": "GET /api/users/{id}",
+    "start_time": "2026-07-10T05:55:01.515849+00:00",
+    "duration_ms": 761.44,
+    "span_count": 7,
+    "error_count": 0,
+    "spans": [
+      {
+        "trace_id": "311a4506fe704d8285dba3792d339ab1",
+        "span_id": "c546f644bfaf4db9",
+        "parent_span_id": null,
+        "service_name": "api-gateway",
+        "operation_name": "GET /api/users/{id}",
+        "start_time": "2026-07-10T05:55:01.515849+00:00",
+        "end_time": "2026-07-10T05:55:02.277285+00:00",
+        "duration_ms": 761.44,
+        "status_code": "OK",
+        "attributes": {
+          "http.method": "GET",
+          "http.url": "/api/users/{id}",
+          "http.status_code": 200,
+          "net.peer.ip": "10.0.1.65"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "311a4506fe704d8285dba3792d339ab1",
+        "span_id": "728b4fb91819453b",
+        "parent_span_id": "c546f644bfaf4db9",
+        "service_name": "inventory-db",
+        "operation_name": "getProductDetails",
+        "start_time": "2026-07-10T05:55:01.525396+00:00",
+        "end_time": "2026-07-10T05:55:01.712456+00:00",
+        "duration_ms": 187.06,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "inventory-db",
+          "rpc.method": "getProductDetails",
+          "db.system": "postgresql"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "311a4506fe704d8285dba3792d339ab1",
+        "span_id": "214014303e604d09",
+        "parent_span_id": "728b4fb91819453b",
+        "service_name": "auth-service",
+        "operation_name": "refreshSession",
+        "start_time": "2026-07-10T05:55:01.527731+00:00",
+        "end_time": "2026-07-10T05:55:01.577289+00:00",
+        "duration_ms": 49.56,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "refreshSession"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "311a4506fe704d8285dba3792d339ab1",
+        "span_id": "91b0ff67ae104027",
+        "parent_span_id": "c546f644bfaf4db9",
+        "service_name": "auth-service",
+        "operation_name": "validateToken",
+        "start_time": "2026-07-10T05:55:01.716321+00:00",
+        "end_time": "2026-07-10T05:55:01.996891+00:00",
+        "duration_ms": 280.57,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "validateToken"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "311a4506fe704d8285dba3792d339ab1",
+        "span_id": "208c0d4cc64249ef",
+        "parent_span_id": "c546f644bfaf4db9",
+        "service_name": "payment-gateway",
+        "operation_name": "createCharge",
+        "start_time": "2026-07-10T05:55:02.005963+00:00",
+        "end_time": "2026-07-10T05:55:02.223497+00:00",
+        "duration_ms": 217.53,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "payment-gateway",
+          "rpc.method": "createCharge"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "311a4506fe704d8285dba3792d339ab1",
+        "span_id": "093dd04ac2f24731",
+        "parent_span_id": "c546f644bfaf4db9",
+        "service_name": "order-service",
+        "operation_name": "getOrderById",
+        "start_time": "2026-07-10T05:55:02.233495+00:00",
+        "end_time": "2026-07-10T05:55:02.543665+00:00",
+        "duration_ms": 310.17,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "order-service",
+          "rpc.method": "getOrderById"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "311a4506fe704d8285dba3792d339ab1",
+        "span_id": "fdd88428535f40dc",
+        "parent_span_id": "093dd04ac2f24731",
+        "service_name": "inventory-db",
+        "operation_name": "bulkLookup",
+        "start_time": "2026-07-10T05:55:02.234922+00:00",
+        "end_time": "2026-07-10T05:55:02.265294+00:00",
+        "duration_ms": 30.37,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "inventory-db",
+          "rpc.method": "bulkLookup"
+        },
+        "events": []
+      }
+    ]
+  },
+  {
+    "trace_id": "d0c53c8c69aa470396040c8e3161cb09",
+    "root_service": "api-gateway",
+    "root_operation": "GET /api/orders",
+    "start_time": "2026-07-10T05:20:52.768144+00:00",
+    "duration_ms": 475.53,
+    "span_count": 5,
+    "error_count": 0,
+    "spans": [
+      {
+        "trace_id": "d0c53c8c69aa470396040c8e3161cb09",
+        "span_id": "80a3d4c59c184f0a",
+        "parent_span_id": null,
+        "service_name": "api-gateway",
+        "operation_name": "GET /api/orders",
+        "start_time": "2026-07-10T05:20:52.768144+00:00",
+        "end_time": "2026-07-10T05:20:53.243679+00:00",
+        "duration_ms": 475.53,
+        "status_code": "OK",
+        "attributes": {
+          "http.method": "GET",
+          "http.url": "/api/orders",
+          "http.status_code": 200,
+          "net.peer.ip": "10.0.8.148"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "d0c53c8c69aa470396040c8e3161cb09",
+        "span_id": "fb15982139524f73",
+        "parent_span_id": "80a3d4c59c184f0a",
+        "service_name": "order-service",
+        "operation_name": "validateCart",
+        "start_time": "2026-07-10T05:20:52.773305+00:00",
+        "end_time": "2026-07-10T05:20:52.830641+00:00",
+        "duration_ms": 57.34,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "order-service",
+          "rpc.method": "validateCart"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "d0c53c8c69aa470396040c8e3161cb09",
+        "span_id": "21313e0b6ded4dc3",
+        "parent_span_id": "fb15982139524f73",
+        "service_name": "payment-gateway",
+        "operation_name": "createCharge",
+        "start_time": "2026-07-10T05:20:52.777804+00:00",
+        "end_time": "2026-07-10T05:20:52.794866+00:00",
+        "duration_ms": 17.06,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "payment-gateway",
+          "rpc.method": "createCharge"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "d0c53c8c69aa470396040c8e3161cb09",
+        "span_id": "5d08b8cec1d4489e",
+        "parent_span_id": "80a3d4c59c184f0a",
+        "service_name": "inventory-db",
+        "operation_name": "reserveItems",
+        "start_time": "2026-07-10T05:20:52.838816+00:00",
+        "end_time": "2026-07-10T05:20:53.002825+00:00",
+        "duration_ms": 164.01,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "inventory-db",
+          "rpc.method": "reserveItems",
+          "db.system": "postgresql"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "d0c53c8c69aa470396040c8e3161cb09",
+        "span_id": "b7c281c1fe414625",
+        "parent_span_id": "5d08b8cec1d4489e",
+        "service_name": "auth-service",
+        "operation_name": "refreshSession",
+        "start_time": "2026-07-10T05:20:52.840081+00:00",
+        "end_time": "2026-07-10T05:20:52.916527+00:00",
+        "duration_ms": 76.45,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "refreshSession"
+        },
+        "events": []
+      }
+    ]
+  },
+  {
+    "trace_id": "87f0dbec8740445ab33720b16529f0ed",
+    "root_service": "api-gateway",
+    "root_operation": "POST /api/auth/login",
+    "start_time": "2026-07-10T04:12:17.067648+00:00",
+    "duration_ms": 92.54,
+    "span_count": 4,
+    "error_count": 1,
+    "spans": [
+      {
+        "trace_id": "87f0dbec8740445ab33720b16529f0ed",
+        "span_id": "3f4086a1381149e3",
+        "parent_span_id": null,
+        "service_name": "api-gateway",
+        "operation_name": "POST /api/auth/login",
+        "start_time": "2026-07-10T04:12:17.067648+00:00",
+        "end_time": "2026-07-10T04:12:17.160185+00:00",
+        "duration_ms": 92.54,
+        "status_code": "OK",
+        "attributes": {
+          "http.method": "POST",
+          "http.url": "/api/auth/login",
+          "http.status_code": 200,
+          "net.peer.ip": "10.0.6.152"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "87f0dbec8740445ab33720b16529f0ed",
+        "span_id": "b92e28b915bf40d7",
+        "parent_span_id": "3f4086a1381149e3",
+        "service_name": "inventory-db",
+        "operation_name": "getProductDetails",
+        "start_time": "2026-07-10T04:12:17.071955+00:00",
+        "end_time": "2026-07-10T04:12:17.097887+00:00",
+        "duration_ms": 25.93,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "inventory-db",
+          "rpc.method": "getProductDetails",
+          "db.system": "postgresql"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "87f0dbec8740445ab33720b16529f0ed",
+        "span_id": "2baf1f74470841eb",
+        "parent_span_id": "b92e28b915bf40d7",
+        "service_name": "payment-gateway",
+        "operation_name": "processPayment",
+        "start_time": "2026-07-10T04:12:17.076755+00:00",
+        "end_time": "2026-07-10T04:12:17.084493+00:00",
+        "duration_ms": 7.74,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "payment-gateway",
+          "rpc.method": "processPayment"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "87f0dbec8740445ab33720b16529f0ed",
+        "span_id": "0a60d6dbf0a74159",
+        "parent_span_id": "3f4086a1381149e3",
+        "service_name": "auth-service",
+        "operation_name": "generateJWT",
+        "start_time": "2026-07-10T04:12:17.106242+00:00",
+        "end_time": "2026-07-10T04:12:17.146800+00:00",
+        "duration_ms": 40.56,
+        "status_code": "ERROR",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "generateJWT"
+        },
+        "events": [
+          {
+            "name": "exception",
+            "timestamp": "2026-07-10T04:12:17.146800+00:00",
+            "attributes": {
+              "exception.message": "Connection refused to auth-service",
+              "exception.type": "ConnectionError"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "trace_id": "21c8a0df502743be9cf0bc44c16d9d6d",
+    "root_service": "api-gateway",
+    "root_operation": "POST /api/checkout",
+    "start_time": "2026-07-10T03:03:50.798203+00:00",
+    "duration_ms": 614.24,
+    "span_count": 9,
+    "error_count": 2,
+    "spans": [
+      {
+        "trace_id": "21c8a0df502743be9cf0bc44c16d9d6d",
+        "span_id": "9255d50a38504ab5",
+        "parent_span_id": null,
+        "service_name": "api-gateway",
+        "operation_name": "POST /api/checkout",
+        "start_time": "2026-07-10T03:03:50.798203+00:00",
+        "end_time": "2026-07-10T03:03:51.412448+00:00",
+        "duration_ms": 614.24,
+        "status_code": "OK",
+        "attributes": {
+          "http.method": "POST",
+          "http.url": "/api/checkout",
+          "http.status_code": 200,
+          "net.peer.ip": "10.0.9.119"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "21c8a0df502743be9cf0bc44c16d9d6d",
+        "span_id": "f9987854f6364e9f",
+        "parent_span_id": "9255d50a38504ab5",
+        "service_name": "payment-gateway",
+        "operation_name": "processPayment",
+        "start_time": "2026-07-10T03:03:50.802813+00:00",
+        "end_time": "2026-07-10T03:03:51.060897+00:00",
+        "duration_ms": 258.08,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "payment-gateway",
+          "rpc.method": "processPayment"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "21c8a0df502743be9cf0bc44c16d9d6d",
+        "span_id": "30fc8275001d4b8b",
+        "parent_span_id": "f9987854f6364e9f",
+        "service_name": "auth-service",
+        "operation_name": "generateJWT",
+        "start_time": "2026-07-10T03:03:50.804187+00:00",
+        "end_time": "2026-07-10T03:03:50.897371+00:00",
+        "duration_ms": 93.18,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "generateJWT"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "21c8a0df502743be9cf0bc44c16d9d6d",
+        "span_id": "92996a347fad440b",
+        "parent_span_id": "9255d50a38504ab5",
+        "service_name": "order-service",
+        "operation_name": "createOrder",
+        "start_time": "2026-07-10T03:03:51.064878+00:00",
+        "end_time": "2026-07-10T03:03:51.170606+00:00",
+        "duration_ms": 105.73,
+        "status_code": "ERROR",
+        "attributes": {
+          "rpc.service": "order-service",
+          "rpc.method": "createOrder"
+        },
+        "events": [
+          {
+            "name": "exception",
+            "timestamp": "2026-07-10T03:03:51.170606+00:00",
+            "attributes": {
+              "exception.message": "Connection refused to order-service",
+              "exception.type": "ConnectionError"
+            }
+          }
+        ]
+      },
+      {
+        "trace_id": "21c8a0df502743be9cf0bc44c16d9d6d",
+        "span_id": "64cde74fda4740a0",
+        "parent_span_id": "92996a347fad440b",
+        "service_name": "inventory-db",
+        "operation_name": "checkStock",
+        "start_time": "2026-07-10T03:03:51.066191+00:00",
+        "end_time": "2026-07-10T03:03:51.098476+00:00",
+        "duration_ms": 32.29,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "inventory-db",
+          "rpc.method": "checkStock"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "21c8a0df502743be9cf0bc44c16d9d6d",
+        "span_id": "0e17b25c5dd84470",
+        "parent_span_id": "9255d50a38504ab5",
+        "service_name": "auth-service",
+        "operation_name": "validateToken",
+        "start_time": "2026-07-10T03:03:51.177133+00:00",
+        "end_time": "2026-07-10T03:03:51.328339+00:00",
+        "duration_ms": 151.21,
+        "status_code": "ERROR",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "validateToken"
+        },
+        "events": [
+          {
+            "name": "exception",
+            "timestamp": "2026-07-10T03:03:51.328339+00:00",
+            "attributes": {
+              "exception.message": "Connection refused to auth-service",
+              "exception.type": "ConnectionError"
+            }
+          }
+        ]
+      },
+      {
+        "trace_id": "21c8a0df502743be9cf0bc44c16d9d6d",
+        "span_id": "b8531aba985f44d9",
+        "parent_span_id": "0e17b25c5dd84470",
+        "service_name": "payment-gateway",
+        "operation_name": "processPayment",
+        "start_time": "2026-07-10T03:03:51.178156+00:00",
+        "end_time": "2026-07-10T03:03:51.213762+00:00",
+        "duration_ms": 35.61,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "payment-gateway",
+          "rpc.method": "processPayment"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "21c8a0df502743be9cf0bc44c16d9d6d",
+        "span_id": "1a3363113c86426a",
+        "parent_span_id": "9255d50a38504ab5",
+        "service_name": "inventory-db",
+        "operation_name": "getProductDetails",
+        "start_time": "2026-07-10T03:03:51.331571+00:00",
+        "end_time": "2026-07-10T03:03:51.386142+00:00",
+        "duration_ms": 54.57,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "inventory-db",
+          "rpc.method": "getProductDetails",
+          "db.system": "postgresql"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "21c8a0df502743be9cf0bc44c16d9d6d",
+        "span_id": "237b74fa15b44e05",
+        "parent_span_id": "1a3363113c86426a",
+        "service_name": "auth-service",
+        "operation_name": "generateJWT",
+        "start_time": "2026-07-10T03:03:51.334516+00:00",
+        "end_time": "2026-07-10T03:03:51.351449+00:00",
+        "duration_ms": 16.93,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "generateJWT"
+        },
+        "events": []
+      }
+    ]
+  },
+  {
+    "trace_id": "9dc9022e5491482cb8dc4d4d7da574de",
+    "root_service": "api-gateway",
+    "root_operation": "POST /api/auth/login",
+    "start_time": "2026-07-10T02:41:38.354024+00:00",
+    "duration_ms": 520.11,
+    "span_count": 4,
+    "error_count": 2,
+    "spans": [
+      {
+        "trace_id": "9dc9022e5491482cb8dc4d4d7da574de",
+        "span_id": "c53de5d2c6d04858",
+        "parent_span_id": null,
+        "service_name": "api-gateway",
+        "operation_name": "POST /api/auth/login",
+        "start_time": "2026-07-10T02:41:38.354024+00:00",
+        "end_time": "2026-07-10T02:41:38.874131+00:00",
+        "duration_ms": 520.11,
+        "status_code": "OK",
+        "attributes": {
+          "http.method": "POST",
+          "http.url": "/api/auth/login",
+          "http.status_code": 200,
+          "net.peer.ip": "10.0.5.155"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "9dc9022e5491482cb8dc4d4d7da574de",
+        "span_id": "9243fc932eca428a",
+        "parent_span_id": "c53de5d2c6d04858",
+        "service_name": "inventory-db",
+        "operation_name": "updateQuantity",
+        "start_time": "2026-07-10T02:41:38.359662+00:00",
+        "end_time": "2026-07-10T02:41:38.379563+00:00",
+        "duration_ms": 19.9,
+        "status_code": "ERROR",
+        "attributes": {
+          "rpc.service": "inventory-db",
+          "rpc.method": "updateQuantity",
+          "db.system": "postgresql"
+        },
+        "events": [
+          {
+            "name": "exception",
+            "timestamp": "2026-07-10T02:41:38.379563+00:00",
+            "attributes": {
+              "exception.message": "Connection refused to inventory-db",
+              "exception.type": "ConnectionError"
+            }
+          }
+        ]
+      },
+      {
+        "trace_id": "9dc9022e5491482cb8dc4d4d7da574de",
+        "span_id": "fd05cb32225c42b7",
+        "parent_span_id": "c53de5d2c6d04858",
+        "service_name": "order-service",
+        "operation_name": "validateCart",
+        "start_time": "2026-07-10T02:41:38.387831+00:00",
+        "end_time": "2026-07-10T02:41:38.451959+00:00",
+        "duration_ms": 64.13,
+        "status_code": "ERROR",
+        "attributes": {
+          "rpc.service": "order-service",
+          "rpc.method": "validateCart"
+        },
+        "events": [
+          {
+            "name": "exception",
+            "timestamp": "2026-07-10T02:41:38.451959+00:00",
+            "attributes": {
+              "exception.message": "Connection refused to order-service",
+              "exception.type": "ConnectionError"
+            }
+          }
+        ]
+      },
+      {
+        "trace_id": "9dc9022e5491482cb8dc4d4d7da574de",
+        "span_id": "edbd93f7a21c45a3",
+        "parent_span_id": "fd05cb32225c42b7",
+        "service_name": "inventory-db",
+        "operation_name": "reserveItems",
+        "start_time": "2026-07-10T02:41:38.390216+00:00",
+        "end_time": "2026-07-10T02:41:38.392794+00:00",
+        "duration_ms": 2.58,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "inventory-db",
+          "rpc.method": "reserveItems"
+        },
+        "events": []
+      }
+    ]
+  },
+  {
+    "trace_id": "5952a32176054037a64600ccf4c2f3cb",
+    "root_service": "api-gateway",
+    "root_operation": "GET /api/products",
+    "start_time": "2026-07-10T00:43:16.617836+00:00",
+    "duration_ms": 97.97,
+    "span_count": 5,
+    "error_count": 0,
+    "spans": [
+      {
+        "trace_id": "5952a32176054037a64600ccf4c2f3cb",
+        "span_id": "8cf46a2c7b954500",
+        "parent_span_id": null,
+        "service_name": "api-gateway",
+        "operation_name": "GET /api/products",
+        "start_time": "2026-07-10T00:43:16.617836+00:00",
+        "end_time": "2026-07-10T00:43:16.715808+00:00",
+        "duration_ms": 97.97,
+        "status_code": "OK",
+        "attributes": {
+          "http.method": "GET",
+          "http.url": "/api/products",
+          "http.status_code": 200,
+          "net.peer.ip": "10.0.10.77"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "5952a32176054037a64600ccf4c2f3cb",
+        "span_id": "1443189bbf8c4f64",
+        "parent_span_id": "8cf46a2c7b954500",
+        "service_name": "order-service",
+        "operation_name": "updateOrderStatus",
+        "start_time": "2026-07-10T00:43:16.623286+00:00",
+        "end_time": "2026-07-10T00:43:16.631865+00:00",
+        "duration_ms": 8.58,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "order-service",
+          "rpc.method": "updateOrderStatus"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "5952a32176054037a64600ccf4c2f3cb",
+        "span_id": "72c6c6560cbb4ec6",
+        "parent_span_id": "1443189bbf8c4f64",
+        "service_name": "auth-service",
+        "operation_name": "refreshSession",
+        "start_time": "2026-07-10T00:43:16.624365+00:00",
+        "end_time": "2026-07-10T00:43:16.627017+00:00",
+        "duration_ms": 2.65,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "refreshSession"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "5952a32176054037a64600ccf4c2f3cb",
+        "span_id": "60bdb0b1314e43e2",
+        "parent_span_id": "8cf46a2c7b954500",
+        "service_name": "inventory-db",
+        "operation_name": "getProductDetails",
+        "start_time": "2026-07-10T00:43:16.638083+00:00",
+        "end_time": "2026-07-10T00:43:16.695592+00:00",
+        "duration_ms": 57.51,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "inventory-db",
+          "rpc.method": "getProductDetails",
+          "db.system": "postgresql"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "5952a32176054037a64600ccf4c2f3cb",
+        "span_id": "08d60873533a4203",
+        "parent_span_id": "8cf46a2c7b954500",
+        "service_name": "auth-service",
+        "operation_name": "checkPermissions",
+        "start_time": "2026-07-10T00:43:16.698416+00:00",
+        "end_time": "2026-07-10T00:43:16.750101+00:00",
+        "duration_ms": 51.68,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "checkPermissions"
+        },
+        "events": []
+      }
+    ]
+  },
+  {
+    "trace_id": "119851faf1b04d4fb5c5af35e5d38263",
+    "root_service": "api-gateway",
+    "root_operation": "POST /api/auth/login",
+    "start_time": "2026-07-10T00:02:39.918969+00:00",
+    "duration_ms": 751.69,
+    "span_count": 7,
+    "error_count": 0,
+    "spans": [
+      {
+        "trace_id": "119851faf1b04d4fb5c5af35e5d38263",
+        "span_id": "424916f70ff743df",
+        "parent_span_id": null,
+        "service_name": "api-gateway",
+        "operation_name": "POST /api/auth/login",
+        "start_time": "2026-07-10T00:02:39.918969+00:00",
+        "end_time": "2026-07-10T00:02:40.670659+00:00",
+        "duration_ms": 751.69,
+        "status_code": "OK",
+        "attributes": {
+          "http.method": "POST",
+          "http.url": "/api/auth/login",
+          "http.status_code": 200,
+          "net.peer.ip": "10.0.1.104"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "119851faf1b04d4fb5c5af35e5d38263",
+        "span_id": "b2e5c7e805b24a21",
+        "parent_span_id": "424916f70ff743df",
+        "service_name": "auth-service",
+        "operation_name": "checkPermissions",
+        "start_time": "2026-07-10T00:02:39.924727+00:00",
+        "end_time": "2026-07-10T00:02:40.223470+00:00",
+        "duration_ms": 298.74,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "checkPermissions"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "119851faf1b04d4fb5c5af35e5d38263",
+        "span_id": "2c70186bb8cb48cc",
+        "parent_span_id": "424916f70ff743df",
+        "service_name": "order-service",
+        "operation_name": "createOrder",
+        "start_time": "2026-07-10T00:02:40.229536+00:00",
+        "end_time": "2026-07-10T00:02:40.676308+00:00",
+        "duration_ms": 446.77,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "order-service",
+          "rpc.method": "createOrder"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "119851faf1b04d4fb5c5af35e5d38263",
+        "span_id": "72d3246505f449a9",
+        "parent_span_id": "2c70186bb8cb48cc",
+        "service_name": "auth-service",
+        "operation_name": "validateToken",
+        "start_time": "2026-07-10T00:02:40.230930+00:00",
+        "end_time": "2026-07-10T00:02:40.340463+00:00",
+        "duration_ms": 109.53,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "validateToken"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "119851faf1b04d4fb5c5af35e5d38263",
+        "span_id": "36f666830bed4dee",
+        "parent_span_id": "424916f70ff743df",
+        "service_name": "inventory-db",
+        "operation_name": "reserveItems",
+        "start_time": "2026-07-10T00:02:40.680843+00:00",
+        "end_time": "2026-07-10T00:02:40.884379+00:00",
+        "duration_ms": 203.54,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "inventory-db",
+          "rpc.method": "reserveItems",
+          "db.system": "postgresql"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "119851faf1b04d4fb5c5af35e5d38263",
+        "span_id": "53332fce0e2c475d",
+        "parent_span_id": "36f666830bed4dee",
+        "service_name": "auth-service",
+        "operation_name": "refreshSession",
+        "start_time": "2026-07-10T00:02:40.683104+00:00",
+        "end_time": "2026-07-10T00:02:40.726119+00:00",
+        "duration_ms": 43.01,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "refreshSession"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "119851faf1b04d4fb5c5af35e5d38263",
+        "span_id": "05832a66b6a544c2",
+        "parent_span_id": "424916f70ff743df",
+        "service_name": "payment-gateway",
+        "operation_name": "createCharge",
+        "start_time": "2026-07-10T00:02:40.886879+00:00",
+        "end_time": "2026-07-10T00:02:41.090681+00:00",
+        "duration_ms": 203.8,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "payment-gateway",
+          "rpc.method": "createCharge"
+        },
+        "events": []
+      }
+    ]
+  },
+  {
+    "trace_id": "ce4942724c084687a8a85032379f14a3",
+    "root_service": "api-gateway",
+    "root_operation": "GET /api/users/{id}",
+    "start_time": "2026-07-09T22:36:59.411427+00:00",
+    "duration_ms": 732.16,
+    "span_count": 4,
+    "error_count": 0,
+    "spans": [
+      {
+        "trace_id": "ce4942724c084687a8a85032379f14a3",
+        "span_id": "c01cf652225943dc",
+        "parent_span_id": null,
+        "service_name": "api-gateway",
+        "operation_name": "GET /api/users/{id}",
+        "start_time": "2026-07-09T22:36:59.411427+00:00",
+        "end_time": "2026-07-09T22:37:00.143589+00:00",
+        "duration_ms": 732.16,
+        "status_code": "OK",
+        "attributes": {
+          "http.method": "GET",
+          "http.url": "/api/users/{id}",
+          "http.status_code": 200,
+          "net.peer.ip": "10.0.6.172"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "ce4942724c084687a8a85032379f14a3",
+        "span_id": "7a9d889eea614366",
+        "parent_span_id": "c01cf652225943dc",
+        "service_name": "payment-gateway",
+        "operation_name": "refundTransaction",
+        "start_time": "2026-07-09T22:36:59.416476+00:00",
+        "end_time": "2026-07-09T22:36:59.611820+00:00",
+        "duration_ms": 195.34,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "payment-gateway",
+          "rpc.method": "refundTransaction"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "ce4942724c084687a8a85032379f14a3",
+        "span_id": "46a34371b790434b",
+        "parent_span_id": "c01cf652225943dc",
+        "service_name": "auth-service",
+        "operation_name": "checkPermissions",
+        "start_time": "2026-07-09T22:36:59.619144+00:00",
+        "end_time": "2026-07-09T22:36:59.834246+00:00",
+        "duration_ms": 215.1,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "checkPermissions"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "ce4942724c084687a8a85032379f14a3",
+        "span_id": "f30bf03dbec04789",
+        "parent_span_id": "c01cf652225943dc",
+        "service_name": "inventory-db",
+        "operation_name": "bulkLookup",
+        "start_time": "2026-07-09T22:36:59.837977+00:00",
+        "end_time": "2026-07-09T22:36:59.999781+00:00",
+        "duration_ms": 161.8,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "inventory-db",
+          "rpc.method": "bulkLookup",
+          "db.system": "postgresql"
+        },
+        "events": []
+      }
+    ]
+  },
+  {
+    "trace_id": "0ee739774fd24fa589ae9552ff8f7cb3",
+    "root_service": "api-gateway",
+    "root_operation": "GET /api/orders",
+    "start_time": "2026-07-09T22:04:23.496769+00:00",
+    "duration_ms": 659.7,
+    "span_count": 7,
+    "error_count": 0,
+    "spans": [
+      {
+        "trace_id": "0ee739774fd24fa589ae9552ff8f7cb3",
+        "span_id": "cbdf7a427f214c0f",
+        "parent_span_id": null,
+        "service_name": "api-gateway",
+        "operation_name": "GET /api/orders",
+        "start_time": "2026-07-09T22:04:23.496769+00:00",
+        "end_time": "2026-07-09T22:04:24.156465+00:00",
+        "duration_ms": 659.7,
+        "status_code": "OK",
+        "attributes": {
+          "http.method": "GET",
+          "http.url": "/api/orders",
+          "http.status_code": 200,
+          "net.peer.ip": "10.0.9.218"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "0ee739774fd24fa589ae9552ff8f7cb3",
+        "span_id": "13b36facb5764ad1",
+        "parent_span_id": "cbdf7a427f214c0f",
+        "service_name": "inventory-db",
+        "operation_name": "checkStock",
+        "start_time": "2026-07-09T22:04:23.499082+00:00",
+        "end_time": "2026-07-09T22:04:23.589825+00:00",
+        "duration_ms": 90.74,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "inventory-db",
+          "rpc.method": "checkStock",
+          "db.system": "postgresql"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "0ee739774fd24fa589ae9552ff8f7cb3",
+        "span_id": "7cb619357c604265",
+        "parent_span_id": "cbdf7a427f214c0f",
+        "service_name": "payment-gateway",
+        "operation_name": "processPayment",
+        "start_time": "2026-07-09T22:04:23.595977+00:00",
+        "end_time": "2026-07-09T22:04:23.837608+00:00",
+        "duration_ms": 241.63,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "payment-gateway",
+          "rpc.method": "processPayment"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "0ee739774fd24fa589ae9552ff8f7cb3",
+        "span_id": "0b3e2dd49aa74af8",
+        "parent_span_id": "7cb619357c604265",
+        "service_name": "auth-service",
+        "operation_name": "validateToken",
+        "start_time": "2026-07-09T22:04:23.598728+00:00",
+        "end_time": "2026-07-09T22:04:23.601660+00:00",
+        "duration_ms": 2.93,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "validateToken"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "0ee739774fd24fa589ae9552ff8f7cb3",
+        "span_id": "c2e040909c9249c7",
+        "parent_span_id": "cbdf7a427f214c0f",
+        "service_name": "order-service",
+        "operation_name": "validateCart",
+        "start_time": "2026-07-09T22:04:23.839819+00:00",
+        "end_time": "2026-07-09T22:04:23.968182+00:00",
+        "duration_ms": 128.36,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "order-service",
+          "rpc.method": "validateCart"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "0ee739774fd24fa589ae9552ff8f7cb3",
+        "span_id": "82e727fae43b4fed",
+        "parent_span_id": "c2e040909c9249c7",
+        "service_name": "auth-service",
+        "operation_name": "generateJWT",
+        "start_time": "2026-07-09T22:04:23.842043+00:00",
+        "end_time": "2026-07-09T22:04:23.888862+00:00",
+        "duration_ms": 46.82,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "generateJWT"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "0ee739774fd24fa589ae9552ff8f7cb3",
+        "span_id": "4c43e5032d584ac9",
+        "parent_span_id": "cbdf7a427f214c0f",
+        "service_name": "auth-service",
+        "operation_name": "refreshSession",
+        "start_time": "2026-07-09T22:04:23.976142+00:00",
+        "end_time": "2026-07-09T22:04:24.140351+00:00",
+        "duration_ms": 164.21,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "refreshSession"
+        },
+        "events": []
+      }
+    ]
+  },
+  {
+    "trace_id": "70713b6cfeeb4ef39c4c41386eb4e05e",
+    "root_service": "api-gateway",
+    "root_operation": "GET /api/users/{id}",
+    "start_time": "2026-07-09T21:46:50.084422+00:00",
+    "duration_ms": 82.31,
+    "span_count": 4,
+    "error_count": 1,
+    "spans": [
+      {
+        "trace_id": "70713b6cfeeb4ef39c4c41386eb4e05e",
+        "span_id": "b31d7b229b254ccf",
+        "parent_span_id": null,
+        "service_name": "api-gateway",
+        "operation_name": "GET /api/users/{id}",
+        "start_time": "2026-07-09T21:46:50.084422+00:00",
+        "end_time": "2026-07-09T21:46:50.166733+00:00",
+        "duration_ms": 82.31,
+        "status_code": "OK",
+        "attributes": {
+          "http.method": "GET",
+          "http.url": "/api/users/{id}",
+          "http.status_code": 200,
+          "net.peer.ip": "10.0.5.49"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "70713b6cfeeb4ef39c4c41386eb4e05e",
+        "span_id": "c772c156d3d941b2",
+        "parent_span_id": "b31d7b229b254ccf",
+        "service_name": "auth-service",
+        "operation_name": "checkPermissions",
+        "start_time": "2026-07-09T21:46:50.087082+00:00",
+        "end_time": "2026-07-09T21:46:50.116864+00:00",
+        "duration_ms": 29.78,
+        "status_code": "ERROR",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "checkPermissions"
+        },
+        "events": [
+          {
+            "name": "exception",
+            "timestamp": "2026-07-09T21:46:50.116864+00:00",
+            "attributes": {
+              "exception.message": "Connection refused to auth-service",
+              "exception.type": "ConnectionError"
+            }
+          }
+        ]
+      },
+      {
+        "trace_id": "70713b6cfeeb4ef39c4c41386eb4e05e",
+        "span_id": "992ee59f5f0a43b9",
+        "parent_span_id": "b31d7b229b254ccf",
+        "service_name": "payment-gateway",
+        "operation_name": "createCharge",
+        "start_time": "2026-07-09T21:46:50.125517+00:00",
+        "end_time": "2026-07-09T21:46:50.136717+00:00",
+        "duration_ms": 11.2,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "payment-gateway",
+          "rpc.method": "createCharge"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "70713b6cfeeb4ef39c4c41386eb4e05e",
+        "span_id": "9560b3ddc36c4c33",
+        "parent_span_id": "992ee59f5f0a43b9",
+        "service_name": "auth-service",
+        "operation_name": "checkPermissions",
+        "start_time": "2026-07-09T21:46:50.130430+00:00",
+        "end_time": "2026-07-09T21:46:50.135240+00:00",
+        "duration_ms": 4.81,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "checkPermissions"
+        },
+        "events": []
+      }
+    ]
+  },
+  {
+    "trace_id": "d879c7432daf4a469cc3de0795e54a6e",
+    "root_service": "api-gateway",
+    "root_operation": "GET /api/products",
+    "start_time": "2026-07-09T21:11:52.343419+00:00",
+    "duration_ms": 201.87,
+    "span_count": 6,
+    "error_count": 2,
+    "spans": [
+      {
+        "trace_id": "d879c7432daf4a469cc3de0795e54a6e",
+        "span_id": "6d190719300f4d82",
+        "parent_span_id": null,
+        "service_name": "api-gateway",
+        "operation_name": "GET /api/products",
+        "start_time": "2026-07-09T21:11:52.343419+00:00",
+        "end_time": "2026-07-09T21:11:52.545288+00:00",
+        "duration_ms": 201.87,
+        "status_code": "ERROR",
+        "attributes": {
+          "http.method": "GET",
+          "http.url": "/api/products",
+          "http.status_code": 500,
+          "net.peer.ip": "10.0.1.216"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "d879c7432daf4a469cc3de0795e54a6e",
+        "span_id": "6b6e928b65364299",
+        "parent_span_id": "6d190719300f4d82",
+        "service_name": "payment-gateway",
+        "operation_name": "verifyCard",
+        "start_time": "2026-07-09T21:11:52.350798+00:00",
+        "end_time": "2026-07-09T21:11:52.361139+00:00",
+        "duration_ms": 10.34,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "payment-gateway",
+          "rpc.method": "verifyCard"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "d879c7432daf4a469cc3de0795e54a6e",
+        "span_id": "33c834e8e43c406d",
+        "parent_span_id": "6d190719300f4d82",
+        "service_name": "order-service",
+        "operation_name": "getOrderById",
+        "start_time": "2026-07-09T21:11:52.365500+00:00",
+        "end_time": "2026-07-09T21:11:52.470652+00:00",
+        "duration_ms": 105.15,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "order-service",
+          "rpc.method": "getOrderById"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "d879c7432daf4a469cc3de0795e54a6e",
+        "span_id": "2401a280a1ba44ca",
+        "parent_span_id": "33c834e8e43c406d",
+        "service_name": "inventory-db",
+        "operation_name": "updateQuantity",
+        "start_time": "2026-07-09T21:11:52.369415+00:00",
+        "end_time": "2026-07-09T21:11:52.414287+00:00",
+        "duration_ms": 44.87,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "inventory-db",
+          "rpc.method": "updateQuantity"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "d879c7432daf4a469cc3de0795e54a6e",
+        "span_id": "ab8a59df84224f88",
+        "parent_span_id": "6d190719300f4d82",
+        "service_name": "inventory-db",
+        "operation_name": "getProductDetails",
+        "start_time": "2026-07-09T21:11:52.474576+00:00",
+        "end_time": "2026-07-09T21:11:52.507561+00:00",
+        "duration_ms": 32.99,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "inventory-db",
+          "rpc.method": "getProductDetails",
+          "db.system": "postgresql"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "d879c7432daf4a469cc3de0795e54a6e",
+        "span_id": "72bff5ad528e4b27",
+        "parent_span_id": "6d190719300f4d82",
+        "service_name": "auth-service",
+        "operation_name": "generateJWT",
+        "start_time": "2026-07-09T21:11:52.515565+00:00",
+        "end_time": "2026-07-09T21:11:52.621701+00:00",
+        "duration_ms": 106.14,
+        "status_code": "ERROR",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "generateJWT"
+        },
+        "events": [
+          {
+            "name": "exception",
+            "timestamp": "2026-07-09T21:11:52.621701+00:00",
+            "attributes": {
+              "exception.message": "Connection refused to auth-service",
+              "exception.type": "ConnectionError"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "trace_id": "d5b4c992e38443deb18b715bff47479d",
+    "root_service": "api-gateway",
+    "root_operation": "GET /api/orders",
+    "start_time": "2026-07-09T21:01:38.473685+00:00",
+    "duration_ms": 345.57,
+    "span_count": 5,
+    "error_count": 1,
+    "spans": [
+      {
+        "trace_id": "d5b4c992e38443deb18b715bff47479d",
+        "span_id": "741c523e38d94e16",
+        "parent_span_id": null,
+        "service_name": "api-gateway",
+        "operation_name": "GET /api/orders",
+        "start_time": "2026-07-09T21:01:38.473685+00:00",
+        "end_time": "2026-07-09T21:01:38.819253+00:00",
+        "duration_ms": 345.57,
+        "status_code": "OK",
+        "attributes": {
+          "http.method": "GET",
+          "http.url": "/api/orders",
+          "http.status_code": 200,
+          "net.peer.ip": "10.0.10.116"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "d5b4c992e38443deb18b715bff47479d",
+        "span_id": "c27d0c74a27a4a2e",
+        "parent_span_id": "741c523e38d94e16",
+        "service_name": "payment-gateway",
+        "operation_name": "createCharge",
+        "start_time": "2026-07-09T21:01:38.477192+00:00",
+        "end_time": "2026-07-09T21:01:38.666813+00:00",
+        "duration_ms": 189.62,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "payment-gateway",
+          "rpc.method": "createCharge"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "d5b4c992e38443deb18b715bff47479d",
+        "span_id": "eb90aafd87fc4d3d",
+        "parent_span_id": "741c523e38d94e16",
+        "service_name": "inventory-db",
+        "operation_name": "reserveItems",
+        "start_time": "2026-07-09T21:01:38.674016+00:00",
+        "end_time": "2026-07-09T21:01:38.783490+00:00",
+        "duration_ms": 109.47,
+        "status_code": "ERROR",
+        "attributes": {
+          "rpc.service": "inventory-db",
+          "rpc.method": "reserveItems",
+          "db.system": "postgresql"
+        },
+        "events": [
+          {
+            "name": "exception",
+            "timestamp": "2026-07-09T21:01:38.783490+00:00",
+            "attributes": {
+              "exception.message": "Connection refused to inventory-db",
+              "exception.type": "ConnectionError"
+            }
+          }
+        ]
+      },
+      {
+        "trace_id": "d5b4c992e38443deb18b715bff47479d",
+        "span_id": "f5359ae6f8924723",
+        "parent_span_id": "741c523e38d94e16",
+        "service_name": "order-service",
+        "operation_name": "calculateTotal",
+        "start_time": "2026-07-09T21:01:38.792762+00:00",
+        "end_time": "2026-07-09T21:01:38.816605+00:00",
+        "duration_ms": 23.84,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "order-service",
+          "rpc.method": "calculateTotal"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "d5b4c992e38443deb18b715bff47479d",
+        "span_id": "69bac95c61a44146",
+        "parent_span_id": "f5359ae6f8924723",
+        "service_name": "inventory-db",
+        "operation_name": "reserveItems",
+        "start_time": "2026-07-09T21:01:38.797047+00:00",
+        "end_time": "2026-07-09T21:01:38.800431+00:00",
+        "duration_ms": 3.38,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "inventory-db",
+          "rpc.method": "reserveItems"
+        },
+        "events": []
+      }
+    ]
+  },
+  {
+    "trace_id": "639ce62af9c0436696e8df7bb7d29115",
+    "root_service": "api-gateway",
+    "root_operation": "POST /api/checkout",
+    "start_time": "2026-07-09T20:55:05.800496+00:00",
+    "duration_ms": 425.97,
+    "span_count": 3,
+    "error_count": 3,
+    "spans": [
+      {
+        "trace_id": "639ce62af9c0436696e8df7bb7d29115",
+        "span_id": "4443da7083ef4d43",
+        "parent_span_id": null,
+        "service_name": "api-gateway",
+        "operation_name": "POST /api/checkout",
+        "start_time": "2026-07-09T20:55:05.800496+00:00",
+        "end_time": "2026-07-09T20:55:06.226465+00:00",
+        "duration_ms": 425.97,
+        "status_code": "ERROR",
+        "attributes": {
+          "http.method": "POST",
+          "http.url": "/api/checkout",
+          "http.status_code": 500,
+          "net.peer.ip": "10.0.2.207"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "639ce62af9c0436696e8df7bb7d29115",
+        "span_id": "207d3bbd411d4357",
+        "parent_span_id": "4443da7083ef4d43",
+        "service_name": "inventory-db",
+        "operation_name": "bulkLookup",
+        "start_time": "2026-07-09T20:55:05.808594+00:00",
+        "end_time": "2026-07-09T20:55:05.904258+00:00",
+        "duration_ms": 95.66,
+        "status_code": "ERROR",
+        "attributes": {
+          "rpc.service": "inventory-db",
+          "rpc.method": "bulkLookup",
+          "db.system": "postgresql"
+        },
+        "events": [
+          {
+            "name": "exception",
+            "timestamp": "2026-07-09T20:55:05.904258+00:00",
+            "attributes": {
+              "exception.message": "Connection refused to inventory-db",
+              "exception.type": "ConnectionError"
+            }
+          }
+        ]
+      },
+      {
+        "trace_id": "639ce62af9c0436696e8df7bb7d29115",
+        "span_id": "e06cd176605a49bc",
+        "parent_span_id": "4443da7083ef4d43",
+        "service_name": "payment-gateway",
+        "operation_name": "processPayment",
+        "start_time": "2026-07-09T20:55:05.907837+00:00",
+        "end_time": "2026-07-09T20:55:05.954135+00:00",
+        "duration_ms": 46.3,
+        "status_code": "ERROR",
+        "attributes": {
+          "rpc.service": "payment-gateway",
+          "rpc.method": "processPayment"
+        },
+        "events": [
+          {
+            "name": "exception",
+            "timestamp": "2026-07-09T20:55:05.954135+00:00",
+            "attributes": {
+              "exception.message": "Connection refused to payment-gateway",
+              "exception.type": "ConnectionError"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "trace_id": "142a95920a02411689fbff88c3e5b114",
+    "root_service": "api-gateway",
+    "root_operation": "GET /api/users/{id}",
+    "start_time": "2026-07-09T19:33:46.928901+00:00",
+    "duration_ms": 185.05,
+    "span_count": 6,
+    "error_count": 0,
+    "spans": [
+      {
+        "trace_id": "142a95920a02411689fbff88c3e5b114",
+        "span_id": "65ac8dab14de4a58",
+        "parent_span_id": null,
+        "service_name": "api-gateway",
+        "operation_name": "GET /api/users/{id}",
+        "start_time": "2026-07-09T19:33:46.928901+00:00",
+        "end_time": "2026-07-09T19:33:47.113954+00:00",
+        "duration_ms": 185.05,
+        "status_code": "OK",
+        "attributes": {
+          "http.method": "GET",
+          "http.url": "/api/users/{id}",
+          "http.status_code": 200,
+          "net.peer.ip": "10.0.7.245"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "142a95920a02411689fbff88c3e5b114",
+        "span_id": "97e189ad9fc44baf",
+        "parent_span_id": "65ac8dab14de4a58",
+        "service_name": "payment-gateway",
+        "operation_name": "createCharge",
+        "start_time": "2026-07-09T19:33:46.938437+00:00",
+        "end_time": "2026-07-09T19:33:46.956564+00:00",
+        "duration_ms": 18.13,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "payment-gateway",
+          "rpc.method": "createCharge"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "142a95920a02411689fbff88c3e5b114",
+        "span_id": "d4b56513ba9a4cb5",
+        "parent_span_id": "65ac8dab14de4a58",
+        "service_name": "inventory-db",
+        "operation_name": "reserveItems",
+        "start_time": "2026-07-09T19:33:46.965508+00:00",
+        "end_time": "2026-07-09T19:33:46.994925+00:00",
+        "duration_ms": 29.42,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "inventory-db",
+          "rpc.method": "reserveItems",
+          "db.system": "postgresql"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "142a95920a02411689fbff88c3e5b114",
+        "span_id": "aa81c6f39dab40a0",
+        "parent_span_id": "d4b56513ba9a4cb5",
+        "service_name": "payment-gateway",
+        "operation_name": "createCharge",
+        "start_time": "2026-07-09T19:33:46.970135+00:00",
+        "end_time": "2026-07-09T19:33:46.977555+00:00",
+        "duration_ms": 7.42,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "payment-gateway",
+          "rpc.method": "createCharge"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "142a95920a02411689fbff88c3e5b114",
+        "span_id": "d43bc36151b247e5",
+        "parent_span_id": "65ac8dab14de4a58",
+        "service_name": "auth-service",
+        "operation_name": "generateJWT",
+        "start_time": "2026-07-09T19:33:46.999577+00:00",
+        "end_time": "2026-07-09T19:33:47.063675+00:00",
+        "duration_ms": 64.1,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "generateJWT"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "142a95920a02411689fbff88c3e5b114",
+        "span_id": "3f60f44c1aa74bdd",
+        "parent_span_id": "d43bc36151b247e5",
+        "service_name": "inventory-db",
+        "operation_name": "reserveItems",
+        "start_time": "2026-07-09T19:33:47.001860+00:00",
+        "end_time": "2026-07-09T19:33:47.021754+00:00",
+        "duration_ms": 19.89,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "inventory-db",
+          "rpc.method": "reserveItems"
+        },
+        "events": []
+      }
+    ]
+  },
+  {
+    "trace_id": "87076179e9af4e04aa6b4daea1479da8",
+    "root_service": "api-gateway",
+    "root_operation": "GET /api/users/{id}",
+    "start_time": "2026-07-09T18:15:43.938788+00:00",
+    "duration_ms": 602.82,
+    "span_count": 4,
+    "error_count": 0,
+    "spans": [
+      {
+        "trace_id": "87076179e9af4e04aa6b4daea1479da8",
+        "span_id": "c52b86503c1c477a",
+        "parent_span_id": null,
+        "service_name": "api-gateway",
+        "operation_name": "GET /api/users/{id}",
+        "start_time": "2026-07-09T18:15:43.938788+00:00",
+        "end_time": "2026-07-09T18:15:44.541605+00:00",
+        "duration_ms": 602.82,
+        "status_code": "OK",
+        "attributes": {
+          "http.method": "GET",
+          "http.url": "/api/users/{id}",
+          "http.status_code": 200,
+          "net.peer.ip": "10.0.4.239"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "87076179e9af4e04aa6b4daea1479da8",
+        "span_id": "3285859eca0e4a92",
+        "parent_span_id": "c52b86503c1c477a",
+        "service_name": "order-service",
+        "operation_name": "updateOrderStatus",
+        "start_time": "2026-07-09T18:15:43.947774+00:00",
+        "end_time": "2026-07-09T18:15:44.184787+00:00",
+        "duration_ms": 237.01,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "order-service",
+          "rpc.method": "updateOrderStatus"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "87076179e9af4e04aa6b4daea1479da8",
+        "span_id": "95713704002b42ad",
+        "parent_span_id": "c52b86503c1c477a",
+        "service_name": "auth-service",
+        "operation_name": "refreshSession",
+        "start_time": "2026-07-09T18:15:44.190772+00:00",
+        "end_time": "2026-07-09T18:15:44.206512+00:00",
+        "duration_ms": 15.74,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "refreshSession"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "87076179e9af4e04aa6b4daea1479da8",
+        "span_id": "7326250394f94b48",
+        "parent_span_id": "95713704002b42ad",
+        "service_name": "payment-gateway",
+        "operation_name": "createCharge",
+        "start_time": "2026-07-09T18:15:44.192726+00:00",
+        "end_time": "2026-07-09T18:15:44.196601+00:00",
+        "duration_ms": 3.88,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "payment-gateway",
+          "rpc.method": "createCharge"
+        },
+        "events": []
+      }
+    ]
+  },
+  {
+    "trace_id": "0f70ee31afb743a6ba70fb7a33a95c9c",
+    "root_service": "api-gateway",
+    "root_operation": "GET /api/products",
+    "start_time": "2026-07-09T16:57:34.624436+00:00",
+    "duration_ms": 368.74,
+    "span_count": 6,
+    "error_count": 0,
+    "spans": [
+      {
+        "trace_id": "0f70ee31afb743a6ba70fb7a33a95c9c",
+        "span_id": "cfca97e429754963",
+        "parent_span_id": null,
+        "service_name": "api-gateway",
+        "operation_name": "GET /api/products",
+        "start_time": "2026-07-09T16:57:34.624436+00:00",
+        "end_time": "2026-07-09T16:57:34.993173+00:00",
+        "duration_ms": 368.74,
+        "status_code": "OK",
+        "attributes": {
+          "http.method": "GET",
+          "http.url": "/api/products",
+          "http.status_code": 200,
+          "net.peer.ip": "10.0.4.85"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "0f70ee31afb743a6ba70fb7a33a95c9c",
+        "span_id": "f99c3cd1344f4e59",
+        "parent_span_id": "cfca97e429754963",
+        "service_name": "order-service",
+        "operation_name": "validateCart",
+        "start_time": "2026-07-09T16:57:34.629522+00:00",
+        "end_time": "2026-07-09T16:57:34.662878+00:00",
+        "duration_ms": 33.36,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "order-service",
+          "rpc.method": "validateCart"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "0f70ee31afb743a6ba70fb7a33a95c9c",
+        "span_id": "bd11085148d74d5c",
+        "parent_span_id": "cfca97e429754963",
+        "service_name": "auth-service",
+        "operation_name": "refreshSession",
+        "start_time": "2026-07-09T16:57:34.671077+00:00",
+        "end_time": "2026-07-09T16:57:34.880649+00:00",
+        "duration_ms": 209.57,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "refreshSession"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "0f70ee31afb743a6ba70fb7a33a95c9c",
+        "span_id": "d804ad42cfb64e69",
+        "parent_span_id": "bd11085148d74d5c",
+        "service_name": "order-service",
+        "operation_name": "createOrder",
+        "start_time": "2026-07-09T16:57:34.675414+00:00",
+        "end_time": "2026-07-09T16:57:34.698779+00:00",
+        "duration_ms": 23.37,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "order-service",
+          "rpc.method": "createOrder"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "0f70ee31afb743a6ba70fb7a33a95c9c",
+        "span_id": "712c2b9cc4ec47d7",
+        "parent_span_id": "cfca97e429754963",
+        "service_name": "inventory-db",
+        "operation_name": "getProductDetails",
+        "start_time": "2026-07-09T16:57:34.883227+00:00",
+        "end_time": "2026-07-09T16:57:35.070069+00:00",
+        "duration_ms": 186.84,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "inventory-db",
+          "rpc.method": "getProductDetails",
+          "db.system": "postgresql"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "0f70ee31afb743a6ba70fb7a33a95c9c",
+        "span_id": "35b0ef24bf3747ed",
+        "parent_span_id": "712c2b9cc4ec47d7",
+        "service_name": "auth-service",
+        "operation_name": "refreshSession",
+        "start_time": "2026-07-09T16:57:34.885284+00:00",
+        "end_time": "2026-07-09T16:57:34.915748+00:00",
+        "duration_ms": 30.46,
+        "status_code": "OK",
+        "attributes": {
+          "rpc.service": "auth-service",
+          "rpc.method": "refreshSession"
+        },
+        "events": []
+      }
+    ]
+  }
+]

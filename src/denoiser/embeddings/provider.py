@@ -134,17 +134,22 @@ class LocalEmbeddingProvider:
 
             logger.info("Computing embeddings for unseen templates", extra={"count": len(missing_texts)})
             try:
-                computed_vectors = self._model.encode(
-                    missing_texts,
-                    batch_size=self.batch_size,
-                    show_progress_bar=False,
-                    convert_to_numpy=True,
-                )
+                computed_vectors_list = []
+                for i in range(0, len(missing_texts), 500):
+                    chunk = missing_texts[i:i + 500]
+                    chunk_vecs = self._model.encode(
+                        chunk,
+                        batch_size=self.batch_size,
+                        show_progress_bar=False,
+                        convert_to_numpy=True,
+                    )
+                    if not isinstance(chunk_vecs, np.ndarray):
+                        chunk_vecs = np.array(chunk_vecs)
+                    computed_vectors_list.append(chunk_vecs)
+                
+                computed_vectors = np.vstack(computed_vectors_list) if computed_vectors_list else np.empty((0, self.dimension), dtype=np.float32)
             except Exception as e:
                 raise EmbeddingError(f"Failed to compute embeddings: {e}") from e
-
-            if not isinstance(computed_vectors, np.ndarray):
-                computed_vectors = np.array(computed_vectors)
 
             self.cache.set_many(missing_texts, computed_vectors)
 

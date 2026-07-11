@@ -134,7 +134,7 @@ class ClickHouseStore:
             logger.error(f"Failed to insert traces into ClickHouse: {e}")
             return False
 
-    def query_logs(self, query_string: str = "", limit: int = 100, tenant_id: str = ""):
+    def query_logs(self, query_string: str = "", limit: int = 100, tenant_id: str = "", from_ts: int | None = None, to_ts: int | None = None, group_by: str | None = None):
         """Execute a parsed Log Query Language (LQL) search against ClickHouse."""
         if not self.client:
             return []
@@ -149,14 +149,140 @@ class ClickHouseStore:
             sql_where = f"tenant_id = {{tenant_id:String}} AND ({sql_where})"
             params['tenant_id'] = tenant_id
 
+        if from_ts is not None:
+            sql_where += " AND timestamp >= toDateTime64({from_ts:Float64}, 3, 'UTC')"
+            params['from_ts'] = from_ts / 1000.0
+        if to_ts is not None:
+            sql_where += " AND timestamp <= toDateTime64({to_ts:Float64}, 3, 'UTC')"
+            params['to_ts'] = to_ts / 1000.0
+
         sql = "SELECT * FROM semantic_logs"
+        
+        if group_by == 'pattern':
+            sql = """
+                SELECT 
+                    count() as count,
+                    replaceRegexpAll(message, '([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|[0-9]+)', '*') as pattern
+                FROM semantic_logs
+            """
+            
         sql += f" WHERE {sql_where}"
 
-        sql += f" ORDER BY timestamp DESC LIMIT {limit}"
+        if group_by == 'pattern':
+            sql += f" GROUP BY pattern ORDER BY count DESC LIMIT {limit}"
+        else:
+            sql += f" ORDER BY timestamp DESC LIMIT {limit}"
 
         try:
             result = self.client.query(sql, parameters=params)
             return [dict(zip(result.column_names, row, strict=False)) for row in result.result_rows]
         except Exception as e:
             logger.error(f"Failed to query ClickHouse: {e}")
+            return []
+
+    def get_facets(self, tenant_id: str = "", from_ts: int | None = None, to_ts: int | None = None):
+        """Get facet counts for log explorer sidebar"""
+        if not self.client:
+            return {"source": [], "level": []}
+            
+        params = {}
+        sql_where = "1=1"
+        if tenant_id:
+            sql_where += " AND tenant_id = {tenant_id:String}"
+            params['tenant_id'] = tenant_id
+
+        if from_ts is not None:
+            sql_where += " AND timestamp >= toDateTime64({from_ts:Float64}, 3, 'UTC')"
+            params['from_ts'] = from_ts / 1000.0
+        if to_ts is not None:
+            sql_where += " AND timestamp <= toDateTime64({to_ts:Float64}, 3, 'UTC')"
+            params['to_ts'] = to_ts / 1000.0
+
+        facets = {"source": [], "level": []}
+        
+        try:
+            # Source facet
+            sql_source = f"SELECT source, count() as count FROM semantic_logs WHERE {sql_where} GROUP BY source ORDER BY count DESC LIMIT 20"
+            res_source = self.client.query(sql_source, parameters=params)
+            facets["source"] = [{"value": row[0], "count": row[1]} for row in res_source.result_rows]
+            
+            # Level facet
+            sql_level = f"SELECT level, count() as count FROM semantic_logs WHERE {sql_where} GROUP BY level ORDER BY count DESC LIMIT 20"
+            res_level = self.client.query(sql_level, parameters=params)
+            facets["level"] = [{"value": row[0], "count": row[1]} for row in res_level.result_rows]
+            
+            return facets
+        except Exception as e:
+            logger.error(f"Failed to get facets: {e}")
+            return {"source": [], "level": []}
+
+    def get_histogram(self, query_string: str = "", tenant_id: str = "", from_ts: int | None = None, to_ts: int | None = None, interval: str = "1 hour"):
+        """Get log volume over time for histogram"""
+        if not self.client:
+            return []
+            
+        from denoiser.query.parser import compile_to_sql, parse_query
+        ast = parse_query(query_string)
+        params = {}
+        sql_where = compile_to_sql(ast, params)
+
+        if tenant_id:
+            sql_where = f"tenant_id = {{tenant_id:String}} AND ({sql_where})"
+            params['tenant_id'] = tenant_id
+
+        if from_ts is not None:
+            sql_where += " AND timestamp >= toDateTime64({from_ts:Float64}, 3, 'UTC')"
+            params['from_ts'] = from_ts / 1000.0
+        if to_ts is not None:
+            sql_where += " AND timestamp <= toDateTime64({to_ts:Float64}, 3, 'UTC')"
+            params['to_ts'] = to_ts / 1000.0
+
+        # Determine grouping interval if not explicitly provided based on time range
+        # ClickHouse syntax: toStartOfInterval(timestamp, INTERVAL 1 hour)
+        ch_interval = "1 minute"
+        if from_ts and to_ts:
+            diff_hours = (to_ts - from_ts) / 3600000
+            if diff_hours <= 1:
+                ch_interval = "1 minute"
+            elif diff_hours <= 24:
+                ch_interval = "15 minute"
+            elif diff_hours <= 24 * 7:
+                ch_interval = "1 hour"
+            else:
+                ch_interval = "1 day"
+        else:
+            ch_interval = interval
+
+        try:
+            sql = f"""
+                SELECT 
+                    toUnixTimestamp(toStartOfInterval(timestamp, INTERVAL {ch_interval})) * 1000 as time_bucket,
+                    count() as count,
+                    level
+                FROM semantic_logs
+                WHERE {sql_where}
+                GROUP BY time_bucket, level
+                ORDER BY time_bucket ASC
+            """
+            result = self.client.query(sql, parameters=params)
+            
+            # Format the output for Recharts (merge levels into single objects per timestamp)
+            buckets = {}
+            for row in result.result_rows:
+                ts = row[0]
+                count = row[1]
+                level = row[2] or 'INFO'
+                
+                if ts not in buckets:
+                    buckets[ts] = {"timestamp": ts, "count": 0}
+                
+                buckets[ts]["count"] += count
+                # Optional: break down by level if needed
+                if level not in buckets[ts]:
+                     buckets[ts][level] = 0
+                buckets[ts][level] += count
+                
+            return list(buckets.values())
+        except Exception as e:
+            logger.error(f"Failed to get histogram: {e}")
             return []

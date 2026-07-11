@@ -15,12 +15,16 @@ class DashboardCreateSchema(BaseModel):
     layout: list[dict[str, Any]] = []
     widgets: list[WidgetSchema] = []
     is_shared: bool = False
+    default_time_range: str = "1h"
+    template_variables: list[dict[str, Any]] = []
 
 class DashboardUpdateSchema(BaseModel):
     name: str | None = None
     layout: list[dict[str, Any]] | None = None
     widgets: list[WidgetSchema] | None = None
     is_shared: bool | None = None
+    default_time_range: str | None = None
+    template_variables: list[dict[str, Any]] | None = None
 
 class DashboardSchema(BaseModel):
     id: int
@@ -29,6 +33,8 @@ class DashboardSchema(BaseModel):
     layout: list[dict[str, Any]]
     widgets: list[WidgetSchema]
     is_shared: bool
+    default_time_range: str
+    template_variables: list[dict[str, Any]]
     created_at: datetime
 
     class Config:

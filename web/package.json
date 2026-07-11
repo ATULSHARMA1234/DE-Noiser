@@ -23,8 +23,15 @@
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-grid-layout": "^2.2.3",
+    "react-markdown": "^10.1.0",
     "recharts": "^3.8.1",
     "tailwind-merge": "^3.5.0"
+  },
+  "optionalDependencies": {
+    "@next/swc-linux-arm64-gnu": "16.2.6",
+    "@next/swc-linux-arm64-musl": "16.2.6",
+    "@next/swc-linux-x64-gnu": "16.2.6",
+    "@next/swc-linux-x64-musl": "16.2.6"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",

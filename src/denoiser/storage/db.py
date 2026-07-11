@@ -14,6 +14,8 @@ from sqlalchemy import JSON, Boolean, Column, DateTime, Float, Integer, String, 
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
+from sqlalchemy.pool import NullPool
+
 # ── Task 5: Dual-database support ───────────────────────────────────────────
 # Default to SQLite for zero-config local development.
 # Set DATABASE_URL=postgresql://user:pass@host:5432/semanticos for production.
@@ -21,10 +23,15 @@ DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./data/semantic_os.db")
 
 # SQLite requires check_same_thread=False; PostgreSQL does not.
 _connect_args = {}
+_engine_args = {}
 if DATABASE_URL.startswith("sqlite"):
     _connect_args["check_same_thread"] = False
+    _engine_args["poolclass"] = NullPool
+else:
+    _engine_args["pool_size"] = 20
+    _engine_args["max_overflow"] = 50
 
-engine = create_engine(DATABASE_URL, connect_args=_connect_args)
+engine = create_engine(DATABASE_URL, connect_args=_connect_args, **_engine_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
@@ -174,6 +181,8 @@ class Dashboard(Base):
     layout = Column(JSON, default=list)
     widgets = Column(JSON, default=list)
     is_shared = Column(Boolean, default=False)
+    default_time_range = Column(String, default="1h")
+    template_variables = Column(JSON, default=list)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 class MetricRule(Base):
@@ -214,6 +223,21 @@ class RunbookExecution(Base):
     incident_id = Column(Integer, index=True, nullable=False)
     status = Column(String, default="PENDING")  # PENDING, SUCCESS, FAILED
     logs = Column(JSON, default=list)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+class Monitor(Base):
+    __tablename__ = "monitors"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, index=True, nullable=True)
+    name = Column(String, nullable=False)
+    type = Column(String, default="log alert") # log alert, metric alert
+    query = Column(String, nullable=False)
+    message = Column(String, nullable=True)
+    severity = Column(String, default="warning")
+    threshold_critical = Column(Float, nullable=True)
+    threshold_warning = Column(Float, nullable=True)
+    enabled = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 
@@ -296,6 +320,17 @@ def init_db():
             db.rollback()
             try:
                 db.execute(text("ALTER TABLE users ADD COLUMN environment_access JSON DEFAULT '[]'"))
+                db.commit()
+            except Exception:
+                db.rollback()
+
+        try:
+            db.execute(text("SELECT default_time_range FROM dashboards LIMIT 1"))
+        except Exception:
+            db.rollback()
+            try:
+                db.execute(text("ALTER TABLE dashboards ADD COLUMN default_time_range VARCHAR DEFAULT '1h'"))
+                db.execute(text("ALTER TABLE dashboards ADD COLUMN template_variables JSON DEFAULT '[]'"))
                 db.commit()
             except Exception:
                 db.rollback()

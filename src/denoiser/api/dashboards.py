@@ -38,7 +38,9 @@ def create_dashboard(payload: DashboardCreateSchema, db: Session = Depends(get_d
         tenant_id=current_user.tenant_id,
         layout=[layout_item for layout_item in payload.layout],
         widgets=[w.dict() for w in payload.widgets],
-        is_shared=payload.is_shared
+        is_shared=payload.is_shared,
+        default_time_range=payload.default_time_range,
+        template_variables=payload.template_variables
     )
     db.add(db_dash)
     db.commit()
@@ -62,6 +64,10 @@ def update_dashboard(dashboard_id: int, payload: DashboardUpdateSchema, db: Sess
         dashboard.widgets = [w.dict() for w in payload.widgets]
     if payload.is_shared is not None:
         dashboard.is_shared = payload.is_shared
+    if payload.default_time_range is not None:
+        dashboard.default_time_range = payload.default_time_range
+    if payload.template_variables is not None:
+        dashboard.template_variables = payload.template_variables
 
     db.commit()
     db.refresh(dashboard)
@@ -81,7 +87,15 @@ def delete_dashboard(dashboard_id: int, db: Session = Depends(get_db), current_u
     return {"status": "deleted"}
 
 @router.get("/{dashboard_id}/widgets/{widget_id}/data")
-def get_widget_data(dashboard_id: int, widget_id: str, db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
+def get_widget_data(
+    dashboard_id: int, 
+    widget_id: str, 
+    start_time: str | None = None,
+    end_time: str | None = None,
+    variables: str | None = None,
+    db: Session = Depends(get_db), 
+    current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))
+):
     """
     Fetch the underlying data for a specific widget.
     In a real system, this would execute the widget's config (e.g. log query, metric query).

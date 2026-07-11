@@ -2,84 +2,97 @@
 @import "react-grid-layout/css/styles.css";
 @import "react-resizable/css/styles.css";
 /* ═══════════════════════════════════════════════════════════════════════════
-   SemanticOS Design Tokens — Dark/Light Theme System
-   
-   These CSS variables map 1:1 to the hex values used across all components.
+   SemanticOS Design Tokens — Datadog DRUIDS-Inspired Theme System
+
+   Palette derived from Datadog's dark purple-slate visual identity.
    Components reference them via Tailwind arbitrary values: bg-[var(--bg-app)]
    ═══════════════════════════════════════════════════════════════════════════ */
 
+/* ── Google Font ─────────────────────────────────────────────────────────── */
+/* Font is loaded via next/font/google in layout.tsx */
 :root {
   /* ── Backgrounds ─────────────────────────────────────────────────────── */
-  --bg-app: #0a0a0c;          /* Main app background, sidebar, header */
-  --bg-card: #121214;         /* Card surfaces, table containers */
-  --bg-modal: #141416;        /* Modals, elevated surfaces, selects */
-  --bg-inset: #0c0c0e;        /* Inset areas, detail panels, code blocks */
-  --bg-elevated: #0f0f13;     /* Command palette, popovers */
-  --bg-card-hover: #161618;   /* Card hover states */
-  --bg-track: #1a1a1c;        /* Progress bar tracks */
-  --bg-input: #18181b;        /* Input backgrounds (zinc-900) */
-  --bg-surface: rgba(255, 255, 255, 0.02);  /* Subtle surface */
-  --bg-surface-hover: rgba(255, 255, 255, 0.05); /* Surface hover */
+  --bg-app: #1a1733;          /* Main app background — warm dark indigo */
+  --bg-card: #242042;         /* Card surfaces, table containers */
+  --bg-modal: #2a2650;        /* Modals, elevated surfaces, selects */
+  --bg-inset: #16132e;        /* Inset areas, detail panels, code blocks */
+  --bg-elevated: #2e2a54;     /* Command palette, popovers */
+  --bg-card-hover: #2e2a54;   /* Card hover states */
+  --bg-track: #33305c;        /* Progress bar tracks */
+  --bg-input: #1e1b38;        /* Input backgrounds */
+  --bg-surface: rgba(255, 255, 255, 0.03);  /* Subtle surface */
+  --bg-surface-hover: rgba(255, 255, 255, 0.06); /* Surface hover */
 
   /* ── Text ─────────────────────────────────────────────────────────── */
-  --text-primary: #ffffff;
-  --text-secondary: #a1a1aa;   /* zinc-400 */
-  --text-muted: #71717a;       /* zinc-500 */
-  --text-dimmed: #52525b;      /* zinc-600 */
-  --text-input: #d4d4d8;       /* zinc-300 */
+  --text-primary: #edeef5;    /* Warm off-white */
+  --text-secondary: #8f8ba8;  /* Muted lavender */
+  --text-muted: #6e6a8a;      /* Subdued */
+  --text-dimmed: #524f6e;      /* Very dim placeholder */
+  --text-input: #c9c6e0;      /* Input text */
 
   /* ── Borders ───────────────────────────────────────────────────────── */
-  --border-subtle: rgba(255, 255, 255, 0.05);   /* border-white/5 */
-  --border: rgba(255, 255, 255, 0.10);           /* border-white/10 */
-  --border-hover: rgba(255, 255, 255, 0.15);
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border: rgba(255, 255, 255, 0.10);
+  --border-hover: rgba(255, 255, 255, 0.18);
 
-  /* ── Brand ─────────────────────────────────────────────────────────── */
-  --primary: #d946ef;
-  --primary-hover: #e879f9;
-  --primary-glow: rgba(217, 70, 239, 0.15);
-  --accent: #8b5cf6;
+  /* ── Brand — Datadog Purple ────────────────────────────────────────── */
+  --primary: #632CA6;
+  --primary-hover: #7c3aed;
+  --primary-glow: rgba(99, 44, 166, 0.15);
+  --accent: #5d90f6;
 
-  /* ── Status ────────────────────────────────────────────────────────── */
-  --status-active-bg: rgba(190, 18, 60, 0.25);   /* red incident bg */
+  /* ── Status — Datadog canonical status colors ──────────────────────── */
+  --status-green: #3dd682;
+  --status-yellow: #f5c740;
+  --status-red: #ea4e5e;
+  --status-blue: #5d90f6;
+  --status-active-bg: rgba(234, 78, 94, 0.18);
 }
 
 /* ── Light Mode ──────────────────────────────────────────────────────────── */
 .light {
-  --bg-app: #f8fafc;
+  --bg-app: #f4f4f8;
   --bg-card: #ffffff;
   --bg-modal: #ffffff;
-  --bg-inset: #f1f5f9;
+  --bg-inset: #eeeef4;
   --bg-elevated: #ffffff;
-  --bg-card-hover: #f1f5f9;
-  --bg-track: #e2e8f0;
-  --bg-input: #f1f5f9;
+  --bg-card-hover: #f0eff6;
+  --bg-track: #dcdae8;
+  --bg-input: #f0eff6;
   --bg-surface: rgba(0, 0, 0, 0.02);
-  --bg-surface-hover: rgba(0, 0, 0, 0.04);
+  --bg-surface-hover: rgba(0, 0, 0, 0.05);
 
-  --text-primary: #0f172a;
-  --text-secondary: #475569;
-  --text-muted: #64748b;
-  --text-dimmed: #94a3b8;
-  --text-input: #334155;
+  --text-primary: #1a1733;
+  --text-secondary: #5c5880;
+  --text-muted: #7a769a;
+  --text-dimmed: #a09cb8;
+  --text-input: #3a3660;
 
-  --border-subtle: #e2e8f0;
-  --border: #cbd5e1;
-  --border-hover: #94a3b8;
+  --border-subtle: #e4e2f0;
+  --border: #d0cee0;
+  --border-hover: #b0adc8;
 
-  --primary: #c026d3;
-  --primary-hover: #a21caf;
-  --primary-glow: rgba(192, 38, 211, 0.1);
-  --accent: #7c3aed;
+  --primary: #632CA6;
+  --primary-hover: #5320a0;
+  --primary-glow: rgba(99, 44, 166, 0.08);
+  --accent: #4a7cf5;
 
-  --status-active-bg: rgba(254, 202, 202, 0.5);
+  --status-active-bg: rgba(234, 78, 94, 0.10);
 }
 
 /* ── Base ─────────────────────────────────────────────────────────────────── */
 body {
   color: var(--text-primary);
   background: var(--bg-app);
-  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  transition: background-color 0.3s ease, color 0.3s ease;
+  font-family: 'Noto Sans', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  transition: background-color 0.2s ease, color 0.2s ease;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Monospace ─────────────────────────────────────────────────────────── */
+code, pre, .font-mono, kbd {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
 }
 
 /* ── Shimmer Loading Animation ───────────────────────────────────────────── */
@@ -89,9 +102,9 @@ body {
 }
 
 .shimmer-bg {
-  background: linear-gradient(90deg, 
-    var(--bg-card) 25%, 
-    var(--bg-card-hover) 50%, 
+  background: linear-gradient(90deg,
+    var(--bg-card) 25%,
+    var(--bg-card-hover) 50%,
     var(--bg-card) 75%
   );
   background-size: 200% 100%;
@@ -100,10 +113,35 @@ body {
 
 /* ── Smooth Theme Transitions ────────────────────────────────────────────── */
 *, *::before, *::after {
-  transition: background-color 0.3s ease, border-color 0.3s ease, color 0.15s ease;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.12s ease;
 }
 
 /* Disable transitions on animated elements to prevent conflicts */
 .animate-spin, .animate-pulse, [class*="animate-in"] {
   transition: none !important;
+}
+
+/* ── Custom Scrollbar — Datadog-style thin dark ──────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.10);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.10) transparent;
 }

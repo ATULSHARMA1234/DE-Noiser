@@ -102,6 +102,7 @@ from denoiser.api.dashboards import router as dashboards_router
 from denoiser.api.deployments import router as deployments_router
 from denoiser.api.integrations import router as integrations_router
 from denoiser.api.metrics import router as metrics_router
+from denoiser.api.monitors import router as monitors_router
 from denoiser.api.otlp import router as otlp_router
 from denoiser.api.query import router as query_router
 from denoiser.api.runbooks import router as runbooks_router
@@ -118,7 +119,7 @@ app.include_router(query_router)
 app.include_router(slo_router)
 app.include_router(dashboards_router)
 app.include_router(metrics_router)
-app.include_router(automation_router)
+app.include_router(monitors_router)
 app.include_router(runbooks_router)
 app.include_router(integrations_router)
 app.include_router(deployments_router)
@@ -486,12 +487,20 @@ async def ingest_logs(payload: IngestPayload, tenant_id: str = Depends(verify_in
 class LogQuery(BaseModel):
     query: str
     limit: int = 100
+    from_ts: int | None = None
+    to_ts: int | None = None
 
 @app.post("/v1/logs/query")
 def query_logs_api(payload: LogQuery, current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
     """Execute a Log Query Language (LQL) search against the unified ClickHouse log stream."""
     try:
-        results = clickhouse_store.query_logs(payload.query, limit=payload.limit, tenant_id=current_user.tenant_id)
+        results = clickhouse_store.query_logs(
+            payload.query, 
+            limit=payload.limit, 
+            tenant_id=current_user.tenant_id,
+            from_ts=payload.from_ts,
+            to_ts=payload.to_ts
+        )
         return {"status": "success", "count": len(results), "results": results}
     except Exception as e:
         logger.error(f"LQL Query failed: {e}")
