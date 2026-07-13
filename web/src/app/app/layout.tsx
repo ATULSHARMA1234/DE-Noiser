@@ -27,30 +27,71 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
  const { tasks, executeTask } = useTasks();
  const runningTasksCount = tasks.filter(t => t.status === 'running').length;
 
- // Dynamically append User Directory if user is ADMIN
- const navItems = [
+ // Grouped by the job each tool does, so a long list stays scannable.
+ // Three destinations are folded under the thing they belong to rather than
+ // sitting at top level: Analysis Runs is the plumbing behind Incidents, and
+ // Integrations / User Directory are both Settings. They stay one click away.
+ type NavChild = { name: string; path: string };
+ type NavItem = { name: string; path: string; icon: any; children?: NavChild[] };
+ const navSections: { label: string; items: NavItem[] }[] = [
+ {
+ label: 'Overview',
+ items: [
  { name: 'Command Center', path: '/app', icon: LayoutGrid },
  { name: 'Dashboards', path: '/app/dashboards', icon: LayoutGrid },
+ ],
+ },
+ {
+ label: 'Investigate',
+ items: [
  { name: 'Explore', path: '/app/explore', icon: Search },
- { name: 'Incidents', path: '/app/incidents', icon: ShieldAlert },
- { name: 'Traces', path: '/app/traces', icon: Activity },
- { name: 'Metrics', path: '/app/metrics', icon: Activity },
- { name: 'SLOs', path: '/app/slos', icon: Zap },
- { name: 'Runbooks', path: '/app/runbooks', icon: Play },
- { name: 'Notebooks', path: '/app/notebooks', icon: BookOpen },
  { name: 'Live Stream', path: '/app/live', icon: Terminal },
- { name: 'Analysis Runs', path: '/app/runs', icon: History },
+ { name: 'Traces', path: '/app/traces', icon: Activity },
+ { name: 'Notebooks', path: '/app/notebooks', icon: BookOpen },
+ ],
+ },
+ {
+ label: 'Analyze',
+ items: [
+ {
+ name: 'Incidents', path: '/app/incidents', icon: ShieldAlert,
+ children: [{ name: 'Analysis Runs', path: '/app/runs' }],
+ },
+ { name: 'Metrics', path: '/app/metrics', icon: Activity },
  { name: 'Topology', path: '/app/topology', icon: Network },
- { name: 'Alerts', path: '/app/alerts', icon: Bell },
+ ],
+ },
+ {
+ label: 'Reliability',
+ items: [
+ { name: 'SLOs', path: '/app/slos', icon: Zap },
  { name: 'Monitors', path: '/app/monitors', icon: Bell },
+ { name: 'Alerts', path: '/app/alerts', icon: Bell },
+ { name: 'Runbooks', path: '/app/runbooks', icon: Play },
+ ],
+ },
+ {
+ label: 'Configure',
+ items: [
  { name: 'Data Sources', path: '/app/sources', icon: Database },
- { name: 'Integrations', path: '/app/integrations', icon: Plug },
- { name: 'Settings', path: '/app/settings', icon: Settings },
+ {
+ name: 'Settings', path: '/app/settings', icon: Settings,
+ children: [
+ { name: 'Integrations', path: '/app/integrations' },
+ ...(user?.role === 'ADMIN'
+ ? [{ name: 'User Directory', path: '/app/users' }]
+ : []),
+ ],
+ },
+ ],
+ },
  ];
 
- if (user?.role === 'ADMIN') {
- navItems.push({ name: 'User Directory', path: '/app/users', icon: Users });
- }
+ // A parent stays lit while one of its folded children is the active route.
+ const isItemActive = (item: NavItem) =>
+ pathname === item.path ||
+ (!!pathname?.startsWith(item.path + '/') && item.path !== '/app') ||
+ !!item.children?.some((c) => pathname === c.path);
 
  const [showCommandPalette, setShowCommandPalette] = useState(false);
  const [paletteSearch, setPaletteSearch] = useState('');
@@ -171,13 +212,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
  }`}>
  
  {/* Logo Area */}
- <div className="h-14 flex items-center justify-between px-5 border-b border-[var(--border-subtle)] shrink-0">
- <div className="flex items-center gap-2.5">
- <Cpu size={20} className="text-[var(--primary)]" strokeWidth={2.5} />
- <h1 className="text-sm font-bold tracking-tight text-[var(--text-primary)]">SemanticOS</h1>
- </div>
+ <div className="h-14 flex items-center justify-between px-4 border-b border-[var(--border-subtle)] shrink-0">
+ <Link href="/app" className="flex items-center gap-2.5">
+ <span className="w-6 h-6 rounded-[3px] border border-[var(--primary-line)] bg-[var(--primary-dim)] flex items-center justify-center">
+ <span className="mono text-[13px] font-bold text-[var(--primary)] leading-none">S</span>
+ </span>
+ <h1 className="text-[14px] font-semibold tracking-tight text-[var(--text-primary)]">SemanticOS</h1>
+ </Link>
  {/* Close button on mobile */}
- <button 
+ <button
  onClick={() => setMobileSidebarOpen(false)}
  className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] md:hidden cursor-pointer bg-transparent border-none"
  >
@@ -186,34 +229,58 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
  </div>
 
  {/* Navigation */}
- <nav className="flex-1 flex flex-col gap-0.5 w-full px-2 py-4 overflow-y-auto">
- {navItems.map((item) => {
- const isActive = pathname === item.path || (pathname?.startsWith(item.path) && item.path !== '/app');
+ <nav className="flex-1 flex flex-col gap-4 w-full px-2.5 py-3 overflow-y-auto">
+ {navSections.map((section) => (
+ <div key={section.label}>
+ <div className="eyebrow px-2 mb-1.5">{section.label}</div>
+ <div className="flex flex-col gap-0.5">
+ {section.items.map((item) => {
+ const isActive = isItemActive(item);
  const Icon = item.icon;
- 
  return (
- <Link 
- key={item.name} 
- href={item.path} 
- className={`flex items-center gap-3 px-3 py-[7px] rounded transition-all text-[13px] font-medium relative ${
- isActive 
- ? 'text-[var(--text-primary)] bg-[var(--bg-surface-hover)]' 
- : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-hover)]'
+ <div key={item.name}>
+ <Link
+ href={item.path}
+ className={`flex items-center gap-2.5 px-2 h-8 rounded-[3px] transition-colors text-[13px] border-l-2 ${
+ isActive
+ ? 'text-[var(--primary)] bg-[var(--primary-dim)] border-[var(--primary)]'
+ : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-hover)] border-transparent'
  }`}
  >
- {isActive && <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-r-full bg-[var(--primary)]" />}
- <Icon size={16} strokeWidth={isActive ? 2.2 : 1.8} className={isActive ? 'text-[var(--primary)]' : 'text-[var(--text-muted)]'} />
+ <Icon size={15} strokeWidth={2} className={isActive ? 'text-[var(--primary)]' : ''} />
  {item.name}
  </Link>
+ {/* Folded children reveal once you're anywhere in the parent's area. */}
+ {item.children && item.children.length > 0 && isActive && (
+ <div className="ml-4 mt-0.5 flex flex-col border-l border-[var(--border-subtle)]">
+ {item.children.map((c) => (
+ <Link
+ key={c.path}
+ href={c.path}
+ className={`pl-3 h-7 flex items-center text-[12px] transition-colors ${
+ pathname === c.path
+ ? 'text-[var(--primary)]'
+ : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+ }`}
+ >
+ {c.name}
+ </Link>
+ ))}
+ </div>
+ )}
+ </div>
  );
  })}
+ </div>
+ </div>
+ ))}
  </nav>
 
  {/* Footer Status */}
- <div className="px-5 py-4 border-t border-[var(--border-subtle)]">
- <div className="flex items-center gap-2 text-[11px] font-medium text-[var(--text-muted)]">
+ <div className="px-4 py-3 border-t border-[var(--border-subtle)] shrink-0">
+ <div className="flex items-center gap-2 eyebrow">
  <span className="w-1.5 h-1.5 rounded-full bg-[var(--status-green)]" />
- Local Engine Online
+ Engine online · local
  </div>
  </div>
  </aside>
