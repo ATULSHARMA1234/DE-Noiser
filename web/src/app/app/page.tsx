@@ -565,7 +565,7 @@ export default function CommandCenter() {
  )) : (
  <li className="flex items-start gap-2.5">
  <span className="w-1.5 h-1.5 rounded-full bg-[var(--primary)] mt-1.5 shrink-0"></span>
- {data.intelligence.incident_summary}
+ {typeof data.intelligence.incident_summary === 'object' ? (data.intelligence.incident_summary?.summary || data.intelligence.incident_summary?.representative_log || JSON.stringify(data.intelligence.incident_summary)) : data.intelligence.incident_summary}
  </li>
  )
  ) : (
@@ -648,7 +648,7 @@ export default function CommandCenter() {
  </td>
  <td className="py-3 px-2 font-medium text-[var(--text-primary)] truncate max-w-[280px]" title={c.representative_template}>
  {c.keyword_flag && <span className="mr-1 text-[9px] font-bold text-red-400">🔴</span>}
- {c.summary !== "Analyzing..." ? c.summary : c.representative_template}
+ {(() => { const s = typeof c.summary === 'object' ? (c.summary?.summary || c.summary?.representative_log || '') : c.summary; return s && s !== 'Analyzing...' ? s : c.representative_template; })()}
  </td>
  <td className="py-3 text-[var(--text-secondary)] font-mono">{c.size.toLocaleString()}</td>
  <td className="py-3 font-bold">
