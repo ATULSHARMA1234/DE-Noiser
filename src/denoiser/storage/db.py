@@ -188,6 +188,7 @@ class MetricRule(Base):
     __tablename__ = "metric_rules"
 
     id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, index=True, nullable=True)  # nullable for backwards compat
     name = Column(String, nullable=False)
     query = Column(String, nullable=False)
     aggregation = Column(String, default="count")  # count, sum, avg, max, min
@@ -330,6 +331,18 @@ def init_db():
             try:
                 db.execute(text("ALTER TABLE dashboards ADD COLUMN default_time_range VARCHAR DEFAULT '1h'"))
                 db.execute(text("ALTER TABLE dashboards ADD COLUMN template_variables JSON DEFAULT '[]'"))
+                db.commit()
+            except Exception:
+                db.rollback()
+
+        # Issue #8: add tenant_id to metric_rules for proper multi-tenant isolation
+        try:
+            db.execute(text("SELECT tenant_id FROM metric_rules LIMIT 1"))
+        except Exception:
+            db.rollback()
+            try:
+                db.execute(text("ALTER TABLE metric_rules ADD COLUMN tenant_id INTEGER REFERENCES tenants(id)"))
+                db.execute(text("CREATE INDEX IF NOT EXISTS ix_metric_rules_tenant_id ON metric_rules (tenant_id)"))
                 db.commit()
             except Exception:
                 db.rollback()

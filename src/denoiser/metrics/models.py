@@ -11,6 +11,7 @@ class MetricRuleCreateSchema(BaseModel):
 
 class MetricRuleSchema(BaseModel):
     id: int
+    tenant_id: int | None = None
     name: str
     query: str
     aggregation: str
