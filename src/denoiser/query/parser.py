@@ -33,7 +33,8 @@ def parse_query(query_str: str) -> QueryNode:
     """
     # For a real implementation, we'd use pyparsing or similar.
     # This is a naive regex-based tokenization for the demo.
-    tokens = re.findall(r'([A-Za-z0-9_]+:[A-Za-z0-9_]+|"[^"]*"|\S+)', query_str)
+    # field:"quoted value" | field:bare-value (hyphens/dots/slashes ok) | "phrase" | word
+    tokens = re.findall(r'([A-Za-z0-9_]+:"[^"]*"|[A-Za-z0-9_]+:[^\s"]+|"[^"]*"|\S+)', query_str)
 
     if not tokens:
         return TextMatch("")
@@ -45,6 +46,8 @@ def parse_query(query_str: str) -> QueryNode:
             nodes.append(token)
         elif ":" in token and not token.startswith('"'):
             k, v = token.split(":", 1)
+            if len(v) >= 2 and v.startswith('"') and v.endswith('"'):
+                v = v[1:-1]  # strip quotes from field:"quoted value"
             nodes.append(FieldMatch(k, v))
         elif token.startswith('"') and token.endswith('"'):
             nodes.append(TextMatch(token[1:-1]))
