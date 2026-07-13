@@ -6,8 +6,8 @@ from sqlalchemy.orm import Session
 
 from denoiser.api.auth import User, require_role
 from denoiser.dashboards.models import DashboardCreateSchema, DashboardSchema, DashboardUpdateSchema
-from denoiser.storage.db import Dashboard as DBDashboard
 from denoiser.storage.db import AnalysisRun, Incident
+from denoiser.storage.db import Dashboard as DBDashboard
 from denoiser.storage.db import ServiceLevelObjective as SLO
 from denoiser.storage.db import get_db
 
@@ -40,7 +40,9 @@ def create_dashboard(payload: DashboardCreateSchema, db: Session = Depends(get_d
         tenant_id=current_user.tenant_id,
         layout=[layout_item for layout_item in payload.layout],
         widgets=[w.dict() for w in payload.widgets],
-        is_shared=payload.is_shared
+        is_shared=payload.is_shared,
+        default_time_range=payload.default_time_range,
+        template_variables=payload.template_variables
     )
     db.add(db_dash)
     db.commit()
@@ -64,6 +66,10 @@ def update_dashboard(dashboard_id: int, payload: DashboardUpdateSchema, db: Sess
         dashboard.widgets = [w.dict() for w in payload.widgets]
     if payload.is_shared is not None:
         dashboard.is_shared = payload.is_shared
+    if payload.default_time_range is not None:
+        dashboard.default_time_range = payload.default_time_range
+    if payload.template_variables is not None:
+        dashboard.template_variables = payload.template_variables
 
     db.commit()
     db.refresh(dashboard)
@@ -84,22 +90,24 @@ def delete_dashboard(dashboard_id: int, db: Session = Depends(get_db), current_u
 
 @router.get("/{dashboard_id}/widgets/{widget_id}/data")
 def get_widget_data(
-    dashboard_id: int,
-    widget_id: str,
+    dashboard_id: int, 
+    widget_id: str, 
     start_time: str | None = None,
     end_time: str | None = None,
     variables: str | None = None,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"])),
+    db: Session = Depends(get_db), 
+    current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))
 ):
     """
-    Fetch the underlying data for a specific widget.
-    In a real system, this would execute the widget's config (e.g. log query, metric query).
-    For this demo, we mock data based on widget type.
+    Fetch the underlying data for a specific widget, computed from the tenant's
+    own rows. Every branch is scoped to current_user.tenant_id.
     """
     dashboard = db.query(DBDashboard).filter(DBDashboard.id == dashboard_id).first()
     if not dashboard:
         raise HTTPException(status_code=404, detail="Dashboard not found")
+
+    if dashboard.tenant_id != current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="Not authorized to view this dashboard")
 
     widget = next((w for w in dashboard.widgets if w.get("id") == widget_id), None)
     if not widget:
@@ -116,40 +124,61 @@ def get_widget_data(
         return db.query(Incident).filter(Incident.tenant_id == tenant)
 
     if w_type == "metric_card":
-        # Each metric is computed live from real tenant data.
-        if metric == "total_incidents":
-            return {"value": _incident_q().count(), "label": "Total Incidents"}
-        if metric == "resolved_incidents":
-            return {"value": _incident_q().filter(Incident.status == "RESOLVED").count(), "label": "Resolved", "tone": "ok"}
-        if metric == "avg_impact":
-            avg = db.query(func.avg(Incident.impact_score)).filter(Incident.tenant_id == tenant).scalar()
-            return {"value": round(float(avg or 0), 2), "label": "Avg Impact", "tone": "warn"}
-        if metric == "slos_tracked":
-            return {"value": db.query(SLO).filter(SLO.tenant_id == tenant).count(), "label": "SLOs Tracked"}
-        if metric == "clusters_last_run":
-            run = db.query(AnalysisRun).filter(AnalysisRun.tenant_id == tenant).order_by(AnalysisRun.created_at.desc()).first()
-            return {"value": (run.cluster_count if run else 0), "label": "Clusters (last run)"}
-        if metric == "runs_total":
-            return {"value": db.query(AnalysisRun).filter(AnalysisRun.tenant_id == tenant).count(), "label": "Analysis Runs"}
-        # default: open incidents
-        return {"value": _incident_q().filter(Incident.status == "OPEN").count(), "label": "Open Incidents", "tone": "crit"}
+        metrics = {
+            "open_incidents": lambda: {
+                "value": _incident_q().filter(Incident.status == "OPEN").count(),
+                "label": "Open Incidents", "tone": "crit",
+            },
+            "total_incidents": lambda: {"value": _incident_q().count(), "label": "Total Incidents"},
+            "resolved_incidents": lambda: {
+                "value": _incident_q().filter(Incident.status == "RESOLVED").count(),
+                "label": "Resolved", "tone": "ok",
+            },
+            "avg_impact": lambda: {
+                "value": round(float(db.query(func.avg(Incident.impact_score))
+                                     .filter(Incident.tenant_id == tenant).scalar() or 0), 2),
+                "label": "Avg Impact", "tone": "warn",
+            },
+            "slos_tracked": lambda: {
+                "value": db.query(SLO).filter(SLO.tenant_id == tenant).count(),
+                "label": "SLOs Tracked",
+            },
+            "clusters_last_run": lambda: {
+                "value": (lambda r: r.cluster_count if r else 0)(
+                    db.query(AnalysisRun).filter(AnalysisRun.tenant_id == tenant)
+                    .order_by(AnalysisRun.created_at.desc()).first()
+                ),
+                "label": "Clusters (last run)",
+            },
+            "runs_total": lambda: {
+                "value": db.query(AnalysisRun).filter(AnalysisRun.tenant_id == tenant).count(),
+                "label": "Analysis Runs",
+            },
+        }
+        if metric and metric not in metrics:
+            raise HTTPException(status_code=400, detail=f"Unknown metric '{metric}'")
+        return metrics[metric or "open_incidents"]()
 
     elif w_type == "time_series":
-        # Incidents opened per day over the last 14 days (real).
+        # Incidents opened per day over the last 14 days.
         now = datetime.datetime.utcnow()
         days = 14
-        buckets = {(now.date() - datetime.timedelta(days=days - 1 - i)).isoformat(): 0 for i in range(days)}
         since = now - datetime.timedelta(days=days)
-        for (created,) in db.query(Incident.created_at).filter(Incident.tenant_id == tenant, Incident.created_at >= since):
-            if created:
-                key = created.date().isoformat()
-                if key in buckets:
-                    buckets[key] += 1
+        buckets = {(now.date() - datetime.timedelta(days=days - 1 - i)).isoformat(): 0 for i in range(days)}
+        rows = (
+            db.query(func.date(Incident.created_at), func.count(Incident.id))
+            .filter(Incident.tenant_id == tenant, Incident.created_at >= since)
+            .group_by(func.date(Incident.created_at))
+            .all()
+        )
+        for day, count in rows:
+            key = day.isoformat() if hasattr(day, "isoformat") else str(day)
+            if key in buckets:
+                buckets[key] = count
         points = [{"timestamp": k, "value": v} for k, v in buckets.items()]
         return {"series": [{"name": widget.get("title", "Incidents / day"), "data": points}]}
 
     elif w_type == "bar":
-        # Top domains by incident count (real).
         rows = (
             db.query(Incident.domain, func.count(Incident.id))
             .filter(Incident.tenant_id == tenant)
@@ -161,26 +190,36 @@ def get_widget_data(
         return {"bars": [{"label": (d or "unknown"), "value": c} for d, c in rows]}
 
     elif w_type == "gauge":
-        # Resolved ratio: share of incidents that are resolved (0..1) vs a target.
         total = _incident_q().count()
         resolved = _incident_q().filter(Incident.status == "RESOLVED").count()
         ratio = (resolved / total) if total else 0.0
-        return {"value": round(ratio, 4), "label": "Resolved Ratio", "target": 0.8, "resolved": resolved, "total": total}
+        return {"value": round(ratio, 4), "label": "Resolved Ratio", "target": 0.8,
+                "resolved": resolved, "total": total}
 
     elif w_type == "heatmap":
-        # Incidents by weekday (0=Mon) x hour (0..23) — reveals when things break.
-        cells = [[0] * 24 for _ in range(7)]
-        mx = 0
-        for (created,) in db.query(Incident.created_at).filter(Incident.tenant_id == tenant):
-            if created:
-                d, h = created.weekday(), created.hour
-                cells[d][h] += 1
-                mx = max(mx, cells[d][h])
-        flat = [{"day": d, "hour": h, "value": cells[d][h]} for d in range(7) for h in range(24) if cells[d][h]]
-        return {"cells": flat, "max": mx}
+        # Incidents by weekday x hour, aggregated in SQL and bounded to a window
+        # so this does not full-scan every incident the tenant has ever had.
+        days = int(config.get("days") or 30)
+        since = datetime.datetime.utcnow() - datetime.timedelta(days=days)
+        rows = (
+            db.query(
+                func.extract("dow", Incident.created_at).label("dow"),
+                func.extract("hour", Incident.created_at).label("hour"),
+                func.count(Incident.id),
+            )
+            .filter(Incident.tenant_id == tenant, Incident.created_at >= since)
+            .group_by("dow", "hour")
+            .all()
+        )
+        cells, mx = [], 0
+        for dow, hour, count in rows:
+            # Postgres dow: 0=Sunday..6=Saturday -> shift to 0=Monday..6=Sunday
+            day = (int(dow) - 1) % 7
+            cells.append({"day": day, "hour": int(hour), "value": count})
+            mx = max(mx, count)
+        return {"cells": cells, "max": mx, "days": days}
 
     elif w_type in ("incident_feed", "log_table"):
-        # Most recent incidents (real). log_table kept for back-compat.
         rows = _incident_q().order_by(Incident.created_at.desc()).limit(12).all()
         return {"incidents": [
             {
@@ -194,4 +233,4 @@ def get_widget_data(
             for r in rows
         ]}
 
-    return {"error": "Unknown widget type"}
+    raise HTTPException(status_code=400, detail=f"Unknown widget type '{widget.get('type')}'")

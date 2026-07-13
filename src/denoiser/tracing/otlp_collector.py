@@ -97,4 +97,4 @@ def process_otlp_traces(db: Session, payload: dict, tenant_id: str = "default_te
     if ch_traces:
         from denoiser.storage.clickhouse_store import ClickHouseStore
         ch_store = ClickHouseStore()
-        ch_store.insert_traces(ch_traces)
+        ch_store.insert_traces(ch_traces, tenant_id=tenant_id)

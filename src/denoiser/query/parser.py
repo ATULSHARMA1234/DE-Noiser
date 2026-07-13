@@ -2,6 +2,9 @@ import re
 from typing import Any
 
 
+FIELD_NAME = re.compile(r"^[A-Za-z0-9_]+$")
+
+
 class QueryNode:
     pass
 
@@ -39,13 +42,18 @@ def parse_query(query_str: str) -> QueryNode:
     if not tokens:
         return TextMatch("")
 
-    # very naive evaluator
     nodes = []
     for token in tokens:
         if token in ("AND", "OR"):
             nodes.append(token)
         elif ":" in token and not token.startswith('"'):
             k, v = token.split(":", 1)
+            # The field name is interpolated into SQL (JSONExtractString), so it
+            # must be a plain identifier. Anything else is treated as free text
+            # rather than trusted as a column/JSON key.
+            if not FIELD_NAME.match(k):
+                nodes.append(TextMatch(token))
+                continue
             if len(v) >= 2 and v.startswith('"') and v.endswith('"'):
                 v = v[1:-1]  # strip quotes from field:"quoted value"
             nodes.append(FieldMatch(k, v))
@@ -57,21 +65,26 @@ def parse_query(query_str: str) -> QueryNode:
     if not nodes:
         return TextMatch("")
 
-    # left associative building
-    current = nodes[0]
-    i = 1
-    while i < len(nodes) - 1:
-        op = nodes[i]
-        next_node = nodes[i+1]
-        if op == "AND":
-            current = AndNode(current, next_node)
-        elif op == "OR":
-            current = OrNode(current, next_node)
+    # Left-associative build. Terms sitting next to each other with no explicit
+    # operator are an implicit AND. The previous loop stopped at len(nodes)-1 and
+    # so silently dropped every term after the first in `level:ERROR timeout`,
+    # quietly widening the result set instead of erroring.
+    current = nodes[0] if not isinstance(nodes[0], str) else TextMatch("")
+    i = 1 if not isinstance(nodes[0], str) else 0
+    while i < len(nodes):
+        token = nodes[i]
+        if isinstance(token, str):  # AND / OR
+            if i + 1 >= len(nodes):
+                break  # dangling operator -- ignore
+            nxt = nodes[i + 1]
+            if isinstance(nxt, str):  # two operators in a row -- skip the first
+                i += 1
+                continue
+            current = AndNode(current, nxt) if token == "AND" else OrNode(current, nxt)
+            i += 2
         else:
-            # implicit AND
-            current = AndNode(current, op)
-            i -= 1
-        i += 2
+            current = AndNode(current, token)  # implicit AND
+            i += 1
 
     return current
 
@@ -104,6 +117,8 @@ def compile_to_sql(node: QueryNode, params: dict[str, Any]) -> str:
         if node.field in ("source", "level"):
             return f"{node.field} = {{{param_id}:String}}"
         else:
+            if not FIELD_NAME.match(node.field):
+                raise ValueError(f"Invalid field name: {node.field!r}")
             return f"JSONExtractString(raw_json, '{node.field}') = {{{param_id}:String}}"
 
     elif isinstance(node, AndNode):
