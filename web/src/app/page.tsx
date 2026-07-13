@@ -2,83 +2,165 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { Button, Card, Grid, Badge } from '@tremor/react';
-import { Zap, Database, ArrowRight, BrainCircuit } from 'lucide-react';
+import { ArrowRight, Network, Radio, ShieldCheck, Terminal } from 'lucide-react';
+
+const PILLARS = [
+  {
+    icon: Network, k: 'Cluster', title: 'Semantic clustering',
+    body: 'A hybrid Agglomerative + HDBSCAN pipeline collapses millions of raw lines into a handful of pattern templates — most of the noise is gone before a human ever looks.',
+  },
+  {
+    icon: Terminal, k: 'Triage', title: 'Local root-cause',
+    body: 'A causal proximity scorer ranks the patterns, and a local LLM writes the incident narrative and remediation hints. On your hardware; nothing leaves the building.',
+  },
+  {
+    icon: Radio, k: 'Watch', title: 'Live nervous system',
+    body: 'Tail live streams, track SLO error budgets, route alerts to Slack or PagerDuty, and auto-remediate with runbooks the moment drift appears.',
+  },
+];
+
+const RAW = [
+  '10:42:01 api-7f2  ERROR upstream timeout after 30000ms',
+  '10:42:01 api-3a9  ERROR upstream timeout after 30000ms',
+  '10:42:02 api-b21  ERROR upstream timeout after 30000ms',
+  '10:42:02 worker-1 WARN  retry backoff 4s attempt 3',
+  '10:42:03 api-c04  ERROR upstream timeout after 30000ms',
+  '10:42:03 cache-2  INFO  evict 1204 keys ttl expired',
+];
 
 export default function MarketingHome() {
- return (
- <div className="min-h-screen bg-[#020617] text-[#f8fafc] font-sans selection:bg-cyan-500/30 overflow-hidden">
- {/* Navbar */}
- <nav className="flex items-center justify-between p-6 px-12 border-b border-white/5 bg-slate-950/50 backdrop-blur-md sticky top-0 z-50">
- <div className="flex items-center gap-3">
- <div className="w-8 h-8 from-cyan-500 to-emerald-500 rounded-lg flex items-center justify-center">
- <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-white"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
- </div>
- <span className="font-black text-xl tracking-tighter">SemanticOS</span>
- </div>
- <div className="hidden md:flex gap-8 text-sm font-bold text-slate-400">
- <Link href="/product" className="hover:text-white transition-colors">Product</Link>
- <Link href="/security" className="hover:text-white transition-colors">Security & Privacy</Link>
- <Link href="/docs" className="hover:text-white transition-colors">Documentation</Link>
- </div>
- <Link href="/app">
- <Button className="bg-cyan-600 hover:bg-cyan-500 border-none font-bold">Launch Command Center</Button>
- </Link>
- </nav>
+  return (
+    <div className="min-h-screen bg-[var(--bg-app)] text-[var(--text-primary)] app-grid-bg">
+      {/* Nav */}
+      <nav className="flex items-center justify-between px-6 md:px-10 h-14 border-b border-[var(--border-subtle)] bg-[var(--bg-app)]/80 backdrop-blur-sm sticky top-0 z-50">
+        <div className="flex items-center gap-2.5">
+          <span className="w-6 h-6 rounded-[3px] border border-[var(--primary-line)] bg-[var(--primary-dim)] flex items-center justify-center">
+            <span className="mono text-[13px] font-bold text-[var(--primary)] leading-none">S</span>
+          </span>
+          <span className="text-[15px] font-semibold tracking-tight">SemanticOS</span>
+        </div>
+        <div className="hidden md:flex gap-7 text-[13px] text-[var(--text-secondary)]">
+          <Link href="/product" className="hover:text-[var(--text-primary)] transition-colors">Product</Link>
+          <Link href="/security" className="hover:text-[var(--text-primary)] transition-colors">Security</Link>
+          <Link href="/docs" className="hover:text-[var(--text-primary)] transition-colors">Docs</Link>
+        </div>
+        <Link href="/app" className="inline-flex items-center gap-1.5 h-8 px-3.5 rounded-[3px] bg-[var(--primary)] text-black text-[13px] font-medium hover:bg-[var(--primary-hover)] transition-colors">
+          Launch console <ArrowRight size={14} />
+        </Link>
+      </nav>
 
- {/* Hero Section */}
- <main className="max-w-6xl mx-auto px-6 pt-32 pb-24 text-center relative">
- <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-cyan-500/20 blur-[120px] rounded-full pointer-events-none"></div>
- <Badge color="emerald" className="mb-8 font-black uppercase tracking-widest text-[10px]">Private by Default • 100% Local</Badge>
- <h1 className="text-6xl md:text-8xl font-black tracking-tighter leading-[1.1] mb-8">
- The Autonomous <br/><span className="text-transparent bg-clip-text from-cyan-400 to-emerald-400">SRE Copilot</span>
- </h1>
- <p className="text-xl text-slate-400 max-w-3xl mx-auto mb-12 font-medium leading-relaxed">
- Collapse millions of logs into a handful of behaviors. Diagnose incidents locally with Llama 3.3. No cloud upload. No ingestion bill.
- </p>
- <div className="flex items-center justify-center gap-6">
- <Link href="/app">
- <Button size="xl" className="bg-cyan-600 hover:bg-cyan-500 border-none font-black text-lg px-8 py-4 shadow-[0_0_40px_rgba(6,182,212,0.4)]" icon={ArrowRight} iconPosition="right">
- Launch Command Center
- </Button>
- </Link>
- <Button size="xl" variant="secondary" className="bg-white/5 hover:bg-white/10 border-white/10 text-white font-bold text-lg px-8 py-4">
- Read the Docs
- </Button>
- </div>
- </main>
+      {/* Hero — the thesis is the collapse itself, so show it. */}
+      <main className="max-w-6xl mx-auto px-6 md:px-10 pt-16 md:pt-24 pb-20 grid lg:grid-cols-[1.05fr_1fr] gap-12 items-center">
+        <div>
+          <div className="inline-flex items-center gap-2 eyebrow mb-6">
+            <span className="w-1.5 h-1.5 rounded-full bg-[var(--status-green)]" /> Private by default · 100% local
+          </div>
+          <h1 className="text-4xl md:text-6xl font-semibold tracking-tight leading-[1.05] mb-5" style={{ textWrap: 'balance' } as React.CSSProperties}>
+            Turn a million log lines into a handful of causes.
+          </h1>
+          <p className="text-[15px] md:text-[16px] text-[var(--text-secondary)] leading-relaxed max-w-xl mb-8">
+            SemanticOS clusters noisy log streams into pattern templates, scores them by causal proximity, and writes the root-cause narrative with a local LLM. No cloud upload. No per-gigabyte ingestion bill.
+          </p>
+          <div className="flex items-center gap-3">
+            <Link href="/app" className="inline-flex items-center gap-2 h-10 px-5 rounded-[3px] bg-[var(--primary)] text-black text-[14px] font-medium hover:bg-[var(--primary-hover)] transition-colors">
+              Launch Command Center <ArrowRight size={16} />
+            </Link>
+            <Link href="/docs" className="inline-flex items-center h-10 px-5 rounded-[3px] border border-[var(--border)] text-[14px] text-[var(--text-primary)] hover:bg-[var(--bg-surface-hover)] transition-colors">
+              Read the docs
+            </Link>
+          </div>
+          <div className="flex flex-wrap gap-x-8 gap-y-2 mt-10 pt-6 border-t border-[var(--border-subtle)]">
+            {[['99%', 'noise reduced'], ['0', 'bytes to cloud'], ['<1min', 'analysis runs'], ['HDBSCAN', 'clustering core']].map(([n, l]) => (
+              <div key={l}>
+                <div className="text-[20px] font-semibold tnum text-[var(--text-primary)]">{n}</div>
+                <div className="eyebrow mt-0.5">{l}</div>
+              </div>
+            ))}
+          </div>
+        </div>
 
- {/* Pillars Section */}
- <section className="bg-slate-950/50 py-32 border-t border-white/5 relative z-10">
- <div className="max-w-7xl mx-auto px-6">
- <div className="text-center mb-20">
- <h2 className="text-4xl font-black tracking-tighter mb-4">The Three Enterprise Pillars</h2>
- <p className="text-slate-400 text-lg">Built from the ground up for massive scale and absolute privacy.</p>
- </div>
- <Grid numItemsMd={3} className="gap-8">
- <Card className="bg-slate-900/40 border border-white/5 rounded-3xl p-10 hover:border-cyan-500/30 transition-colors">
- <div className="w-14 h-14 bg-cyan-500/10 rounded-2xl flex items-center justify-center text-cyan-400 mb-8 border border-cyan-500/20"><BrainCircuit size={28} /></div>
- <h3 className="text-2xl font-black text-white mb-4">Neural Engine</h3>
- <p className="text-slate-400 leading-relaxed">Polars burst ingestion, semantic vectors, HDBSCAN noise annihilation, and intelligent sampling for sub-minute runs.</p>
- </Card>
- <Card className="bg-slate-900/40 border border-white/5 rounded-3xl p-10 hover:border-emerald-500/30 transition-colors">
- <div className="w-14 h-14 bg-emerald-500/10 rounded-2xl flex items-center justify-center text-emerald-400 mb-8 border border-emerald-500/20"><Zap size={28} /></div>
- <h3 className="text-2xl font-black text-white mb-4">Nervous System</h3>
- <p className="text-slate-400 leading-relaxed">Agent mode tails live streams with multi-source extensibility. Watch your infrastructure health via the live pulse feed.</p>
- </Card>
- <Card className="bg-slate-900/40 border border-white/5 rounded-3xl p-10 hover:border-blue-500/30 transition-colors">
- <div className="w-14 h-14 bg-blue-500/10 rounded-2xl flex items-center justify-center text-blue-400 mb-8 border border-blue-500/20"><Database size={28} /></div>
- <h3 className="text-2xl font-black text-white mb-4">Persistent Memory</h3>
- <p className="text-slate-400 leading-relaxed">Every incident is permanently recorded. Search historical snapshots, track recurrences, and build an organizational memory bank.</p>
- </Card>
- </Grid>
- </div>
- </section>
- 
- {/* Footer */}
- <footer className="border-t border-white/5 py-12 text-center text-slate-500 text-sm font-bold uppercase tracking-widest">
- SemanticOS © 2026 • Built for the Privacy-First Enterprise
- </footer>
- </div>
- );
+        {/* Denoise motif */}
+        <div className="border border-[var(--border-subtle)] rounded-[5px] bg-[var(--bg-card)] overflow-hidden">
+          <div className="flex items-center gap-2 px-3 h-8 border-b border-[var(--border-subtle)]">
+            <span className="w-2.5 h-2.5 rounded-full bg-[var(--status-red)]/60" />
+            <span className="w-2.5 h-2.5 rounded-full bg-[var(--status-yellow)]/60" />
+            <span className="w-2.5 h-2.5 rounded-full bg-[var(--status-green)]/60" />
+            <span className="eyebrow ml-2">semanticos · denoise</span>
+          </div>
+          <div className="p-3 grid gap-3">
+            <div>
+              <div className="eyebrow mb-1.5">Raw stream · 1,284,551 lines</div>
+              <div className="bg-[var(--bg-inset)] rounded-[3px] p-2.5 mono text-[10.5px] leading-relaxed text-[var(--text-muted)] space-y-0.5 overflow-hidden">
+                {RAW.map((l) => <div key={l} className="truncate">{l}</div>)}
+              </div>
+            </div>
+            <div className="flex items-center gap-2 eyebrow text-[var(--primary)]">
+              <ArrowRight size={12} /> cluster · score · triage
+            </div>
+            <div>
+              <div className="eyebrow mb-1.5">3 patterns · 1 root cause</div>
+              <div className="space-y-1.5">
+                <ClusterRow tone="red" id="C1" label="upstream timeout after 30000ms" count="41,208" score="0.94" />
+                <ClusterRow tone="yellow" id="C2" label="retry backoff attempt N" count="3,417" score="0.52" />
+                <ClusterRow tone="blue" id="C3" label="cache evict keys ttl expired" count="912" score="0.11" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      {/* How it works */}
+      <section className="border-t border-[var(--border-subtle)] bg-[var(--bg-app)]">
+        <div className="max-w-6xl mx-auto px-6 md:px-10 py-20">
+          <div className="eyebrow mb-2">How it works</div>
+          <h2 className="text-2xl md:text-3xl font-semibold tracking-tight mb-12" style={{ textWrap: 'balance' } as React.CSSProperties}>
+            Ingest, cluster, triage — end to end, on your infrastructure.
+          </h2>
+          <div className="grid md:grid-cols-3 gap-4">
+            {PILLARS.map(({ icon: Icon, k, title, body }) => (
+              <div key={k} className="border border-[var(--border-subtle)] rounded-[3px] bg-[var(--bg-card)] p-6 hover:border-[var(--border-hover)] transition-colors">
+                <div className="flex items-center justify-between mb-5">
+                  <span className="w-9 h-9 rounded-[3px] bg-[var(--primary-dim)] border border-[var(--primary-line)] flex items-center justify-center text-[var(--primary)]">
+                    <Icon size={18} />
+                  </span>
+                  <span className="eyebrow">{k}</span>
+                </div>
+                <h3 className="text-[15px] font-medium text-[var(--text-primary)] mb-2">{title}</h3>
+                <p className="text-[13px] text-[var(--text-secondary)] leading-relaxed">{body}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* CTA */}
+      <section className="border-t border-[var(--border-subtle)]">
+        <div className="max-w-6xl mx-auto px-6 md:px-10 py-16 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+          <div>
+            <h2 className="text-xl md:text-2xl font-semibold tracking-tight mb-1.5">Run it on your own logs.</h2>
+            <p className="text-[14px] text-[var(--text-secondary)]">Point it at a file or a live cluster and watch the noise collapse.</p>
+          </div>
+          <Link href="/app" className="inline-flex items-center gap-2 h-10 px-5 rounded-[3px] bg-[var(--primary)] text-black text-[14px] font-medium hover:bg-[var(--primary-hover)] transition-colors shrink-0">
+            <ShieldCheck size={16} /> Launch Command Center
+          </Link>
+        </div>
+      </section>
+
+      <footer className="border-t border-[var(--border-subtle)] py-8 text-center eyebrow">
+        SemanticOS © 2026 · privacy-first log intelligence
+      </footer>
+    </div>
+  );
+}
+
+function ClusterRow({ tone, id, label, count, score }: { tone: 'red' | 'yellow' | 'blue'; id: string; label: string; count: string; score: string }) {
+  const color = `var(--status-${tone})`;
+  return (
+    <div className="flex items-center gap-2.5 bg-[var(--bg-inset)] rounded-[3px] px-2.5 py-2">
+      <span className="mono text-[10px] px-1.5 h-5 flex items-center rounded-[2px]" style={{ color, background: 'var(--bg-surface-hover)' }}>{id}</span>
+      <span className="mono text-[11px] text-[var(--text-secondary)] truncate flex-1">{label}</span>
+      <span className="mono text-[10px] text-[var(--text-muted)] tnum">{count}</span>
+      <span className="mono text-[10px] tnum" style={{ color }}>{score}</span>
+    </div>
+  );
 }

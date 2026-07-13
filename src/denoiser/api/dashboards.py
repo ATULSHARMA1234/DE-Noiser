@@ -1,13 +1,13 @@
 import datetime
-import random
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from denoiser.api.auth import User, require_role
 from denoiser.dashboards.models import DashboardCreateSchema, DashboardSchema, DashboardUpdateSchema
+from denoiser.storage.db import AnalysisRun, Incident, ServiceLevelObjective, get_db
 from denoiser.storage.db import Dashboard as DBDashboard
-from denoiser.storage.db import get_db
 
 router = APIRouter(prefix="/dashboards", tags=["dashboards"])
 
@@ -97,44 +97,144 @@ def get_widget_data(
     current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))
 ):
     """
-    Fetch the underlying data for a specific widget.
-    In a real system, this would execute the widget's config (e.g. log query, metric query).
-    For this demo, we mock data based on widget type.
+    Fetch the underlying data for a specific widget, computed from the tenant's
+    own rows. Every branch is scoped to current_user.tenant_id.
     """
     dashboard = db.query(DBDashboard).filter(DBDashboard.id == dashboard_id).first()
     if not dashboard:
         raise HTTPException(status_code=404, detail="Dashboard not found")
 
+    if dashboard.tenant_id != current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="Not authorized to view this dashboard")
+
     widget = next((w for w in dashboard.widgets if w.get("id") == widget_id), None)
     if not widget:
         raise HTTPException(status_code=404, detail="Widget not found")
 
-    w_type = widget.get("type")
+    # Normalize legacy widget-type aliases to the canonical names.
+    _ALIAS = {"stat": "metric_card", "timeseries": "time_series", "logs": "incident_feed"}
+    w_type = _ALIAS.get(widget.get("type"), widget.get("type"))
+    config = widget.get("config") or {}
+    metric = config.get("metric")
+    tenant = current_user.tenant_id
+
+    def _incident_q():
+        return db.query(Incident).filter(Incident.tenant_id == tenant)
 
     if w_type == "metric_card":
-        return {"value": random.randint(100, 10000)}
+        metrics = {
+            "open_incidents": lambda: {
+                "value": _incident_q().filter(Incident.status == "OPEN").count(),
+                "label": "Open Incidents", "tone": "crit",
+            },
+            "total_incidents": lambda: {"value": _incident_q().count(), "label": "Total Incidents"},
+            "resolved_incidents": lambda: {
+                "value": _incident_q().filter(Incident.status == "RESOLVED").count(),
+                "label": "Resolved", "tone": "ok",
+            },
+            "avg_impact": lambda: {
+                "value": round(float(db.query(func.avg(Incident.impact_score))
+                                     .filter(Incident.tenant_id == tenant).scalar() or 0), 2),
+                "label": "Avg Impact", "tone": "warn",
+            },
+            "slos_tracked": lambda: {
+                "value": db.query(ServiceLevelObjective).filter(ServiceLevelObjective.tenant_id == tenant).count(),
+                "label": "SLOs Tracked",
+            },
+            "clusters_last_run": lambda: {
+                "value": (lambda r: r.cluster_count if r else 0)(
+                    db.query(AnalysisRun).filter(AnalysisRun.tenant_id == tenant)
+                    .order_by(AnalysisRun.created_at.desc()).first()
+                ),
+                "label": "Clusters (last run)",
+            },
+            "runs_total": lambda: {
+                "value": db.query(AnalysisRun).filter(AnalysisRun.tenant_id == tenant).count(),
+                "label": "Analysis Runs",
+            },
+        }
+        if metric and metric not in metrics:
+            raise HTTPException(status_code=400, detail=f"Unknown metric '{metric}'")
+        return metrics[metric or "open_incidents"]()
 
     elif w_type == "time_series":
-        # Generate some mock time series data
+        # Incidents opened per day over the last 14 days.
         now = datetime.datetime.utcnow()
-        points = []
-        for i in range(24):
-            points.append({
-                "timestamp": (now - datetime.timedelta(hours=24-i)).isoformat(),
-                "value": random.randint(10, 100)
-            })
-        return {"series": [{"name": widget.get("title", "Metric"), "data": points}]}
+        days = 14
+        since = now - datetime.timedelta(days=days)
+        buckets = {(now.date() - datetime.timedelta(days=days - 1 - i)).isoformat(): 0 for i in range(days)}
+        rows = (
+            db.query(func.date(Incident.created_at), func.count(Incident.id))
+            .filter(Incident.tenant_id == tenant, Incident.created_at >= since)
+            .group_by(func.date(Incident.created_at))
+            .all()
+        )
+        for day, count in rows:
+            key = day.isoformat() if hasattr(day, "isoformat") else str(day)
+            if key in buckets:
+                buckets[key] = count
+        points = [{"timestamp": k, "value": v} for k, v in buckets.items()]
+        return {"series": [{"name": widget.get("title", "Incidents / day"), "data": points}]}
 
-    elif w_type == "log_table":
-        # Mock recent logs
-        logs = []
-        for i in range(10):
-            logs.append({
-                "timestamp": datetime.datetime.utcnow().isoformat(),
-                "level": random.choice(["INFO", "ERROR", "WARN"]),
-                "service": "api-gateway",
-                "message": f"Sample log entry {i}"
-            })
-        return {"logs": logs}
+    elif w_type == "bar":
+        rows = (
+            db.query(Incident.domain, func.count(Incident.id))
+            .filter(Incident.tenant_id == tenant)
+            .group_by(Incident.domain)
+            .order_by(func.count(Incident.id).desc())
+            .limit(8)
+            .all()
+        )
+        return {"bars": [{"label": (d or "unknown"), "value": c} for d, c in rows]}
 
-    return {"error": "Unknown widget type"}
+    elif w_type == "gauge":
+        total = _incident_q().count()
+        resolved = _incident_q().filter(Incident.status == "RESOLVED").count()
+        ratio = (resolved / total) if total else 0.0
+        return {"value": round(ratio, 4), "label": "Resolved Ratio", "target": 0.8,
+                "resolved": resolved, "total": total}
+
+    elif w_type == "heatmap":
+        # Incidents by weekday x hour, aggregated in SQL and bounded to a window
+        # so this does not full-scan every incident the tenant has ever had.
+        try:
+            days = int(config.get("days") or 30)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="heatmap 'days' must be an integer")
+        # Keep the window genuinely bounded -- an arbitrarily large value would
+        # turn this back into a full scan of every incident the tenant ever had.
+        days = max(1, min(days, 90))
+        since = datetime.datetime.utcnow() - datetime.timedelta(days=days)
+        rows = (
+            db.query(
+                func.extract("dow", Incident.created_at).label("dow"),
+                func.extract("hour", Incident.created_at).label("hour"),
+                func.count(Incident.id),
+            )
+            .filter(Incident.tenant_id == tenant, Incident.created_at >= since)
+            .group_by("dow", "hour")
+            .all()
+        )
+        cells, mx = [], 0
+        for dow, hour, count in rows:
+            # Postgres dow: 0=Sunday..6=Saturday -> shift to 0=Monday..6=Sunday
+            day = (int(dow) - 1) % 7
+            cells.append({"day": day, "hour": int(hour), "value": count})
+            mx = max(mx, count)
+        return {"cells": cells, "max": mx, "days": days}
+
+    elif w_type in ("incident_feed", "log_table"):
+        rows = _incident_q().order_by(Incident.created_at.desc()).limit(12).all()
+        return {"incidents": [
+            {
+                "id": r.id,
+                "title": r.title,
+                "status": r.status,
+                "domain": r.domain,
+                "impact_score": r.impact_score,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in rows
+        ]}
+
+    raise HTTPException(status_code=400, detail=f"Unknown widget type '{widget.get('type')}'")

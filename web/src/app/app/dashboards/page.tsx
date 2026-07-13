@@ -70,7 +70,7 @@ export default function DashboardsPage() {
  }
  };
 
- const fetchWidgetData = async (dashId: number, widgetId: string) => {
+ async function fetchWidgetData(dashId: number, widgetId: string) {
  try {
  const data = await apiFetch(`/dashboards/${dashId}/widgets/${widgetId}/data?start_time=${globalTimeRange}`);
  setWidgetDataCache(prev => ({ ...prev, [widgetId]: data }));

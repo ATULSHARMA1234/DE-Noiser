@@ -36,7 +36,7 @@ export default function ExplorePage() {
  handleSearch(undefined, query, selectedFile); // Initial search
  }, [timeRange]);
 
- const fetchFacets = async (fileOverride?: string) => {
+ async function fetchFacets(fileOverride?: string) {
  const activeFile = fileOverride ?? selectedFile;
  try {
  const params = new URLSearchParams();
@@ -54,7 +54,7 @@ export default function ExplorePage() {
  }
  };
 
- const fetchLogFiles = async () => {
+ async function fetchLogFiles() {
  try {
  const data = await apiFetch('/query/log-files');
  setLogFiles(data?.files || []);
@@ -63,7 +63,7 @@ export default function ExplorePage() {
  }
  };
 
- const fetchSavedQueries = async () => {
+ async function fetchSavedQueries() {
  try {
  const data = await apiFetch('/query/saved');
  setSavedQueries(data || []);
@@ -72,7 +72,7 @@ export default function ExplorePage() {
  }
  };
 
- const handleSearch = async (e?: React.FormEvent, overrideQuery?: string, fileOverride?: string) => {
+ async function handleSearch(e?: React.FormEvent, overrideQuery?: string, fileOverride?: string) {
  if (e) e.preventDefault();
  const activeQuery = (overrideQuery ?? query).trim();
  const activeFile = fileOverride ?? selectedFile;

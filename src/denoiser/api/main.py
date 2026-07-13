@@ -89,7 +89,7 @@ app.add_middleware(
     allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-    allow_headers=["Authorization", "Content-Type", "X-API-Key"],
+    allow_headers=["Authorization", "Content-Type", "X-API-Key", "Bypass-Tunnel-Reminder"],
 )
 app.add_middleware(RateLimitMiddleware, max_requests=100, window_seconds=60)
 app.add_middleware(CorrelationIDMiddleware)
@@ -97,7 +97,6 @@ app.add_middleware(CorrelationIDMiddleware)
 from denoiser.api.alerts import router as alerts_router
 from denoiser.api.audit import AuditMiddleware
 from denoiser.api.audit import router as audit_router
-from denoiser.api.automation import router as automation_router
 from denoiser.api.dashboards import router as dashboards_router
 from denoiser.api.deployments import router as deployments_router
 from denoiser.api.integrations import router as integrations_router

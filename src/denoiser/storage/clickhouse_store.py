@@ -92,6 +92,9 @@ class ClickHouseStore:
             return False
 
         try:
+            # tenant_id is a String column in ClickHouse; callers may pass an int
+            # tenant id (e.g. Tenant.id). Coerce so the binary insert doesn't crash.
+            tenant_id = str(tenant_id)
             # Flatten log dicts to tuples matching schema
             data = []
             for log in logs:
@@ -121,6 +124,8 @@ class ClickHouseStore:
             return False
 
         try:
+            # tenant_id is a String column; callers may pass an int Tenant.id.
+            tenant_id = str(tenant_id)
             # Insert tenant_id to the beginning of each tuple
             traces_data_with_tenant = [(tenant_id, *row) for row in traces_data]
 
@@ -147,7 +152,7 @@ class ClickHouseStore:
 
         if tenant_id:
             sql_where = f"tenant_id = {{tenant_id:String}} AND ({sql_where})"
-            params['tenant_id'] = tenant_id
+            params['tenant_id'] = str(tenant_id)
 
         if from_ts is not None:
             sql_where += " AND timestamp >= toDateTime64({from_ts:Float64}, 3, 'UTC')"
@@ -189,7 +194,7 @@ class ClickHouseStore:
         sql_where = "1=1"
         if tenant_id:
             sql_where += " AND tenant_id = {tenant_id:String}"
-            params['tenant_id'] = tenant_id
+            params['tenant_id'] = str(tenant_id)
 
         if from_ts is not None:
             sql_where += " AND timestamp >= toDateTime64({from_ts:Float64}, 3, 'UTC')"
@@ -228,7 +233,7 @@ class ClickHouseStore:
 
         if tenant_id:
             sql_where = f"tenant_id = {{tenant_id:String}} AND ({sql_where})"
-            params['tenant_id'] = tenant_id
+            params['tenant_id'] = str(tenant_id)
 
         if from_ts is not None:
             sql_where += " AND timestamp >= toDateTime64({from_ts:Float64}, 3, 'UTC')"

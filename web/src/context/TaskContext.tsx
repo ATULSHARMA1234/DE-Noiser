@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useRef, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useRef, useEffect, ReactNode } from 'react';
 import { useToast } from './ToastContext';
 
 export type TaskStatus = 'running' | 'success' | 'error';
@@ -27,9 +27,13 @@ const TaskContext = createContext<TaskContextType | undefined>(undefined);
 export function TaskProvider({ children }: { children: ReactNode }) {
   const [tasks, setTasks] = useState<BackgroundTask[]>([]);
   const { toast } = useToast();
-  // Keep a ref so the async callbacks always see the latest tasks array
+  // Keep a ref so the async callbacks always see the latest tasks array.
+  // Written in an effect rather than during render: mutating a ref while
+  // rendering is not allowed (and can leave the ref stale on a bailed render).
   const tasksRef = useRef<BackgroundTask[]>([]);
-  tasksRef.current = tasks;
+  useEffect(() => {
+    tasksRef.current = tasks;
+  }, [tasks]);
 
   const executeTask = (id: string, title: string, promise: Promise<any>) => {
     // Prevent duplicate: if a task with this ID is already running, skip
