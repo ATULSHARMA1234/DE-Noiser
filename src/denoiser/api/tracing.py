@@ -16,6 +16,7 @@ from denoiser.tracing.otlp_collector import process_otlp_traces
 router = APIRouter(prefix="/traces", tags=["tracing"])
 
 import contextlib
+from datetime import UTC
 
 from fastapi import Header
 
@@ -122,13 +123,13 @@ def list_traces(from_ts: int | None = None, to_ts: int | None = None, limit: int
 
     # In-memory fallback from demo file
     demo_traces = _load_demo_traces()
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     filtered = []
     for t in demo_traces:
         ts = datetime.fromisoformat(t["start_time"])
         if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=timezone.utc)
+            ts = ts.replace(tzinfo=UTC)
         ts_ms = ts.timestamp() * 1000
 
         if from_ts is not None and ts_ms < from_ts:

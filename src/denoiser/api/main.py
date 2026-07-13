@@ -97,7 +97,6 @@ app.add_middleware(CorrelationIDMiddleware)
 from denoiser.api.alerts import router as alerts_router
 from denoiser.api.audit import AuditMiddleware
 from denoiser.api.audit import router as audit_router
-from denoiser.api.automation import router as automation_router
 from denoiser.api.dashboards import router as dashboards_router
 from denoiser.api.deployments import router as deployments_router
 from denoiser.api.integrations import router as integrations_router

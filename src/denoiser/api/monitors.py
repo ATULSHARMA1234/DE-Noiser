@@ -1,10 +1,11 @@
 from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from typing import Optional
-from denoiser.storage.db import Monitor, get_db
+from sqlalchemy.orm import Session
+
 from denoiser.api.auth import User, require_role
+from denoiser.storage.db import Monitor, get_db
 
 router = APIRouter(prefix="/monitors", tags=["monitors"])
 
@@ -12,21 +13,21 @@ class MonitorCreateSchema(BaseModel):
     name: str
     type: str = "log alert"
     query: str
-    message: Optional[str] = None
+    message: str | None = None
     severity: str = "warning"
-    threshold_critical: Optional[float] = None
-    threshold_warning: Optional[float] = None
+    threshold_critical: float | None = None
+    threshold_warning: float | None = None
     enabled: bool = True
 
 class MonitorUpdateSchema(BaseModel):
-    name: Optional[str] = None
-    type: Optional[str] = None
-    query: Optional[str] = None
-    message: Optional[str] = None
-    severity: Optional[str] = None
-    threshold_critical: Optional[float] = None
-    threshold_warning: Optional[float] = None
-    enabled: Optional[bool] = None
+    name: str | None = None
+    type: str | None = None
+    query: str | None = None
+    message: str | None = None
+    severity: str | None = None
+    threshold_critical: float | None = None
+    threshold_warning: float | None = None
+    enabled: bool | None = None
 
 @router.get("", response_model=list[dict[str, Any]])
 def list_monitors(db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from denoiser.api.auth import User, require_role
 from denoiser.query.models import QueryCreateSchema, QueryRequestSchema, SavedQuerySchema
-from denoiser.query.parser import compile_to_sql, evaluate_in_memory, parse_query, parse_plain_text_log
+from denoiser.query.parser import compile_to_sql, evaluate_in_memory, parse_plain_text_log, parse_query
 from denoiser.storage.clickhouse_store import ClickHouseStore
 from denoiser.storage.db import SavedQuery, get_db
 
@@ -36,7 +36,7 @@ def _get_all_memory_logs(from_ts: int | None = None, to_ts: int | None = None, f
     for log_file in log_files:
         fname = log_file.name
         try:
-            with open(log_file, "r", encoding="utf-8") as f:
+            with open(log_file, encoding="utf-8") as f:
                 for line in f:
                     if not line.strip():
                         continue

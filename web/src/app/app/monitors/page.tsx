@@ -28,7 +28,7 @@ export default function MonitorsPage() {
  fetchMonitors();
  }, []);
 
- const fetchMonitors = async () => {
+ async function fetchMonitors() {
  setLoading(true);
  try {
  const data = await apiFetch('/monitors');

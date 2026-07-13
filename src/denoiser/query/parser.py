@@ -1,7 +1,6 @@
 import re
 from typing import Any
 
-
 FIELD_NAME = re.compile(r"^[A-Za-z0-9_]+$")
 
 
@@ -142,7 +141,7 @@ def parse_plain_text_log(line: str) -> dict[str, Any] | None:
     # Format: 2026-05-29T10:15:00Z INFO [service-name] message...
     # Or: 2026-05-17 17:15:00 [info]: message
     import re
-    from datetime import datetime, UTC
+    from datetime import UTC, datetime
     
     # Try ISO8601 with level and source
     # Regex for: 2026-05-08T21:23:59.516165Z INFO  [API Gateway] 200 OK GET...

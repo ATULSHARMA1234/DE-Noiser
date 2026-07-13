@@ -515,7 +515,6 @@ def evaluate_slos():
                     if len(recent_points) >= 10:
                         recent_points.reverse() # chronological
 
-                        import numpy as np
                         from statsmodels.tsa.holtwinters import ExponentialSmoothing
 
                         y_values = [p.value for p in recent_points]

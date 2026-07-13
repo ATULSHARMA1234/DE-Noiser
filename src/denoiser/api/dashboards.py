@@ -6,10 +6,8 @@ from sqlalchemy.orm import Session
 
 from denoiser.api.auth import User, require_role
 from denoiser.dashboards.models import DashboardCreateSchema, DashboardSchema, DashboardUpdateSchema
-from denoiser.storage.db import AnalysisRun, Incident
+from denoiser.storage.db import AnalysisRun, Incident, ServiceLevelObjective, get_db
 from denoiser.storage.db import Dashboard as DBDashboard
-from denoiser.storage.db import ServiceLevelObjective as SLO
-from denoiser.storage.db import get_db
 
 router = APIRouter(prefix="/dashboards", tags=["dashboards"])
 
@@ -140,7 +138,7 @@ def get_widget_data(
                 "label": "Avg Impact", "tone": "warn",
             },
             "slos_tracked": lambda: {
-                "value": db.query(SLO).filter(SLO.tenant_id == tenant).count(),
+                "value": db.query(ServiceLevelObjective).filter(ServiceLevelObjective.tenant_id == tenant).count(),
                 "label": "SLOs Tracked",
             },
             "clusters_last_run": lambda: {
