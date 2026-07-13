@@ -35,64 +35,97 @@ async def run_ingestion_worker():
     logger.info("Connected to Redpanda/Kafka.")
 
     try:
-        # Size-or-time batching. Flushing only at BATCH_SIZE would strand any
-        # remainder (< BATCH_SIZE) in memory indefinitely. Each topic keeps its
-        # own linger deadline: a shared deadline lets a hot topic (which keeps
-        # resetting it by flushing on size) starve a quiet one indefinitely.
-        batch_logs = []
-        batch_traces = []
+        # At-least-once delivery.
+        #
+        # Each topic keeps its own batch, its own linger deadline (a shared
+        # deadline lets a hot topic, which keeps resetting it by flushing on
+        # size, starve a quiet one), and its own pending offsets.
+        #
+        # A batch is only dropped from memory once ClickHouse has accepted it,
+        # and offsets are committed per-partition for exactly what was written.
+        # Clearing a failed batch would lose it for good: not committing does not
+        # rewind the consumer's fetch position, so those records would never be
+        # redelivered. On failure we keep the batch and retry.
         BATCH_SIZE = 1000
         LINGER_SECONDS = 2.0
-        now = time.monotonic()
-        last_logs_flush = now
-        last_traces_flush = now
+        MAX_BATCH = BATCH_SIZE * 10  # backpressure ceiling while retrying
+
+        # topic -> {"batch": [...], "offsets": {TopicPartition: last_offset}, "last": monotonic, "fails": int}
+        state = {
+            "logs_topic": {"batch": [], "offsets": {}, "last": time.monotonic(), "fails": 0},
+            "traces_topic": {"batch": [], "offsets": {}, "last": time.monotonic(), "fails": 0},
+        }
+        flushers = {"logs_topic": lambda b: _flush_logs(ch_store, b), "traces_topic": _flush_traces}
 
         while True:
             records = await consumer.getmany(timeout_ms=int(LINGER_SECONDS * 1000))
 
-            for _tp, msgs in records.items():
+            for tp, msgs in records.items():
+                st = state.get(tp.topic)
+                if st is None:
+                    continue
                 for msg in msgs:
                     try:
                         payload = json.loads(msg.value.decode("utf-8"))
                         tenant_id = payload.pop("_tenant_id", "default_tenant")
-                        if msg.topic == "logs_topic":
-                            batch_logs.append((payload, tenant_id))
-                        elif msg.topic == "traces_topic":
-                            batch_traces.append((payload, tenant_id))
+                        st["batch"].append((payload, tenant_id))
                     except Exception as e:
-                        logger.error(f"Failed to process message from {msg.topic}: {e}")
+                        # A malformed message must not stall the partition; skip it
+                        # but still acknowledge it so we don't spin on it forever.
+                        logger.error(f"Skipping unparseable message from {tp.topic}: {e}")
+                    # Track the highest offset we've taken responsibility for.
+                    st["offsets"][tp] = max(st["offsets"].get(tp, -1), msg.offset)
 
-            now = time.monotonic()
-            logs_due = batch_logs and (
-                len(batch_logs) >= BATCH_SIZE or (now - last_logs_flush) >= LINGER_SECONDS
-            )
-            traces_due = batch_traces and (
-                len(batch_traces) >= BATCH_SIZE or (now - last_traces_flush) >= LINGER_SECONDS
-            )
+            for topic, st in state.items():
+                if not st["batch"]:
+                    continue
+                now = time.monotonic()
+                due = len(st["batch"]) >= BATCH_SIZE or (now - st["last"]) >= LINGER_SECONDS
+                if not due:
+                    continue
 
-            ok = True
-            if logs_due:
-                ok &= _flush_logs(ch_store, batch_logs)
-                batch_logs = []
-                last_logs_flush = time.monotonic()
+                if flushers[topic](st["batch"]):
+                    # Durably written -- commit exactly these partitions/offsets.
+                    if st["offsets"]:
+                        await consumer.commit(
+                            {tp: off + 1 for tp, off in st["offsets"].items()}
+                        )
+                    st["batch"] = []
+                    st["offsets"] = {}
+                    st["fails"] = 0
+                else:
+                    # Keep the batch and the offsets; retry on the next cycle.
+                    st["fails"] += 1
+                    logger.error(
+                        f"{topic}: flush failed (attempt {st['fails']}), "
+                        f"retaining {len(st['batch'])} records for retry"
+                    )
+                    if len(st["batch"]) > MAX_BATCH:
+                        # Stop pulling more of a topic we cannot write; pausing keeps
+                        # the data in Kafka instead of growing the heap without bound.
+                        paused = [tp for tp in st["offsets"]]
+                        if paused:
+                            consumer.pause(*paused)
+                            logger.error(f"{topic}: paused {len(paused)} partition(s) -- ClickHouse not accepting writes")
+                    await asyncio.sleep(min(30.0, 2.0 * st["fails"]))
+                st["last"] = time.monotonic()
 
-            if traces_due:
-                ok &= _flush_traces(batch_traces)
-                batch_traces = []
-                last_traces_flush = time.monotonic()
-
-            # Advance offsets only once everything we consumed is safely stored.
-            # On failure we leave the offsets where they are and let the batch be
-            # redelivered rather than acknowledging data we dropped.
-            if (logs_due or traces_due) and ok:
-                await consumer.commit()
+            # Resume anything we paused once its backlog has drained.
+            for topic, st in state.items():
+                if st["fails"] == 0 and not st["batch"]:
+                    resumable = [tp for tp in consumer.paused() if tp.topic == topic]
+                    if resumable:
+                        consumer.resume(*resumable)
 
     finally:
-        # Flush remaining
-        if batch_logs:
-            _flush_logs(ch_store, batch_logs)
-        if batch_traces:
-            _flush_traces(batch_traces)
+        # Flush what's left and commit it, otherwise a graceful restart replays
+        # (and duplicates) the last uncommitted window.
+        try:
+            for topic, st in state.items():
+                if st["batch"] and flushers[topic](st["batch"]) and st["offsets"]:
+                    await consumer.commit({tp: off + 1 for tp, off in st["offsets"].items()})
+        except Exception as e:
+            logger.error(f"Failed to flush/commit on shutdown: {e}")
         await consumer.stop()
 
 def _flush_logs(ch_store, batch_logs) -> bool:

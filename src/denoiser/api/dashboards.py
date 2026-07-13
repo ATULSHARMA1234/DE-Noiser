@@ -199,7 +199,13 @@ def get_widget_data(
     elif w_type == "heatmap":
         # Incidents by weekday x hour, aggregated in SQL and bounded to a window
         # so this does not full-scan every incident the tenant has ever had.
-        days = int(config.get("days") or 30)
+        try:
+            days = int(config.get("days") or 30)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="heatmap 'days' must be an integer")
+        # Keep the window genuinely bounded -- an arbitrarily large value would
+        # turn this back into a full scan of every incident the tenant ever had.
+        days = max(1, min(days, 90))
         since = datetime.datetime.utcnow() - datetime.timedelta(days=days)
         rows = (
             db.query(

@@ -94,7 +94,7 @@ def execute_query(payload: QueryRequestSchema, current_user: User = Depends(requ
 
     if clickhouse_store.client:
         try:
-            params = {'tenant_id': current_user.tenant_id}
+            params = {'tenant_id': str(current_user.tenant_id)}
             sql_where = compile_to_sql(ast, params)
             sql_where = f"tenant_id = {{tenant_id:String}} AND ({sql_where})"
 

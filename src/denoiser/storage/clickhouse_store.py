@@ -194,7 +194,7 @@ class ClickHouseStore:
         sql_where = "1=1"
         if tenant_id:
             sql_where += " AND tenant_id = {tenant_id:String}"
-            params['tenant_id'] = tenant_id
+            params['tenant_id'] = str(tenant_id)
 
         if from_ts is not None:
             sql_where += " AND timestamp >= toDateTime64({from_ts:Float64}, 3, 'UTC')"
