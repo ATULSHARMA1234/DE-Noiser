@@ -92,6 +92,9 @@ class ClickHouseStore:
             return False
 
         try:
+            # tenant_id is a String column in ClickHouse; callers may pass an int
+            # tenant id (e.g. Tenant.id). Coerce so the binary insert doesn't crash.
+            tenant_id = str(tenant_id)
             # Flatten log dicts to tuples matching schema
             data = []
             for log in logs:

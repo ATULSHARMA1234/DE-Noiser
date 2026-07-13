@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import time
 
 from aiokafka import AIOKafkaConsumer
 
@@ -30,36 +31,43 @@ async def run_ingestion_worker():
     logger.info("Connected to Redpanda/Kafka.")
 
     try:
-        # Simple batching mechanism
+        # Size-or-time batching. Flushing only at BATCH_SIZE would strand any
+        # remainder (< BATCH_SIZE) in memory indefinitely — those logs would never
+        # reach ClickHouse until the process shut down. The linger deadline makes
+        # sure a partial batch is still written promptly.
         batch_logs = []
         batch_traces = []
         BATCH_SIZE = 1000
+        LINGER_SECONDS = 2.0
+        last_flush = time.monotonic()
 
-        async for msg in consumer:
-            topic = msg.topic
-            try:
-                payload = json.loads(msg.value.decode('utf-8'))
-                tenant_id = payload.pop("_tenant_id", "default_tenant")
+        while True:
+            # Wait up to LINGER for more records, then flush whatever we have.
+            records = await consumer.getmany(timeout_ms=int(LINGER_SECONDS * 1000))
 
-                if topic == "logs_topic":
-                    # Attach tenant_id back if it's missing or handle it
-                    batch_logs.append((payload, tenant_id))
+            for _tp, msgs in records.items():
+                for msg in msgs:
+                    try:
+                        payload = json.loads(msg.value.decode("utf-8"))
+                        tenant_id = payload.pop("_tenant_id", "default_tenant")
+                        if msg.topic == "logs_topic":
+                            batch_logs.append((payload, tenant_id))
+                        elif msg.topic == "traces_topic":
+                            batch_traces.append((payload, tenant_id))
+                    except Exception as e:
+                        logger.error(f"Failed to process message from {msg.topic}: {e}")
 
-                    if len(batch_logs) >= BATCH_SIZE:
-                        # Flush logs
-                        _flush_logs(ch_store, batch_logs)
-                        batch_logs = []
+            due = (time.monotonic() - last_flush) >= LINGER_SECONDS
 
-                elif topic == "traces_topic":
-                    batch_traces.append((payload, tenant_id))
+            if batch_logs and (len(batch_logs) >= BATCH_SIZE or due):
+                _flush_logs(ch_store, batch_logs)
+                batch_logs = []
+                last_flush = time.monotonic()
 
-                    if len(batch_traces) >= BATCH_SIZE:
-                        # Flush traces
-                        _flush_traces(batch_traces)
-                        batch_traces = []
-
-            except Exception as e:
-                logger.error(f"Failed to process message from {topic}: {e}")
+            if batch_traces and (len(batch_traces) >= BATCH_SIZE or due):
+                _flush_traces(batch_traces)
+                batch_traces = []
+                last_flush = time.monotonic()
 
     finally:
         # Flush remaining
