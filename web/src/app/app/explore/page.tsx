@@ -7,6 +7,16 @@ import { useTimeRange } from '@/context/TimeRangeContext';
 import { Search, Save, History, Play, Terminal, Database, Clock, ChevronRight, Activity, Pause, Filter, X } from 'lucide-react';
 import { BarChart, Bar, ResponsiveContainer, XAxis, YAxis, Tooltip } from 'recharts';
 
+// Severity-ordered so the stack reads worst-on-top.
+const LEVEL_ORDER = ['FATAL', 'ERROR', 'WARN', 'INFO', 'DEBUG'];
+const LEVEL_COLOR: Record<string, string> = {
+ FATAL: 'var(--signal-alt)',
+ ERROR: 'var(--signal-crit)',
+ WARN: 'var(--signal-warn)',
+ INFO: 'var(--signal-info)',
+ DEBUG: 'var(--text-muted)',
+};
+
 export default function ExplorePage() {
  const { toast } = useToast();
  const { timeRange } = useTimeRange();
@@ -166,6 +176,12 @@ export default function ExplorePage() {
  handleSearch(undefined, query, val);
  };
 
+ // Only stack the levels the API actually returned for this result set, in
+ // severity order — hardcoding all five would draw empty series.
+ const activeLevels = LEVEL_ORDER.filter((l) =>
+ histogram.some((b: any) => (b?.[l] ?? 0) > 0)
+ );
+
  return (
  <div className="flex flex-col h-[calc(100vh-80px)] space-y-6">
  <div className="flex items-center justify-between">
@@ -177,7 +193,7 @@ export default function ExplorePage() {
 
  <div className="flex gap-6 h-full min-h-0">
  {/* Main query area */}
- <div className="flex-1 flex flex-col h-full min-w-0 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-hidden">
+ <div className="flex-1 flex flex-col h-full min-w-0 bg-[var(--bg-card)] border border-[var(--border)] rounded-[3px] overflow-hidden">
  
  {/* Query Bar */}
  <div className="p-4 border-b border-[var(--border)] bg-[var(--bg-app)]">
@@ -185,7 +201,7 @@ export default function ExplorePage() {
  <select
  value={selectedFile}
  onChange={(e) => handleFileChange(e.target.value)}
- className="bg-[var(--bg-card)] border border-[var(--border)] rounded px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-blue-500 min-w-[200px] max-w-[280px]"
+ className="bg-[var(--bg-card)] border border-[var(--border)] rounded px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--primary-line)] min-w-[200px] max-w-[280px]"
  >
  <option value="">All Log Files</option>
  {logFiles.map((f) => (
@@ -195,7 +211,7 @@ export default function ExplorePage() {
  ))}
  </select>
 
- <div className="relative flex-1 flex items-center bg-[var(--bg-card)] border border-[var(--border)] rounded overflow-hidden focus-within:ring-1 focus-within:ring-blue-500">
+ <div className="relative flex-1 flex items-center bg-[var(--bg-card)] border border-[var(--border)] rounded overflow-hidden focus-within:border-[var(--primary-line)]">
  <Terminal className="text-[var(--text-secondary)] ml-3" size={16} />
  <input 
  type="text" 
@@ -208,7 +224,7 @@ export default function ExplorePage() {
  <button 
  type="submit" 
  disabled={loading && !liveTailing}
- className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded font-medium flex items-center gap-2 transition-colors disabled:opacity-50"
+ className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-black px-3.5 h-9 rounded-[3px] text-[13px] flex items-center gap-1.5 transition-colors disabled:opacity-50 border-none cursor-pointer"
  >
  {loading && !liveTailing ? <Clock className="animate-spin" size={16} /> : <Play size={16} />}
  Run
@@ -234,11 +250,11 @@ export default function ExplorePage() {
  
  <div className="flex gap-2 mt-3 text-xs text-[var(--text-secondary)]">
  <span className="font-medium text-[var(--text-primary)]">Examples:</span>
- <button onClick={() => handleSampleClick('level:ERROR')} className="hover:text-blue-400">level:ERROR</button>
+ <button onClick={() => handleSampleClick('level:ERROR')} className="hover:text-[var(--signal-info)]">level:ERROR</button>
  <span>•</span>
- <button onClick={() => handleSampleClick('service:payment AND level:ERROR')} className="hover:text-blue-400">service:payment AND level:ERROR</button>
+ <button onClick={() => handleSampleClick('service:payment AND level:ERROR')} className="hover:text-[var(--signal-info)]">service:payment AND level:ERROR</button>
  <span>•</span>
- <button onClick={() => handleSampleClick('"database connection failed"')} className="hover:text-blue-400">&quot;exact phrase&quot;</button>
+ <button onClick={() => handleSampleClick('"database connection failed"')} className="hover:text-[var(--signal-info)]">&quot;exact phrase&quot;</button>
  </div>
  </div>
 
@@ -253,13 +269,13 @@ export default function ExplorePage() {
  <div className="flex bg-[var(--bg-card)] rounded border border-[var(--border)] p-0.5">
  <button 
  onClick={() => { setViewMode('list'); setResults([]); }}
- className={`px-3 py-1 rounded-sm text-xs font-medium transition-colors ${viewMode === 'list' ? 'bg-[var(--bg-app)] text-blue-500 shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
+ className={`px-3 py-1 rounded-sm text-xs font-medium transition-colors ${viewMode === 'list' ? 'bg-[var(--bg-app)] text-[var(--signal-info)] shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
  >
  List
  </button>
  <button 
  onClick={() => { setViewMode('patterns'); setResults([]); }}
- className={`px-3 py-1 rounded-sm text-xs font-medium transition-colors ${viewMode === 'patterns' ? 'bg-[var(--bg-app)] text-blue-500 shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
+ className={`px-3 py-1 rounded-sm text-xs font-medium transition-colors ${viewMode === 'patterns' ? 'bg-[var(--bg-app)] text-[var(--signal-info)] shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
  >
  Patterns
  </button>
@@ -268,26 +284,50 @@ export default function ExplorePage() {
  )}
  
  {!loading && histogram.length > 0 && viewMode === 'list' && (
- <div className="h-32 border-b border-[var(--border)] bg-[var(--bg-card)] p-4 pt-2">
+ <div className="border-b border-[var(--border)] bg-[var(--bg-card)] px-4 pt-2 pb-1">
+ <div className="flex items-center justify-between mb-1">
+ <span className="eyebrow">
+ Volume · {histogram.reduce((a: number, b: any) => a + (b.count || 0), 0).toLocaleString()} events
+ </span>
+ <div className="flex items-center gap-3">
+ {activeLevels.map((l) => (
+ <span key={l} className="eyebrow flex items-center gap-1.5">
+ <span className="w-2 h-2 rounded-[1px]" style={{ background: LEVEL_COLOR[l] }} />{l}
+ </span>
+ ))}
+ </div>
+ </div>
+ <div className="h-24">
  <ResponsiveContainer width="100%" height="100%">
- <BarChart data={histogram} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
- <XAxis 
- dataKey="timestamp" 
+ <BarChart data={histogram} margin={{ top: 4, right: 4, left: -22, bottom: 0 }}>
+ <XAxis
+ dataKey="timestamp"
  tickFormatter={(ts) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
  stroke="var(--border)"
- tick={{ fill: 'var(--text-secondary)', fontSize: 10 }}
+ tick={{ fill: 'var(--text-muted)', fontSize: 9 }}
+ axisLine={false}
+ tickLine={false}
  />
- <YAxis 
+ <YAxis
  stroke="var(--border)"
- tick={{ fill: 'var(--text-secondary)', fontSize: 10 }}
+ tick={{ fill: 'var(--text-muted)', fontSize: 9 }}
+ axisLine={false}
+ tickLine={false}
+ allowDecimals={false}
  />
- <Tooltip 
- contentStyle={{ backgroundColor: 'var(--bg-modal)', border: '1px solid var(--border)', fontSize: '12px' }}
+ <Tooltip
+ contentStyle={{ backgroundColor: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: '3px', fontSize: '11px' }}
+ cursor={{ fill: 'var(--bg-surface-hover)' }}
  labelFormatter={(ts) => new Date(ts).toLocaleString()}
  />
- <Bar dataKey="count" fill="#3b82f6" radius={[2, 2, 0, 0]} />
+ {/* The API already groups each bucket by level — stacking it turns a flat
+ volume bar into "when did errors spike", which is the actual question. */}
+ {activeLevels.map((level) => (
+ <Bar key={level} dataKey={level} stackId="vol" fill={LEVEL_COLOR[level]} radius={0} />
+ ))}
  </BarChart>
  </ResponsiveContainer>
+ </div>
  </div>
  )}
  
@@ -336,9 +376,9 @@ export default function ExplorePage() {
  {results.map((log, i) => {
  const level = log.level || 'INFO';
  let levelColor = 'text-[var(--text-secondary)]';
- if (level === 'ERROR' || level === 'FATAL') levelColor = 'text-red-400';
- else if (level === 'WARN') levelColor = 'text-yellow-400';
- else if (level === 'INFO') levelColor = 'text-blue-400';
+ if (level === 'ERROR' || level === 'FATAL') levelColor = 'text-[var(--signal-crit)]';
+ else if (level === 'WARN') levelColor = 'text-[var(--signal-warn)]';
+ else if (level === 'INFO') levelColor = 'text-[var(--signal-info)]';
  
  // Fallback formatting if raw text is provided
  const timestamp = log.timestamp || new Date().toISOString();
@@ -374,7 +414,7 @@ export default function ExplorePage() {
 
  {/* Sidebar */}
  <div className="w-72 flex-shrink-0 flex flex-col gap-4">
- <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-4 flex-1">
+ <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-[3px] p-4 flex-1">
  <h3 className="font-medium text-[var(--text-primary)] mb-4 flex items-center gap-2">
  <History size={16} /> Saved Queries
  </h3>
@@ -388,13 +428,13 @@ export default function ExplorePage() {
  <div className="flex justify-between items-start">
  <button 
  onClick={() => { setQuery(sq.query_text); handleSearch(undefined, sq.query_text); }}
- className="text-sm font-medium text-[var(--text-primary)] hover:text-blue-400 text-left"
+ className="text-sm font-medium text-[var(--text-primary)] hover:text-[var(--signal-info)] text-left"
  >
  {sq.name}
  </button>
  <button 
  onClick={() => deleteSavedQuery(sq.id)}
- className="text-xs text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+ className="text-xs text-[var(--signal-crit)] opacity-0 group-hover:opacity-100 transition-opacity"
  >
  Delete
  </button>
@@ -408,7 +448,7 @@ export default function ExplorePage() {
  )}
  </div>
  
- <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-4 flex-1 overflow-y-auto">
+ <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-[3px] p-4 flex-1 overflow-y-auto">
  <h3 className="font-medium text-[var(--text-primary)] mb-4 flex items-center gap-2">
  <Filter size={16} /> Filters
  </h3>
@@ -466,7 +506,7 @@ export default function ExplorePage() {
  </div>
  <div>
  <span className="text-xs text-[var(--text-secondary)] uppercase tracking-wider block mb-1">Level</span>
- <span className={`font-semibold ${selectedLog.level === 'ERROR' || selectedLog.level === 'FATAL' ? 'text-red-400' : selectedLog.level === 'WARN' ? 'text-yellow-400' : 'text-blue-400'}`}>{selectedLog.level || 'INFO'}</span>
+ <span className={`font-semibold ${selectedLog.level === 'ERROR' || selectedLog.level === 'FATAL' ? 'text-[var(--signal-crit)]' : selectedLog.level === 'WARN' ? 'text-[var(--signal-warn)]' : 'text-[var(--signal-info)]'}`}>{selectedLog.level || 'INFO'}</span>
  </div>
  <div>
  <span className="text-xs text-[var(--text-secondary)] uppercase tracking-wider block mb-1">Source</span>
