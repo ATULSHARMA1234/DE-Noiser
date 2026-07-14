@@ -122,6 +122,13 @@ def verify_ingest_auth(
         if not static_key and is_testing:
             static_key = "semanticos-ingest-key-123"
         if static_key and api_key == static_key:
+            # Resolve to a real tenant. Returning the literal "default_tenant"
+            # writes rows under a tenant id that no user can ever hold, so
+            # everything ingested with the static key was orphaned: stored, but
+            # invisible to every logged-in user (who carry a numeric tenant_id).
+            default_tenant = db.query(Tenant).order_by(Tenant.id).first()
+            if default_tenant:
+                return str(default_tenant.id)
             return "default_tenant"
 
     if token:

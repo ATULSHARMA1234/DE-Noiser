@@ -14,6 +14,15 @@ import { MarkdownWidget } from '@/components/widgets/MarkdownWidget';
 
 const ResponsiveGridLayout = WidthProvider(Responsive);
 
+// Must mirror the server's alias map (api/dashboards.py) — dashboards created
+// earlier persist these legacy type names.
+const WIDGET_ALIAS: Record<string, string> = {
+ stat: 'metric_card',
+ timeseries: 'time_series',
+ logs: 'incident_feed',
+ log_table: 'incident_feed',
+};
+
 // Signal palette — severity reads the same here as everywhere else in the app.
 const SLICE_COLORS = ['var(--signal-crit)', 'var(--signal-warn)', 'var(--signal-info)', 'var(--signal-ok)', 'var(--signal-alt)', 'var(--text-muted)'];
 const CHART_TOOLTIP = {
@@ -210,10 +219,14 @@ export default function DashboardsPage() {
 
  const renderWidget = (w: any) => {
  const data = widgetDataCache[w.id];
+ // Dashboards created earlier store legacy type names. The API normalizes them,
+ // so the client has to as well — otherwise the data arrives fine and the widget
+ // still renders "unsupported" because it switched on the raw type.
+ const type = WIDGET_ALIAS[w.type] ?? w.type;
 
  // Markdown is authored in the widget config — it has nothing to fetch, so it
  // must render before the data guard or it would sit on "Loading" forever.
- if (w.type === 'markdown') {
+ if (type === 'markdown') {
  return <MarkdownWidget content={w.config?.content || ''} />;
  }
 
@@ -226,7 +239,7 @@ export default function DashboardsPage() {
  );
  }
 
- if (w.type === 'metric_card') {
+ if (type === 'metric_card') {
  const tone = data.tone === 'crit' ? 'var(--signal-crit)'
  : data.tone === 'warn' ? 'var(--signal-warn)'
  : data.tone === 'ok' ? 'var(--signal-ok)'
@@ -241,7 +254,7 @@ export default function DashboardsPage() {
  );
  }
 
- if (w.type === 'time_series') {
+ if (type === 'time_series') {
  const series = data.series?.[0]?.data || [];
  if (!series.length) return <EmptyWidget label="No incidents in range" />;
 
@@ -266,7 +279,7 @@ export default function DashboardsPage() {
  );
  }
 
- if (w.type === 'log_table' || w.type === 'incident_feed') {
+ if (type === 'incident_feed') {
  // The backend serves this from the incident feed, so read `incidents` and
  // fall back to `logs` for any dashboard still shaped the old way.
  const rows = data.incidents || data.logs || [];
@@ -308,7 +321,7 @@ export default function DashboardsPage() {
  );
  }
 
- if (w.type === 'pie_chart') {
+ if (type === 'pie_chart') {
  // Real distribution from /widgets/{id}/data — this used to render a
  // hardcoded array, so every pie showed the same invented numbers.
  const slices = data.slices || [];
@@ -340,7 +353,7 @@ export default function DashboardsPage() {
  );
  }
 
- if (w.type === 'bar_chart') {
+ if (type === 'bar_chart') {
  // Top domains by incident count — was a hardcoded Mon..Sun array.
  const bars = data.bars || [];
  if (!bars.length) return <EmptyWidget label="No incidents in range" />;
