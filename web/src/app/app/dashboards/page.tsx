@@ -121,9 +121,14 @@ export default function DashboardsPage() {
  }
  };
 
- async function fetchWidgetData(dashId: number, widgetId: string) {
+ // range is passed explicitly by callers that just changed it — reading
+ // globalTimeRange from the closure here would use the pre-update value (the
+ // setState hasn't committed yet), so the picker always fetched the *previous*
+ // range. Default to current state for callers that didn't change it.
+ async function fetchWidgetData(dashId: number, widgetId: string, range?: string) {
  try {
- const data = await apiFetch(`/dashboards/${dashId}/widgets/${widgetId}/data?start_time=${globalTimeRange}`);
+ const r = range ?? globalTimeRange;
+ const data = await apiFetch(`/dashboards/${dashId}/widgets/${widgetId}/data?start_time=${r}`);
  setWidgetDataCache(prev => ({ ...prev, [widgetId]: data }));
  } catch (e: any) {
  console.error('Failed to fetch widget data', e);
@@ -568,7 +573,8 @@ export default function DashboardsPage() {
  setGlobalTimeRange={(val) => {
  setGlobalTimeRange(val);
  if (selectedDashboard) {
- selectedDashboard.widgets.forEach((w: any) => fetchWidgetData(selectedDashboard.id, w.id));
+ // Pass val directly — state isn't committed yet on this tick.
+ selectedDashboard.widgets.forEach((w: any) => fetchWidgetData(selectedDashboard.id, w.id, val));
  }
  }}
  autoRefreshInterval={autoRefreshInterval}

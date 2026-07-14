@@ -131,14 +131,17 @@ def get_widget_data(
     # 4h, 1d, 7d). It was accepted and then ignored, so changing the range moved
     # the control but never the numbers. Resolve it to a cutoff and apply it.
     _UNITS = {"m": 60, "h": 3600, "d": 86400, "w": 604800}
+    _MAX_WINDOW = 366 * 86400  # a year is the widest useful dashboard window
     since = None
     if start_time:
         raw = start_time.strip().lstrip("-")
         if raw and raw[-1].lower() in _UNITS and raw[:-1].isdigit():
-            seconds = int(raw[:-1]) * _UNITS[raw[-1].lower()]
+            # Clamp before building the timedelta: a huge magnitude (999999999d)
+            # otherwise overflows datetime and 500s on user-controllable input.
+            seconds = min(int(raw[:-1]) * _UNITS[raw[-1].lower()], _MAX_WINDOW)
             since = datetime.datetime.utcnow() - datetime.timedelta(seconds=seconds)
         else:
-            with contextlib.suppress(ValueError):
+            with contextlib.suppress(ValueError, OverflowError):
                 since = datetime.datetime.fromisoformat(raw.replace("Z", "+00:00")).replace(tzinfo=None)
 
     def _incident_q():
@@ -185,14 +188,16 @@ def get_widget_data(
         return metrics[metric or "open_incidents"]()
 
     elif w_type == "time_series":
-        # Incidents opened per day over the last 14 days.
+        # Incidents opened per day. Honour the dashboard time picker when it sent
+        # one (`since`); otherwise default to the last 14 days. Day count is
+        # clamped so a 15m window still renders a sane single-bucket series.
         now = datetime.datetime.utcnow()
-        days = 14
-        since = now - datetime.timedelta(days=days)
+        start = since if since is not None else now - datetime.timedelta(days=14)
+        days = max(1, min(90, (now.date() - start.date()).days + 1))
         buckets = {(now.date() - datetime.timedelta(days=days - 1 - i)).isoformat(): 0 for i in range(days)}
         rows = (
             db.query(func.date(Incident.created_at), func.count(Incident.id))
-            .filter(Incident.tenant_id == tenant, Incident.created_at >= since)
+            .filter(Incident.tenant_id == tenant, Incident.created_at >= start)
             .group_by(func.date(Incident.created_at))
             .all()
         )
@@ -224,21 +229,21 @@ def get_widget_data(
     elif w_type == "heatmap":
         # Incidents by weekday x hour, aggregated in SQL and bounded to a window
         # so this does not full-scan every incident the tenant has ever had.
+        # The dashboard time picker (`since`) wins when set; otherwise fall back
+        # to the widget's own config.days (default 30).
         try:
             days = int(config.get("days") or 30)
         except (TypeError, ValueError):
             raise HTTPException(status_code=400, detail="heatmap 'days' must be an integer")
-        # Keep the window genuinely bounded -- an arbitrarily large value would
-        # turn this back into a full scan of every incident the tenant ever had.
         days = max(1, min(days, 90))
-        since = datetime.datetime.utcnow() - datetime.timedelta(days=days)
+        cutoff = since if since is not None else datetime.datetime.utcnow() - datetime.timedelta(days=days)
         rows = (
             db.query(
                 func.extract("dow", Incident.created_at).label("dow"),
                 func.extract("hour", Incident.created_at).label("hour"),
                 func.count(Incident.id),
             )
-            .filter(Incident.tenant_id == tenant, Incident.created_at >= since)
+            .filter(Incident.tenant_id == tenant, Incident.created_at >= cutoff)
             .group_by("dow", "hour")
             .all()
         )

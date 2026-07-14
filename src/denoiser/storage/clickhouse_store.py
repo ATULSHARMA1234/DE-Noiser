@@ -1,6 +1,6 @@
+import contextlib
 import json
 import os
-import time
 from datetime import UTC
 from typing import Any
 
@@ -86,6 +86,23 @@ class ClickHouseStore:
         except Exception as e:
             logger.error(f"Failed to cleanup old data for tenant {tenant_id}: {e}")
 
+    @staticmethod
+    def _coerce_timestamp(ts):
+        """Accept an epoch number OR an ISO-8601 string.
+
+        ISO strings are the natural producer format (and what the API examples
+        use), but were previously dropped -- any non-numeric timestamp fell back
+        to ingestion wall-clock, so the stored time bore no relation to the event
+        and corrupted every time-range query and the volume histogram.
+        """
+        from datetime import datetime
+        if isinstance(ts, (int, float)):
+            return datetime.fromtimestamp(ts, UTC)
+        if isinstance(ts, str) and ts.strip():
+            with contextlib.suppress(ValueError):
+                return datetime.fromisoformat(ts.strip().replace("Z", "+00:00"))
+        return datetime.now(UTC)
+
     def insert_logs(self, logs: list[dict[str, Any]], tenant_id: str):
         """Dual-write logs to ClickHouse"""
         if not self.client:
@@ -98,10 +115,7 @@ class ClickHouseStore:
             # Flatten log dicts to tuples matching schema
             data = []
             for log in logs:
-                ts = log.get("timestamp", time.time())
-                # If timestamp is seconds, convert to datetime object
-                from datetime import datetime
-                dt = datetime.fromtimestamp(ts, UTC) if isinstance(ts, (int, float)) else datetime.now(UTC)
+                dt = self._coerce_timestamp(log.get("timestamp"))
 
                 data.append((
                     tenant_id,
