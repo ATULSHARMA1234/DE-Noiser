@@ -14,6 +14,24 @@ import { MarkdownWidget } from '@/components/widgets/MarkdownWidget';
 
 const ResponsiveGridLayout = WidthProvider(Responsive);
 
+// Signal palette — severity reads the same here as everywhere else in the app.
+const SLICE_COLORS = ['var(--signal-crit)', 'var(--signal-warn)', 'var(--signal-info)', 'var(--signal-ok)', 'var(--signal-alt)', 'var(--text-muted)'];
+const CHART_TOOLTIP = {
+ backgroundColor: 'var(--bg-elevated)',
+ border: '1px solid var(--border)',
+ borderRadius: '3px',
+ fontSize: '11px',
+ color: 'var(--text-primary)',
+};
+
+function EmptyWidget({ label }: { label: string }) {
+ return (
+ <div className="h-full flex items-center justify-center">
+ <span className="eyebrow">{label}</span>
+ </div>
+ );
+}
+
 export default function DashboardsPage() {
  const { toast } = useToast();
  const [dashboards, setDashboards] = useState<any[]>([]);
@@ -192,58 +210,98 @@ export default function DashboardsPage() {
 
  const renderWidget = (w: any) => {
  const data = widgetDataCache[w.id];
- 
- if (!data) return <div className="h-full flex items-center justify-center text-[var(--text-secondary)] animate-pulse">Loading...</div>;
 
- if (w.type === 'metric_card') {
+ // Markdown is authored in the widget config — it has nothing to fetch, so it
+ // must render before the data guard or it would sit on "Loading" forever.
+ if (w.type === 'markdown') {
+ return <MarkdownWidget content={w.config?.content || ''} />;
+ }
+
+ if (!data) {
  return (
- <div className="flex flex-col items-center justify-center h-full">
- <div className="text-4xl font-bold text-[var(--text-primary)]">{data.value?.toLocaleString() || 0}</div>
- <div className="text-sm text-[var(--text-secondary)] mt-2">{w.title}</div>
+ <div className="h-full flex flex-col justify-center gap-2 px-1">
+ <div className="shimmer-bg h-2.5 w-1/3 rounded-[2px]" />
+ <div className="shimmer-bg h-2.5 w-2/3 rounded-[2px]" />
  </div>
  );
  }
 
- if (w.type === 'markdown') {
- return <MarkdownWidget content={w.config?.content || ''} />;
+ if (w.type === 'metric_card') {
+ const tone = data.tone === 'crit' ? 'var(--signal-crit)'
+ : data.tone === 'warn' ? 'var(--signal-warn)'
+ : data.tone === 'ok' ? 'var(--signal-ok)'
+ : 'var(--text-primary)';
+ return (
+ <div className="flex flex-col justify-center h-full">
+ <div className="text-[34px] leading-none font-semibold tnum mono" style={{ color: tone }}>
+ {typeof data.value === 'number' ? data.value.toLocaleString() : (data.value ?? 0)}
+ </div>
+ <div className="eyebrow mt-2">{data.label || w.title}</div>
+ </div>
+ );
  }
- 
+
  if (w.type === 'time_series') {
- // Mock simple sparkline
  const series = data.series?.[0]?.data || [];
- if (!series.length) return <div>No data</div>;
- 
- const max = Math.max(...series.map((d: any) => d.value));
- const min = 0;
- const range = max - min || 1;
- 
+ if (!series.length) return <EmptyWidget label="No incidents in range" />;
+
+ const max = Math.max(...series.map((d: any) => d.value), 1);
  const points = series.map((d: any, i: number) => {
- const x = (i / (series.length - 1)) * 100;
- const y = 100 - ((d.value - min) / range) * 100;
+ const x = (i / Math.max(1, series.length - 1)) * 100;
+ const y = 100 - (d.value / max) * 100;
  return `${x},${y}`;
  }).join(' ');
+ const latest = series[series.length - 1]?.value ?? 0;
 
  return (
  <div className="flex flex-col h-full w-full">
- <svg className="flex-1 w-full" preserveAspectRatio="none">
- <polyline points={points} fill="none" stroke="#a855f7" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+ <div className="flex items-baseline gap-2">
+ <span className="text-[20px] font-semibold tnum mono text-[var(--text-primary)]">{latest}</span>
+ <span className="eyebrow">peak {max}</span>
+ </div>
+ <svg className="flex-1 w-full mt-1" preserveAspectRatio="none" viewBox="0 0 100 100">
+ <polyline points={points} fill="none" stroke="var(--primary)" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
  </svg>
  </div>
  );
  }
 
- if (w.type === 'log_table') {
+ if (w.type === 'log_table' || w.type === 'incident_feed') {
+ // The backend serves this from the incident feed, so read `incidents` and
+ // fall back to `logs` for any dashboard still shaped the old way.
+ const rows = data.incidents || data.logs || [];
+ if (!rows.length) return <EmptyWidget label="Nothing to show" />;
+
  return (
- <div className="overflow-auto h-full text-xs">
+ <div className="overflow-auto h-full mono text-[11px]">
  <table className="w-full text-left">
- <tbody className="divide-y divide-[var(--border)]">
- {(data.logs || []).map((log: any, i: number) => (
- <tr key={i}>
- <td className="py-1 pr-2 whitespace-nowrap text-[var(--text-secondary)]">{new Date(log.timestamp).toLocaleTimeString()}</td>
- <td className={`py-1 pr-2 font-bold ${log.level === 'ERROR' ? 'text-red-400' : 'text-blue-400'}`}>{log.level}</td>
- <td className="py-1 text-[var(--text-primary)] truncate max-w-[200px]">{log.message}</td>
+ <tbody className="divide-y divide-[var(--border-subtle)]">
+ {rows.map((r: any, i: number) => {
+ const open = (r.status || '').toUpperCase() === 'OPEN';
+ return (
+ <tr key={r.id ?? i} className="hover:bg-[var(--bg-surface-hover)]">
+ <td className="py-1.5 pr-2 whitespace-nowrap text-[var(--text-dimmed)]">
+ {r.created_at || r.timestamp
+ ? new Date(r.created_at || r.timestamp).toLocaleTimeString()
+ : '—'}
+ </td>
+ <td className="py-1.5 pr-2">
+ <span
+ className="px-1.5 py-0.5 rounded-[2px] text-[9px] uppercase tracking-wider"
+ style={{
+ color: open ? 'var(--signal-crit)' : 'var(--signal-ok)',
+ background: open ? 'var(--signal-crit-dim)' : 'var(--signal-ok-dim)',
+ }}
+ >
+ {r.status || r.level || 'INFO'}
+ </span>
+ </td>
+ <td className="py-1.5 text-[var(--text-secondary)] truncate max-w-[220px]">
+ {r.title || r.message}
+ </td>
  </tr>
- ))}
+ );
+ })}
  </tbody>
  </table>
  </div>
@@ -251,33 +309,31 @@ export default function DashboardsPage() {
  }
 
  if (w.type === 'pie_chart') {
- const mockPieData = [
- { name: 'Info', value: 400 },
- { name: 'Warning', value: 300 },
- { name: 'Error', value: 300 },
- { name: 'Critical', value: 200 },
- ];
- const COLORS = ['#3b82f6', '#f59e0b', '#ef4444', '#d946ef'];
- 
+ // Real distribution from /widgets/{id}/data — this used to render a
+ // hardcoded array, so every pie showed the same invented numbers.
+ const slices = data.slices || [];
+ if (!slices.length) return <EmptyWidget label="No incidents in range" />;
+
  return (
  <div className="flex flex-col items-center justify-center h-full w-full">
  <ResponsiveContainer width="100%" height="100%">
  <PieChart>
  <Pie
- data={mockPieData}
+ data={slices}
  cx="50%"
  cy="50%"
- innerRadius={40}
- outerRadius={80}
- fill="#8884d8"
- paddingAngle={5}
+ innerRadius={38}
+ outerRadius={72}
+ paddingAngle={2}
  dataKey="value"
+ stroke="var(--bg-card)"
+ strokeWidth={2}
  >
- {mockPieData.map((entry, index) => (
- <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+ {slices.map((entry: any, index: number) => (
+ <Cell key={`cell-${index}`} fill={SLICE_COLORS[index % SLICE_COLORS.length]} />
  ))}
  </Pie>
- <RechartsTooltip contentStyle={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border)' }} />
+ <RechartsTooltip contentStyle={CHART_TOOLTIP} />
  </PieChart>
  </ResponsiveContainer>
  </div>
@@ -285,32 +341,25 @@ export default function DashboardsPage() {
  }
 
  if (w.type === 'bar_chart') {
- const mockBarData = [
- { name: 'Mon', errors: 4000, warnings: 2400 },
- { name: 'Tue', errors: 3000, warnings: 1398 },
- { name: 'Wed', errors: 2000, warnings: 9800 },
- { name: 'Thu', errors: 2780, warnings: 3908 },
- { name: 'Fri', errors: 1890, warnings: 4800 },
- { name: 'Sat', errors: 2390, warnings: 3800 },
- { name: 'Sun', errors: 3490, warnings: 4300 },
- ];
+ // Top domains by incident count — was a hardcoded Mon..Sun array.
+ const bars = data.bars || [];
+ if (!bars.length) return <EmptyWidget label="No incidents in range" />;
 
  return (
  <div className="flex flex-col h-full w-full">
  <ResponsiveContainer width="100%" height="100%">
- <BarChart data={mockBarData}>
- <XAxis dataKey="name" tick={{ fill: 'var(--text-muted)', fontSize: 10 }} axisLine={false} tickLine={false} />
- <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 10 }} axisLine={false} tickLine={false} />
- <RechartsTooltip contentStyle={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border)' }} cursor={{ fill: 'var(--bg-surface-hover)' }} />
- <Bar dataKey="errors" stackId="a" fill="#ef4444" radius={[0, 0, 4, 4]} />
- <Bar dataKey="warnings" stackId="a" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+ <BarChart data={bars} margin={{ top: 8, right: 8, bottom: 0, left: -18 }}>
+ <XAxis dataKey="label" tick={{ fill: 'var(--text-muted)', fontSize: 10 }} axisLine={false} tickLine={false} />
+ <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 10 }} axisLine={false} tickLine={false} allowDecimals={false} />
+ <RechartsTooltip contentStyle={CHART_TOOLTIP} cursor={{ fill: 'var(--bg-surface-hover)' }} />
+ <Bar dataKey="value" fill="var(--signal-crit)" radius={[2, 2, 0, 0]} />
  </BarChart>
  </ResponsiveContainer>
  </div>
  );
  }
 
- return <div>Unknown Widget Type</div>;
+ return <EmptyWidget label={`Unsupported widget: ${w.type}`} />;
  };
 
  if (selectedDashboard) {

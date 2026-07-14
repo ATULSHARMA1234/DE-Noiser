@@ -111,8 +111,16 @@ def get_widget_data(
     if not widget:
         raise HTTPException(status_code=404, detail="Widget not found")
 
-    # Normalize legacy widget-type aliases to the canonical names.
-    _ALIAS = {"stat": "metric_card", "timeseries": "time_series", "logs": "incident_feed"}
+    # Normalize widget-type aliases. The UI's widget picker emits bar_chart /
+    # pie_chart / markdown, so those must resolve here -- an unknown type 400s,
+    # which would leave those widgets stuck on their loading state forever.
+    _ALIAS = {
+        "stat": "metric_card",
+        "timeseries": "time_series",
+        "logs": "incident_feed",
+        "bar_chart": "bar",
+        "log_table": "incident_feed",
+    }
     w_type = _ALIAS.get(widget.get("type"), widget.get("type"))
     config = widget.get("config") or {}
     metric = config.get("metric")
@@ -222,6 +230,51 @@ def get_widget_data(
             cells.append({"day": day, "hour": int(hour), "value": count})
             mx = max(mx, count)
         return {"cells": cells, "max": mx, "days": days}
+
+    elif w_type == "pie_chart":
+        # Distribution of incidents across a dimension (default: severity band).
+        by = config.get("by") or "severity"
+        if by == "status":
+            rows = (
+                db.query(Incident.status, func.count(Incident.id))
+                .filter(Incident.tenant_id == tenant)
+                .group_by(Incident.status)
+                .all()
+            )
+            slices = [{"name": (s or "UNKNOWN").title(), "value": c} for s, c in rows]
+        elif by == "domain":
+            rows = (
+                db.query(Incident.domain, func.count(Incident.id))
+                .filter(Incident.tenant_id == tenant)
+                .group_by(Incident.domain)
+                .order_by(func.count(Incident.id).desc())
+                .limit(6)
+                .all()
+            )
+            slices = [{"name": (d or "unknown"), "value": c} for d, c in rows]
+        else:
+            # Severity bands off the impact score.
+            bands = [
+                ("Critical", 0.8, 1.01),
+                ("High", 0.6, 0.8),
+                ("Medium", 0.3, 0.6),
+                ("Low", 0.0, 0.3),
+            ]
+            slices = []
+            for name, lo, hi in bands:
+                c = (
+                    _incident_q()
+                    .filter(Incident.impact_score >= lo, Incident.impact_score < hi)
+                    .count()
+                )
+                if c:
+                    slices.append({"name": name, "value": c})
+        return {"slices": slices, "by": by}
+
+    elif w_type == "markdown":
+        # Content lives in the widget config; there is nothing to query. Return a
+        # payload anyway so the client's "data loaded" check passes.
+        return {"content": config.get("content", "")}
 
     elif w_type in ("incident_feed", "log_table"):
         rows = _incident_q().order_by(Incident.created_at.desc()).limit(12).all()
