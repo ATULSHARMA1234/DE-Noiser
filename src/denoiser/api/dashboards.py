@@ -1,3 +1,4 @@
+import contextlib
 import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -126,8 +127,25 @@ def get_widget_data(
     metric = config.get("metric")
     tenant = current_user.tenant_id
 
+    # The dashboard's time picker sends start_time as a relative window (15m, 1h,
+    # 4h, 1d, 7d). It was accepted and then ignored, so changing the range moved
+    # the control but never the numbers. Resolve it to a cutoff and apply it.
+    _UNITS = {"m": 60, "h": 3600, "d": 86400, "w": 604800}
+    since = None
+    if start_time:
+        raw = start_time.strip().lstrip("-")
+        if raw and raw[-1].lower() in _UNITS and raw[:-1].isdigit():
+            seconds = int(raw[:-1]) * _UNITS[raw[-1].lower()]
+            since = datetime.datetime.utcnow() - datetime.timedelta(seconds=seconds)
+        else:
+            with contextlib.suppress(ValueError):
+                since = datetime.datetime.fromisoformat(raw.replace("Z", "+00:00")).replace(tzinfo=None)
+
     def _incident_q():
-        return db.query(Incident).filter(Incident.tenant_id == tenant)
+        q = db.query(Incident).filter(Incident.tenant_id == tenant)
+        if since is not None:
+            q = q.filter(Incident.created_at >= since)
+        return q
 
     if w_type == "metric_card":
         metrics = {
@@ -141,8 +159,9 @@ def get_widget_data(
                 "label": "Resolved", "tone": "ok",
             },
             "avg_impact": lambda: {
-                "value": round(float(db.query(func.avg(Incident.impact_score))
-                                     .filter(Incident.tenant_id == tenant).scalar() or 0), 2),
+                "value": round(float(
+                    _incident_q().with_entities(func.avg(Incident.impact_score)).scalar() or 0
+                ), 2),
                 "label": "Avg Impact", "tone": "warn",
             },
             "slos_tracked": lambda: {
@@ -186,8 +205,8 @@ def get_widget_data(
 
     elif w_type == "bar":
         rows = (
-            db.query(Incident.domain, func.count(Incident.id))
-            .filter(Incident.tenant_id == tenant)
+            _incident_q()
+            .with_entities(Incident.domain, func.count(Incident.id))
             .group_by(Incident.domain)
             .order_by(func.count(Incident.id).desc())
             .limit(8)
@@ -236,16 +255,16 @@ def get_widget_data(
         by = config.get("by") or "severity"
         if by == "status":
             rows = (
-                db.query(Incident.status, func.count(Incident.id))
-                .filter(Incident.tenant_id == tenant)
+                _incident_q()
+                .with_entities(Incident.status, func.count(Incident.id))
                 .group_by(Incident.status)
                 .all()
             )
             slices = [{"name": (s or "UNKNOWN").title(), "value": c} for s, c in rows]
         elif by == "domain":
             rows = (
-                db.query(Incident.domain, func.count(Incident.id))
-                .filter(Incident.tenant_id == tenant)
+                _incident_q()
+                .with_entities(Incident.domain, func.count(Incident.id))
                 .group_by(Incident.domain)
                 .order_by(func.count(Incident.id).desc())
                 .limit(6)

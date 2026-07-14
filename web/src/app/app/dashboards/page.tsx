@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { apiFetch, apiPut, apiPost } from '@/lib/api';
 import { useToast } from '@/context/ToastContext';
 import { ShimmerCardList } from '@/components/ShimmerSkeleton';
-import { LayoutGrid, Plus, Edit2, Trash2, ArrowLeft, BarChart2, Activity, List, X, PieChart as PieChartIcon } from 'lucide-react';
+import { LayoutGrid, Plus, Edit2, Trash2, ArrowLeft, BarChart2, Activity, List, X, PieChart as PieChartIcon, Hash, Gauge, Grid3x3, FileText } from 'lucide-react';
 import { Responsive, WidthProvider } from "react-grid-layout/legacy";
 import { ConfirmModal } from '@/components/ConfirmModal';
 import { ResponsiveContainer, PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip } from 'recharts';
@@ -33,6 +33,29 @@ const CHART_TOOLTIP = {
  color: 'var(--text-primary)',
 };
 
+// Every entry maps to a widget type + config the API already serves
+// (api/dashboards.py::get_widget_data). Named by what it tells you, not by the
+// chart primitive it happens to use.
+type CatalogItem = { key: string; title: string; kind: string; icon: any; type: string; config?: Record<string, any>; w: number; h: number };
+const WIDGET_CATALOG: CatalogItem[] = [
+ { key: 'open_incidents', title: 'Open Incidents', kind: 'Metric', icon: Hash, type: 'metric_card', config: { metric: 'open_incidents' }, w: 3, h: 3 },
+ { key: 'total_incidents', title: 'Total Incidents', kind: 'Metric', icon: Hash, type: 'metric_card', config: { metric: 'total_incidents' }, w: 3, h: 3 },
+ { key: 'resolved_incidents', title: 'Resolved', kind: 'Metric', icon: Hash, type: 'metric_card', config: { metric: 'resolved_incidents' }, w: 3, h: 3 },
+ { key: 'avg_impact', title: 'Avg Impact', kind: 'Metric', icon: Hash, type: 'metric_card', config: { metric: 'avg_impact' }, w: 3, h: 3 },
+ { key: 'slos_tracked', title: 'SLOs Tracked', kind: 'Metric', icon: Hash, type: 'metric_card', config: { metric: 'slos_tracked' }, w: 3, h: 3 },
+ { key: 'clusters_last_run', title: 'Clusters (last run)', kind: 'Metric', icon: Hash, type: 'metric_card', config: { metric: 'clusters_last_run' }, w: 3, h: 3 },
+ { key: 'runs_total', title: 'Analysis Runs', kind: 'Metric', icon: Hash, type: 'metric_card', config: { metric: 'runs_total' }, w: 3, h: 3 },
+ { key: 'incidents_per_day', title: 'Incidents / day', kind: 'Chart', icon: Activity, type: 'time_series', w: 6, h: 4 },
+ { key: 'top_domains', title: 'Top Domains', kind: 'Chart', icon: BarChart2, type: 'bar_chart', w: 6, h: 4 },
+ { key: 'severity_split', title: 'Severity Split', kind: 'Chart', icon: PieChartIcon, type: 'pie_chart', config: { by: 'severity' }, w: 4, h: 4 },
+ { key: 'resolved_ratio', title: 'Resolved Ratio', kind: 'Chart', icon: Gauge, type: 'gauge', w: 4, h: 4 },
+ { key: 'incident_heatmap', title: 'Incident Heatmap', kind: 'Chart', icon: Grid3x3, type: 'heatmap', config: { days: 30 }, w: 6, h: 4 },
+ { key: 'recent_incidents', title: 'Recent Incidents', kind: 'Feed', icon: List, type: 'incident_feed', w: 6, h: 5 },
+ { key: 'notes', title: 'Notes', kind: 'Markdown', icon: FileText, type: 'markdown', config: { content: '## Notes\n\nWrite anything here.' }, w: 4, h: 3 },
+];
+
+const DAY_LABELS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+
 function EmptyWidget({ label }: { label: string }) {
  return (
  <div className="h-full flex items-center justify-center">
@@ -60,6 +83,7 @@ export default function DashboardsPage() {
  const [globalTimeRange, setGlobalTimeRange] = useState('1h');
  const [autoRefreshInterval, setAutoRefreshInterval] = useState(0);
  const [showWidgetConfigModal, setShowWidgetConfigModal] = useState(false);
+ const [showCatalog, setShowCatalog] = useState(false);
  const [editingWidget, setEditingWidget] = useState<any>(null);
 
  useEffect(() => {
@@ -190,6 +214,26 @@ export default function DashboardsPage() {
  setShowWidgetConfigModal(true);
  };
 
+ // Catalog entries already know their type + config, so they go straight onto the
+ // board rather than through the generic config modal.
+ const addFromCatalog = async (item: CatalogItem) => {
+ if (!selectedDashboard) return;
+ const id = `w_${item.key}_${selectedDashboard.widgets.length + 1}`;
+ const widget = { id, type: item.type, title: item.title, config: item.config || {} };
+ const widgets = [...selectedDashboard.widgets, widget];
+ const layout = selectedDashboard.layout || [];
+ const maxY = layout.length ? Math.max(...layout.map((l: any) => l.y + l.h)) : 0;
+ const nextLayout = [...layout, { i: id, x: 0, y: maxY, w: item.w, h: item.h, minW: 2, minH: 2 }];
+ try {
+ await apiPut(`/dashboards/${selectedDashboard.id}`, { widgets, layout: nextLayout });
+ updateDashboardState({ ...selectedDashboard, widgets, layout: nextLayout });
+ fetchWidgetData(selectedDashboard.id, id);
+ setShowCatalog(false);
+ } catch (e: any) {
+ toast({ title: 'Failed to add widget', description: e.message, type: 'error' });
+ }
+ };
+
  const onLayoutChange = async (layout: any) => {
  if (!selectedDashboard || !isEditing) return;
  
@@ -275,6 +319,71 @@ export default function DashboardsPage() {
  <svg className="flex-1 w-full mt-1" preserveAspectRatio="none" viewBox="0 0 100 100">
  <polyline points={points} fill="none" stroke="var(--primary)" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
  </svg>
+ </div>
+ );
+ }
+
+ if (type === 'gauge') {
+ const pct = Math.round((data.value ?? 0) * 100);
+ const target = Math.round((data.target ?? 0.8) * 100);
+ const hit = pct >= target;
+ const color = hit ? 'var(--signal-ok)' : pct >= target * 0.6 ? 'var(--signal-warn)' : 'var(--signal-crit)';
+ // Semicircular arc: r=52, so the sweep is π·52 ≈ 163.4 units long.
+ const LEN = Math.PI * 52;
+ const targetAngle = Math.PI * (Math.min(100, target) / 100);
+ return (
+ <div className="flex flex-col items-center justify-center h-full">
+ <svg viewBox="0 0 120 68" className="w-full max-w-[180px]">
+ <path d="M 8 60 A 52 52 0 0 1 112 60" fill="none" stroke="var(--bg-track)" strokeWidth="8" strokeLinecap="round" />
+ <path
+ d="M 8 60 A 52 52 0 0 1 112 60"
+ fill="none" stroke={color} strokeWidth="8" strokeLinecap="round"
+ strokeDasharray={`${(Math.min(100, pct) / 100) * LEN} ${LEN}`}
+ />
+ {/* target tick — a ratio without its target is just a number */}
+ <line
+ x1={60 - 57 * Math.cos(targetAngle)} y1={60 - 57 * Math.sin(targetAngle)}
+ x2={60 - 47 * Math.cos(targetAngle)} y2={60 - 47 * Math.sin(targetAngle)}
+ stroke="var(--text-secondary)" strokeWidth="1.5"
+ />
+ <text x="60" y="56" textAnchor="middle" className="mono" fontSize="19" fontWeight="600" fill={color}>{pct}%</text>
+ </svg>
+ <div className="eyebrow mt-1">{data.resolved ?? 0}/{data.total ?? 0} · target {target}%</div>
+ </div>
+ );
+ }
+
+ if (type === 'heatmap') {
+ const cells: any[] = data.cells || [];
+ if (!cells.length) return <EmptyWidget label="No incidents in range" />;
+ const max = data.max || 1;
+ const at = (d: number, h: number) => cells.find((c) => c.day === d && c.hour === h)?.value ?? 0;
+ return (
+ <div className="flex flex-col h-full gap-1 overflow-auto">
+ <span className="eyebrow">Last {data.days ?? 30}d · by weekday × hour</span>
+ <div className="flex flex-col gap-[2px]">
+ {DAY_LABELS.map((label, d) => (
+ <div key={d} className="flex items-center gap-[3px]">
+ <span className="eyebrow w-3 shrink-0">{label}</span>
+ <div className="flex gap-[2px]">
+ {Array.from({ length: 24 }, (_, h) => {
+ const v = at(d, h);
+ return (
+ <span
+ key={h}
+ title={`${label} ${h}:00 — ${v} incident${v === 1 ? '' : 's'}`}
+ className="w-2 h-2 rounded-[1px]"
+ style={{
+ background: v ? 'var(--signal-crit)' : 'var(--bg-track)',
+ opacity: v ? 0.25 + 0.75 * (v / max) : 1,
+ }}
+ />
+ );
+ })}
+ </div>
+ </div>
+ ))}
+ </div>
  </div>
  );
  }
@@ -404,26 +513,53 @@ export default function DashboardsPage() {
  </div>
 
  {isEditing && (
- <div className="bg-[var(--bg-card)] border border-[var(--primary)] rounded-lg p-4 flex items-center gap-4">
- <span className="text-sm font-medium text-[var(--text-primary)]">Add Widget:</span>
- <button onClick={() => openWidgetConfig('metric_card')} className="flex items-center gap-2 px-3 py-1.5 bg-[var(--bg-app)] border border-[var(--border)] rounded text-sm hover:border-[var(--primary)] transition-colors">
- <Activity size={14} className="text-[var(--primary)]" /> Metric Card
+ <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-[3px] p-3 flex items-center gap-3">
+ <span className="eyebrow">Editing</span>
+ <button
+ onClick={() => setShowCatalog(true)}
+ className="flex items-center gap-1.5 px-3 h-8 rounded-[3px] bg-[var(--primary)] text-black text-[13px] hover:bg-[var(--primary-hover)] transition-colors border-none cursor-pointer"
+ >
+ <Plus size={14} /> Add widget
  </button>
- <button onClick={() => openWidgetConfig('time_series')} className="flex items-center gap-2 px-3 py-1.5 bg-[var(--bg-app)] border border-[var(--border)] rounded text-sm hover:border-[var(--primary)] transition-colors">
- <BarChart2 size={14} className="text-blue-400" /> Time Series
+ <span className="text-[12px] text-[var(--text-muted)]">Drag to move, drag a corner to resize. Layout saves automatically.</span>
+ </div>
+ )}
+
+ {/* Widget catalog — pick the thing you want to see, not the chart type it
+ happens to be drawn with. Each entry carries the config the API needs. */}
+ {showCatalog && (
+ <div className="fixed inset-0 bg-black/70 z-[100] flex items-center justify-center p-6" onClick={() => setShowCatalog(false)}>
+ <div className="bg-[var(--bg-modal)] border border-[var(--border)] rounded-[4px] w-[720px] max-h-[80vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+ <div className="flex items-start justify-between px-5 py-4 border-b border-[var(--border-subtle)]">
+ <div>
+ <div className="eyebrow mb-1">Widget catalog</div>
+ <h2 className="text-[16px] font-semibold text-[var(--text-primary)]">Add a widget</h2>
+ </div>
+ <button onClick={() => setShowCatalog(false)} className="text-[var(--text-muted)] hover:text-[var(--text-primary)] bg-transparent border-none cursor-pointer">
+ <X size={18} />
  </button>
- <button onClick={() => openWidgetConfig('log_table')} className="flex items-center gap-2 px-3 py-1.5 bg-[var(--bg-app)] border border-[var(--border)] rounded text-sm hover:border-[var(--primary)] transition-colors">
- <List size={14} className="text-emerald-400" /> Log Table
+ </div>
+ <div className="p-4 overflow-y-auto grid grid-cols-2 gap-2">
+ {WIDGET_CATALOG.map((item) => {
+ const Icon = item.icon;
+ return (
+ <button
+ key={item.key}
+ onClick={() => addFromCatalog(item)}
+ className="flex items-center gap-3 p-3 rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-card)] hover:border-[var(--primary-line)] hover:bg-[var(--bg-surface-hover)] transition-colors text-left cursor-pointer"
+ >
+ <span className="w-9 h-9 shrink-0 rounded-[3px] flex items-center justify-center border border-[var(--primary-line)] bg-[var(--primary-dim)]">
+ <Icon size={16} className="text-[var(--primary)]" />
+ </span>
+ <span className="min-w-0">
+ <span className="block text-[13px] text-[var(--text-primary)] truncate">{item.title}</span>
+ <span className="eyebrow">{item.kind}</span>
+ </span>
  </button>
- <button onClick={() => openWidgetConfig('pie_chart')} className="flex items-center gap-2 px-3 py-1.5 bg-[var(--bg-app)] border border-[var(--border)] rounded text-sm hover:border-[var(--primary)] transition-colors">
- <PieChartIcon size={14} className="text-purple-400" /> Pie Chart
- </button>
- <button onClick={() => openWidgetConfig('bar_chart')} className="flex items-center gap-2 px-3 py-1.5 bg-[var(--bg-app)] border border-[var(--border)] rounded text-sm hover:border-[var(--primary)] transition-colors">
- <BarChart2 size={14} className="text-orange-400" /> Bar Chart
- </button>
- <button onClick={() => openWidgetConfig('markdown')} className="flex items-center gap-2 px-3 py-1.5 bg-[var(--bg-app)] border border-[var(--border)] rounded text-sm hover:border-[var(--primary)] transition-colors">
- <span className="text-pink-400 font-bold">M↓</span> Markdown
- </button>
+ );
+ })}
+ </div>
+ </div>
  </div>
  )}
 
