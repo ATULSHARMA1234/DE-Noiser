@@ -4,10 +4,13 @@ import json
 import os
 import time
 from collections import deque
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 from denoiser.logging import get_logger
+from denoiser.settings import get_settings as get_infra_settings
+from denoiser.settings import validate_for_production
 
 logger = get_logger(__name__)
 import redis.asyncio as redis_asyncio
@@ -79,11 +82,7 @@ app = FastAPI(title="SemanticOS — Enterprise Log Intelligence API", version="2
 # Order matters: CORS first, then rate limiter, then correlation ID (outermost runs last)
 # Origins are an explicit allowlist (never "*" on a credentialed API). Configure
 # via CORS_ALLOWED_ORIGINS (comma-separated); defaults to local dev origins.
-_cors_origins = [
-    o.strip()
-    for o in os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",")
-    if o.strip()
-]
+_cors_origins = get_infra_settings().cors_origin_list
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
@@ -162,8 +161,21 @@ def _save_settings(s: dict):
     SETTINGS_FILE.write_text(json.dumps(s, indent=2))
 
 
-@app.on_event("startup")
-async def on_startup():
+async def _startup() -> None:
+    # Refuse to serve a production deployment with a configuration that is
+    # silently unsafe. Doing this at boot rather than per-request means a bad
+    # deploy fails immediately and visibly, instead of on whichever request
+    # first reaches the affected subsystem.
+    infra = get_infra_settings()
+    if infra.is_production:
+        problems = validate_for_production(infra)
+        if problems:
+            for problem in problems:
+                logger.error(f"Unsafe production configuration: {problem}")
+            raise RuntimeError(
+                f"Refusing to start in production with {len(problems)} unsafe setting(s); see the errors above."
+            )
+
     init_db()
     DATA_DIR.mkdir(exist_ok=True)
     if not SETTINGS_FILE.exists():
@@ -175,7 +187,7 @@ async def on_startup():
     global kafka_producer
     try:
         kafka_producer = AIOKafkaProducer(
-            bootstrap_servers=os.getenv("KAFKA_BROKER", "localhost:9092")
+            bootstrap_servers=infra.kafka_broker or "localhost:9092"
         )
         await kafka_producer.start()
         logger.info("Kafka Producer started")
@@ -183,8 +195,8 @@ async def on_startup():
         logger.error(f"Failed to start Kafka Producer: {e}")
         kafka_producer = None
 
-@app.on_event("shutdown")
-async def on_shutdown():
+
+async def _shutdown() -> None:
     metrics_agent.stop()
     ebpf_agent.stop()
     stop_scheduler()
@@ -193,6 +205,24 @@ async def on_shutdown():
     if kafka_producer:
         await kafka_producer.stop()
         logger.info("Kafka Producer stopped")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Startup/shutdown. Replaces the deprecated on_event hooks.
+
+    The shutdown half runs in a finally block so a crash during serving still
+    stops the collectors and flushes the Kafka producer, rather than leaving
+    buffered records unsent.
+    """
+    await _startup()
+    try:
+        yield
+    finally:
+        await _shutdown()
+
+
+app.router.lifespan_context = lifespan
 
 
 # ─── MODELS — Now imported from denoiser.api.schemas ─────────────────────────

@@ -129,3 +129,48 @@ class TestDecorator:
 
         await work()
         assert len(runs) == 1
+
+
+class TestSchedulerToggle:
+    def test_enabled_by_default(self, monkeypatch):
+        from denoiser.api.scheduler import scheduler_enabled
+
+        monkeypatch.delenv("SEMANTICOS_SCHEDULER_ENABLED", raising=False)
+        assert scheduler_enabled() is True
+
+    def test_can_be_disabled_for_a_dedicated_cron_replica(self, monkeypatch):
+        from denoiser.api.scheduler import scheduler_enabled
+
+        monkeypatch.setenv("SEMANTICOS_SCHEDULER_ENABLED", "0")
+        assert scheduler_enabled() is False
+
+    def test_start_scheduler_respects_the_toggle(self, monkeypatch):
+        from denoiser.api import scheduler as sched
+
+        monkeypatch.setenv("SEMANTICOS_SCHEDULER_ENABLED", "0")
+        started = []
+        monkeypatch.setattr(sched.scheduler, "start", lambda: started.append(1))
+
+        sched.start_scheduler()
+
+        assert started == []
+
+
+class TestLockKeyAndClient:
+    def test_redis_url_reads_the_environment(self, monkeypatch):
+        monkeypatch.setenv("REDIS_URL", "redis://configured:6379/0")
+        assert joblock._redis_url() == "redis://configured:6379/0"
+
+    def test_empty_redis_url_counts_as_unconfigured(self, monkeypatch):
+        """An empty string must not be mistaken for a working backend."""
+        monkeypatch.setenv("REDIS_URL", "")
+        assert joblock._redis_url() is None
+
+    def test_occurrence_key_is_per_job_per_day(self):
+        key = joblock._occurrence_key("archive", datetime(2026, 7, 23, 2, 0, tzinfo=UTC))
+        assert key == "semanticos:joblock:archive:2026-07-23"
+
+    def test_make_client_builds_a_client_without_connecting(self):
+        """Constructing the client must not perform I/O; the lock call does that."""
+        client = joblock._make_client("redis://localhost:6379/0")
+        assert hasattr(client, "set")
