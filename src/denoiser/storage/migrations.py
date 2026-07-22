@@ -25,10 +25,12 @@ never taken again.
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from pathlib import Path
 
-from sqlalchemy import inspect, text
+from sqlalchemy import JSON, Boolean, Column, DateTime, Integer, String, inspect
 from sqlalchemy.engine import Engine
+from sqlalchemy.sql.expression import true
 
 from denoiser.logging import get_logger
 
@@ -38,16 +40,24 @@ logger = get_logger(__name__)
 # create_all at any point in that history may be missing any subset of them, so
 # each is probed and added independently — gating several columns behind one
 # probe silently skips the rest on a database that already has the first.
-LEGACY_COLUMNS: list[tuple[str, str, str]] = [
-    ("users", "is_active", "BOOLEAN DEFAULT 1"),
-    ("users", "department", "VARCHAR DEFAULT 'Engineering'"),
-    ("users", "environment_access", "JSON DEFAULT '[]'"),
-    ("dashboards", "default_time_range", "VARCHAR DEFAULT '1h'"),
-    ("dashboards", "template_variables", "JSON DEFAULT '[]'"),
-    ("monitors", "muted_until", "DATETIME"),
-    ("metric_rules", "tenant_id", "INTEGER REFERENCES tenants(id)"),
-    ("extracted_metrics", "tenant_id", "INTEGER REFERENCES tenants(id)"),
-    ("spans", "tenant_id", "INTEGER REFERENCES tenants(id)"),
+#
+# Declared as SQLAlchemy types rather than DDL strings so alembic renders them
+# per dialect. Hand-written DDL was SQLite-shaped ("BOOLEAN DEFAULT 1",
+# "DATETIME") and Postgres rejects both — which is the dialect the deployed
+# instance actually runs.
+#
+# ``index`` is only set where the model declares one. A blanket index breaks on
+# Postgres anyway: json columns have no default btree operator class.
+LEGACY_COLUMNS: list[tuple[str, str, Callable[[], Column], bool]] = [
+    ("users", "is_active", lambda: Column("is_active", Boolean(), server_default=true(), nullable=True), False),
+    ("users", "department", lambda: Column("department", String(), server_default="Engineering", nullable=True), False),
+    ("users", "environment_access", lambda: Column("environment_access", JSON(), nullable=True), False),
+    ("dashboards", "default_time_range", lambda: Column("default_time_range", String(), server_default="1h", nullable=True), False),
+    ("dashboards", "template_variables", lambda: Column("template_variables", JSON(), nullable=True), False),
+    ("monitors", "muted_until", lambda: Column("muted_until", DateTime(), nullable=True), False),
+    ("metric_rules", "tenant_id", lambda: Column("tenant_id", Integer(), nullable=True), True),
+    ("extracted_metrics", "tenant_id", lambda: Column("tenant_id", Integer(), nullable=True), True),
+    ("spans", "tenant_id", lambda: Column("tenant_id", Integer(), nullable=True), True),
 ]
 
 
@@ -96,20 +106,29 @@ def _run_alembic(cfg, engine: Engine, run) -> None:
 
 
 def _repair_legacy_columns(engine: Engine) -> list[str]:
-    """Add any baseline columns a create_all-era database is missing."""
+    """Add any baseline columns a create_all-era database is missing.
+
+    Uses alembic's operations rather than raw DDL so the column types render
+    correctly for whichever dialect is in use.
+    """
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
     inspector = inspect(engine)
     existing_tables = set(inspector.get_table_names())
     repaired = []
 
-    for table, column, ddl in LEGACY_COLUMNS:
+    for table, column, build_column, wants_index in LEGACY_COLUMNS:
         if table not in existing_tables:
             continue  # create_all will add the whole table below
         if column in {c["name"] for c in inspector.get_columns(table)}:
             continue
 
         with engine.begin() as conn:
-            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
-            conn.execute(text(f"CREATE INDEX IF NOT EXISTS ix_{table}_{column} ON {table} ({column})"))
+            op = Operations(MigrationContext.configure(conn))
+            op.add_column(table, build_column())
+            if wants_index:
+                op.create_index(f"ix_{table}_{column}", table, [column])
         repaired.append(f"{table}.{column}")
 
     return repaired

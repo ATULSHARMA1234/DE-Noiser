@@ -58,7 +58,7 @@ class TestFreshDatabase:
         bootstrap_schema(fresh_engine)
 
         inspector = inspect(fresh_engine)
-        for table, column, _ddl in LEGACY_COLUMNS:
+        for table, column, _build, _index in LEGACY_COLUMNS:
             assert column in {c["name"] for c in inspector.get_columns(table)}, f"{table}.{column} missing"
 
 
@@ -78,7 +78,7 @@ class TestLegacyDatabase:
         bootstrap_schema(legacy_engine)
 
         inspector = inspect(legacy_engine)
-        for table, column, _ddl in LEGACY_COLUMNS:
+        for table, column, _build, _index in LEGACY_COLUMNS:
             assert column in {c["name"] for c in inspector.get_columns(table)}, f"{table}.{column} not repaired"
 
     def test_creates_tables_added_since(self, legacy_engine):
