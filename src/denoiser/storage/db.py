@@ -10,7 +10,7 @@ from __future__ import annotations
 import datetime
 import os
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, Float, Integer, String, create_engine, text
+from sqlalchemy import JSON, Boolean, Column, DateTime, Float, Integer, String, create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
@@ -303,83 +303,13 @@ class DeploymentMarker(Base):
 # ── Session helpers ──────────────────────────────────────────────────────────
 
 def init_db():
-    """Create all tables if they don't exist and seed default admin."""
-    Base.metadata.create_all(bind=engine)
+    """Bring the schema to head and seed the default tenant and admin."""
+    from denoiser.storage.migrations import bootstrap_schema
+
+    bootstrap_schema(engine)
 
     db = SessionLocal()
     try:
-        try:
-            db.execute(text("SELECT is_active FROM users LIMIT 1"))
-        except Exception:
-            db.rollback()
-            try:
-                db.execute(text("ALTER TABLE users ADD COLUMN is_active BOOLEAN DEFAULT 1"))
-                db.commit()
-            except Exception:
-                db.rollback()
-
-        try:
-            db.execute(text("SELECT department FROM users LIMIT 1"))
-        except Exception:
-            db.rollback()
-            try:
-                db.execute(text("ALTER TABLE users ADD COLUMN department VARCHAR DEFAULT 'Engineering'"))
-                db.commit()
-            except Exception:
-                db.rollback()
-
-        try:
-            db.execute(text("SELECT environment_access FROM users LIMIT 1"))
-        except Exception:
-            db.rollback()
-            try:
-                db.execute(text("ALTER TABLE users ADD COLUMN environment_access JSON DEFAULT '[]'"))
-                db.commit()
-            except Exception:
-                db.rollback()
-
-        try:
-            db.execute(text("SELECT default_time_range FROM dashboards LIMIT 1"))
-        except Exception:
-            db.rollback()
-            try:
-                db.execute(text("ALTER TABLE dashboards ADD COLUMN default_time_range VARCHAR DEFAULT '1h'"))
-                db.execute(text("ALTER TABLE dashboards ADD COLUMN template_variables JSON DEFAULT '[]'"))
-                db.commit()
-            except Exception:
-                db.rollback()
-
-        # Add muted_until to monitors for snooze feature
-        try:
-            db.execute(text("SELECT muted_until FROM monitors LIMIT 1"))
-        except Exception:
-            db.rollback()
-            try:
-                db.execute(text("ALTER TABLE monitors ADD COLUMN muted_until DATETIME"))
-                db.commit()
-            except Exception:
-                db.rollback()
-
-        # Issue #8: add tenant_id to metric_rules, extracted_metrics and spans
-        # for proper multi-tenant isolation.
-        #
-        # Each table is probed separately. Gating all three behind a single
-        # probe on metric_rules silently skips the other two on any database
-        # that already picked up the metric_rules column, leaving the models
-        # declaring tenant_id against tables that don't have it — every insert
-        # then fails with "table spans has no column named tenant_id".
-        for table in ("metric_rules", "extracted_metrics", "spans"):
-            try:
-                db.execute(text(f"SELECT tenant_id FROM {table} LIMIT 1"))
-            except Exception:
-                db.rollback()
-                try:
-                    db.execute(text(f"ALTER TABLE {table} ADD COLUMN tenant_id INTEGER REFERENCES tenants(id)"))
-                    db.execute(text(f"CREATE INDEX IF NOT EXISTS ix_{table}_tenant_id ON {table} (tenant_id)"))
-                    db.commit()
-                except Exception:
-                    db.rollback()
-
         admin_email = "admin@semanticos.io"
         exists = db.query(User).filter(User.email == admin_email).first()
 

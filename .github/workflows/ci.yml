@@ -35,6 +35,19 @@ jobs:
         continue-on-error: true
         run: uv run mypy src/denoiser
 
+      # Blocking: the migrations must build the real schema from empty, and
+      # must match the models. Before this gate the chain had never been run at
+      # all: it failed on the second revision, and the schema was actually
+      # created by create_all with columns bolted on by ad-hoc ALTER probes.
+      # `alembic check` is what keeps models and migrations from drifting again
+      # — it fails whenever a model change has no accompanying migration.
+      - name: Migration integrity
+        env:
+          DATABASE_URL: sqlite:///./ci_migration_check.db
+        run: |
+          uv run alembic upgrade head
+          uv run alembic check
+
       # Blocking: tests + coverage floor. The floor is a ratchet — raise it as
       # coverage improves; it must never silently exceed real coverage again.
       - name: Test with pytest

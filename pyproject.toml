@@ -62,6 +62,7 @@ dependencies = [
     "statsmodels>=0.14.6",
     "pandas>=3.0.3",
     "aiokafka>=0.14.0",
+    "alembic>=1.13.0",
 ]
 
 [dependency-groups]
