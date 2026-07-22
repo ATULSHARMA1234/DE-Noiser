@@ -60,7 +60,7 @@ export function OnboardingWizard() {
 
  {step === 2 && (
  <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
- <div className="w-12 h-12 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">
+ <div className="w-12 h-12 rounded-xl bg-[var(--primary-dim)] border border-[var(--primary-line)] flex items-center justify-center text-[var(--primary)]">
  <Play size={24} />
  </div>
  <h2 className="text-xl font-bold text-[var(--text-primary)]">Upload & Provision Log Sources</h2>

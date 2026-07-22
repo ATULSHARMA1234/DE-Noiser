@@ -9,6 +9,14 @@ import { apiFetch, runAnalysis as runAnalysisJob } from '@/lib/api';
 import { useTimeRange } from '@/context/TimeRangeContext';
 import { useTasks } from '@/context/TaskContext';
 
+// ECharts draws to a canvas, where `var(--token)` is not a valid colour — it
+// would silently render black. Resolve design tokens to their computed value.
+const cssVar = (name: string, fallback: string) => {
+ if (typeof window === 'undefined') return fallback;
+ const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+ return v || fallback;
+};
+
 const seededValue = (index: number, seed: number) => {
  const x = Math.sin(index * 12.9898 + seed * 78.233) * 43758.5453;
  return x - Math.floor(x);
@@ -16,12 +24,27 @@ const seededValue = (index: number, seed: number) => {
 
 
 function Sparkline({ data, dataKey, color }: { data: any[], dataKey: string, color: string }) {
+ // A sparkline alone shows shape but no reading. State the current value's
+ // drift from the window average, so the shape means something.
+ const series = data.map((d) => d?.[dataKey] ?? 0);
+ const current = series[series.length - 1] ?? 0;
+ const avg = series.length ? series.reduce((a, b) => a + b, 0) / series.length : 0;
+ const delta = current - avg;
+ const pct = avg ? (delta / avg) * 100 : 0;
+ const flat = Math.abs(pct) < 1;
+
  return (
- <div className="ml-auto">
- <LineChart width={120} height={40} data={data}>
- <Line type="monotone" dataKey={dataKey} stroke={color} strokeWidth={2} dot={false} isAnimationActive={false} />
+ <div className="ml-auto flex flex-col items-end gap-0.5">
+ <LineChart width={120} height={36} data={data}>
+ <Line type="monotone" dataKey={dataKey} stroke={color} strokeWidth={1.5} dot={false} isAnimationActive={false} />
  <YAxis domain={['dataMin - 10', 'dataMax + 10']} hide />
  </LineChart>
+ <span
+ className="mono text-[10px] tnum"
+ style={{ color: flat ? 'var(--text-muted)' : delta > 0 ? 'var(--signal-warn)' : 'var(--signal-ok)' }}
+ >
+ {flat ? '≈ avg' : `${delta > 0 ? '+' : ''}${pct.toFixed(0)}% vs avg`}
+ </span>
  </div>
  );
 }
@@ -216,46 +239,91 @@ export default function CommandCenter() {
  const getMetricOption = () => {
  const chartData = metrics.length > 0 ? metrics : Array.from({ length: 20 }, () => ({ time: '', cpu: 0, mem: 0, anomaly: null }));
  const xLabels = chartData.filter((_, i) => i % 3 === 0).map(m => m.time);
+ // The same thresholds the anomaly rule uses (cpu > 85 || mem > 90). Drawing
+ // them makes the scatter points legible: you can see what a dot breached.
+ const WARN = 0.85;
+ const CRIT = 0.90;
+ const C = {
+ info: cssVar('--signal-info', '#4a9eff'),
+ ok: cssVar('--signal-ok', '#35c08e'),
+ warn: cssVar('--signal-warn', '#f5a623'),
+ crit: cssVar('--signal-crit', '#f2555a'),
+ text: cssVar('--text-primary', '#e7e9ec'),
+ muted: cssVar('--text-muted', '#6a717a'),
+ border: cssVar('--border', 'rgba(255,255,255,0.09)'),
+ borderSubtle: cssVar('--border-subtle', 'rgba(255,255,255,0.045)'),
+ elevated: cssVar('--bg-elevated', '#121519'),
+ };
  return {
  backgroundColor: 'transparent',
+ // Shared crosshair: read every series at one instant, like an APM chart.
  tooltip: {
  trigger: 'axis',
+ axisPointer: { type: 'cross', label: { backgroundColor: C.elevated }, crossStyle: { color: 'rgba(255,255,255,0.2)' } },
+ backgroundColor: C.elevated,
+ borderColor: C.border,
+ borderWidth: 1,
+ textStyle: { color: C.text, fontSize: 11 },
  formatter: (params: any) => {
  if (!params?.length) return '';
- let html = `<div style="font-size:11px">${params[0].axisValue}</div>`;
+ let html = `<div style="opacity:.65;margin-bottom:3px">${params[0].axisValue}</div>`;
+ let breached = false;
  params.forEach((p: any) => {
  if (p.value != null) {
- const val = p.seriesName === 'Anomalies' ? `${(p.value * 100).toFixed(1)}%` : `${(p.value * 100).toFixed(1)}%`;
- html += `<div>${p.marker} ${p.seriesName}: <b>${val}</b></div>`;
+ if (p.value >= WARN) breached = true;
+ html += `<div>${p.marker} ${p.seriesName}: <b>${(p.value * 100).toFixed(1)}%</b></div>`;
  }
  });
+ if (breached) html += `<div style="margin-top:3px;color:var(--signal-warn)">above threshold</div>`;
  return html;
  }
  },
  legend: {
  data: ['CPU', 'Memory', 'Anomalies'],
  bottom: 0,
- textStyle: { color: '#71717a', fontSize: 10 },
- icon: 'circle'
+ textStyle: { color: C.muted, fontSize: 10 },
+ icon: 'rect',
+ itemWidth: 8,
+ itemHeight: 8,
  },
- grid: { top: 20, bottom: 40, left: 40, right: 10 },
+ grid: { top: 16, bottom: 40, left: 40, right: 12 },
  xAxis: {
  type: 'category',
  data: xLabels,
- axisLabel: { color: '#52525b', fontSize: 9 },
- axisLine: { lineStyle: { color: '#27272a' } },
+ axisLabel: { color: C.muted, fontSize: 9 },
+ axisLine: { lineStyle: { color: C.border } },
  axisTick: { show: false }
  },
  yAxis: {
  type: 'value',
  min: 0, max: 1,
- splitLine: { lineStyle: { color: '#27272a', type: 'dashed' } },
- axisLabel: { color: '#52525b', fontSize: 9, formatter: (v: number) => `${(v * 100).toFixed(0)}%` }
+ splitLine: { lineStyle: { color: C.borderSubtle } },
+ axisLabel: { color: C.muted, fontSize: 9, formatter: (v: number) => `${(v * 100).toFixed(0)}%` }
  },
  series: [
- { name: 'CPU', type: 'line', smooth: true, data: chartData.map(m => m.cpu), itemStyle: { color: '#3b82f6' }, symbol: 'circle', symbolSize: 4, areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(59, 130, 246, 0.3)' }, { offset: 1, color: 'rgba(59, 130, 246, 0)' }]) } },
- { name: 'Memory', type: 'line', smooth: true, data: chartData.map(m => m.mem), itemStyle: { color: '#10b981' }, symbol: 'circle', symbolSize: 4, areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(16, 185, 129, 0.3)' }, { offset: 1, color: 'rgba(16, 185, 129, 0)' }]) } },
- { name: 'Anomalies', type: 'scatter', data: chartData.map(m => m.anomaly), itemStyle: { color: '#d946ef' }, symbolSize: 8 }
+ {
+ name: 'CPU', type: 'line', smooth: false, data: chartData.map(m => m.cpu),
+ lineStyle: { width: 1.5, color: C.info },
+ itemStyle: { color: C.info }, symbol: 'none',
+ // Thresholds ride on the first series so they render once.
+ markLine: {
+ silent: true, symbol: 'none',
+ label: { formatter: (p: any) => p.name, color: C.muted, fontSize: 9, position: 'insideEndTop' },
+ data: [
+ { yAxis: WARN, name: 'warn 85', lineStyle: { color: C.warn, type: 'dashed', width: 1, opacity: 0.7 } },
+ { yAxis: CRIT, name: 'crit 90', lineStyle: { color: C.crit, type: 'dashed', width: 1, opacity: 0.7 } },
+ ],
+ },
+ },
+ {
+ name: 'Memory', type: 'line', smooth: false, data: chartData.map(m => m.mem),
+ lineStyle: { width: 1.5, color: C.ok },
+ itemStyle: { color: C.ok }, symbol: 'none',
+ },
+ {
+ name: 'Anomalies', type: 'scatter', data: chartData.map(m => m.anomaly),
+ itemStyle: { color: C.crit }, symbolSize: 7,
+ },
  ]
  };
  };
@@ -277,11 +345,11 @@ export default function CommandCenter() {
  }
  });
  const groups = [...new Set(scatterData.map(d => d[3]))];
- const colors = ['#d946ef', '#3b82f6', '#10b981', '#f59e0b', '#ef4444'];
+ const colors = [cssVar('--signal-alt', '#9d7bff'), cssVar('--signal-info', '#4a9eff'), cssVar('--signal-ok', '#35c08e'), cssVar('--signal-warn', '#f5a623'), cssVar('--signal-crit', '#f2555a')];
  return {
  backgroundColor: 'transparent',
  tooltip: { show: false },
- legend: { bottom: 0, left: 10, textStyle: { color: '#71717a', fontSize: 9 }, icon: 'circle' },
+ legend: { bottom: 0, left: 10, textStyle: { color: cssVar('--text-muted', '#6a717a'), fontSize: 9 }, icon: 'circle' },
  grid: { top: 10, bottom: 30, left: 10, right: 10 },
  xAxis: { show: false }, yAxis: { show: false },
  series: groups.map((g, gi) => ({
@@ -303,13 +371,13 @@ export default function CommandCenter() {
  return {
  backgroundColor: 'transparent',
  tooltip: { show: false },
- legend: { bottom: 0, left: 10, textStyle: { color: '#71717a', fontSize: 9 }, icon: 'circle' },
+ legend: { bottom: 0, left: 10, textStyle: { color: cssVar('--text-muted', '#6a717a'), fontSize: 9 }, icon: 'circle' },
  grid: { top: 10, bottom: 30, left: 10, right: 10 },
  xAxis: { show: false }, yAxis: { show: false },
  series: [
- { name: 'C1', type: 'scatter', symbolSize: (d: any) => d[2] * 2, data: scatterData.filter(d => d[3] === 'C1'), itemStyle: { color: '#d946ef', opacity: 0.8 } },
- { name: 'C2', type: 'scatter', symbolSize: (d: any) => d[2] * 2, data: scatterData.filter(d => d[3] === 'C2'), itemStyle: { color: '#3b82f6', opacity: 0.8 } },
- { name: 'Noise', type: 'scatter', symbolSize: (d: any) => d[2] * 2, data: scatterData.filter(d => d[3] === 'Noise'), itemStyle: { color: '#10b981', opacity: 0.3 } }
+ { name: 'C1', type: 'scatter', symbolSize: (d: any) => d[2] * 2, data: scatterData.filter(d => d[3] === 'C1'), itemStyle: { color: cssVar('--signal-alt', '#9d7bff'), opacity: 0.8 } },
+ { name: 'C2', type: 'scatter', symbolSize: (d: any) => d[2] * 2, data: scatterData.filter(d => d[3] === 'C2'), itemStyle: { color: cssVar('--signal-info', '#4a9eff'), opacity: 0.8 } },
+ { name: 'Noise', type: 'scatter', symbolSize: (d: any) => d[2] * 2, data: scatterData.filter(d => d[3] === 'Noise'), itemStyle: { color: cssVar('--signal-ok', '#35c08e'), opacity: 0.3 } }
  ]
  };
  };
@@ -402,45 +470,45 @@ export default function CommandCenter() {
 
  {/* System Vitals Panel */}
  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
- <div className="bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-xl p-4 shadow-sm flex items-center justify-between">
+ <div className="bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-[3px] p-3.5 flex items-center justify-between">
  <div>
  <div className="flex items-center gap-2 mb-1">
  <Cpu size={14} className="text-blue-400" />
- <p className="text-xs text-[var(--text-muted)] font-medium uppercase tracking-wider">CPU Usage</p>
+ <p className="eyebrow">CPU Usage</p>
  </div>
- <span className="text-2xl font-bold text-[var(--text-primary)]">{vitals[vitals.length-1].cpu.toFixed(1)}%</span>
+ <span className="text-[22px] font-semibold tnum mono text-[var(--text-primary)]">{vitals[vitals.length-1].cpu.toFixed(1)}%</span>
  </div>
- <Sparkline data={vitals} dataKey="cpu" color="#3b82f6" />
+ <Sparkline data={vitals} dataKey="cpu" color="var(--signal-info)" />
  </div>
- <div className="bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-xl p-4 shadow-sm flex items-center justify-between">
+ <div className="bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-[3px] p-3.5 flex items-center justify-between">
  <div>
  <div className="flex items-center gap-2 mb-1">
- <MemoryStick size={14} className="text-emerald-400" />
- <p className="text-xs text-[var(--text-muted)] font-medium uppercase tracking-wider">Memory</p>
+ <MemoryStick size={14} style={{ color: "var(--signal-ok)" }} />
+ <p className="eyebrow">Memory</p>
  </div>
- <span className="text-2xl font-bold text-[var(--text-primary)]">{vitals[vitals.length-1].mem.toFixed(1)}%</span>
+ <span className="text-[22px] font-semibold tnum mono text-[var(--text-primary)]">{vitals[vitals.length-1].mem.toFixed(1)}%</span>
  </div>
- <Sparkline data={vitals} dataKey="mem" color="#10b981" />
+ <Sparkline data={vitals} dataKey="mem" color="var(--signal-ok)" />
  </div>
- <div className="bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-xl p-4 shadow-sm flex items-center justify-between">
+ <div className="bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-[3px] p-3.5 flex items-center justify-between">
  <div>
  <div className="flex items-center gap-2 mb-1">
  <HardDrive size={14} className="text-[var(--primary)]" />
- <p className="text-xs text-[var(--text-muted)] font-medium uppercase tracking-wider">Disk I/O</p>
+ <p className="eyebrow">Disk I/O</p>
  </div>
- <span className="text-2xl font-bold text-[var(--text-primary)]">{vitals[vitals.length-1].disk.toFixed(0)} IOPS</span>
+ <span className="text-[22px] font-semibold tnum mono text-[var(--text-primary)]">{vitals[vitals.length-1].disk.toFixed(0)} IOPS</span>
  </div>
- <Sparkline data={vitals} dataKey="disk" color="#d946ef" />
+ <Sparkline data={vitals} dataKey="disk" color="var(--signal-alt)" />
  </div>
- <div className="bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-xl p-4 shadow-sm flex items-center justify-between">
+ <div className="bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-[3px] p-3.5 flex items-center justify-between">
  <div>
  <div className="flex items-center gap-2 mb-1">
- <Wifi size={14} className="text-orange-400" />
- <p className="text-xs text-[var(--text-muted)] font-medium uppercase tracking-wider">Net Drops</p>
+ <Wifi size={14} style={{ color: "var(--signal-warn)" }} />
+ <p className="eyebrow">Net Drops</p>
  </div>
- <span className="text-2xl font-bold text-[var(--text-primary)]">{vitals[vitals.length-1].net.toFixed(0)} pkt/s</span>
+ <span className="text-[22px] font-semibold tnum mono text-[var(--text-primary)]">{vitals[vitals.length-1].net.toFixed(0)} pkt/s</span>
  </div>
- <Sparkline data={vitals} dataKey="net" color="#f97316" />
+ <Sparkline data={vitals} dataKey="net" color="var(--signal-warn)" />
  </div>
  </div>
 
@@ -565,7 +633,7 @@ export default function CommandCenter() {
  )) : (
  <li className="flex items-start gap-2.5">
  <span className="w-1.5 h-1.5 rounded-full bg-[var(--primary)] mt-1.5 shrink-0"></span>
- {data.intelligence.incident_summary}
+ {typeof data.intelligence.incident_summary === 'object' ? (data.intelligence.incident_summary?.summary || data.intelligence.incident_summary?.representative_log || JSON.stringify(data.intelligence.incident_summary)) : data.intelligence.incident_summary}
  </li>
  )
  ) : (
@@ -648,7 +716,7 @@ export default function CommandCenter() {
  </td>
  <td className="py-3 px-2 font-medium text-[var(--text-primary)] truncate max-w-[280px]" title={c.representative_template}>
  {c.keyword_flag && <span className="mr-1 text-[9px] font-bold text-red-400">🔴</span>}
- {c.summary !== "Analyzing..." ? c.summary : c.representative_template}
+ {(() => { const s = typeof c.summary === 'object' ? (c.summary?.summary || c.summary?.representative_log || '') : c.summary; return s && s !== 'Analyzing...' ? s : c.representative_template; })()}
  </td>
  <td className="py-3 text-[var(--text-secondary)] font-mono">{c.size.toLocaleString()}</td>
  <td className="py-3 font-bold">

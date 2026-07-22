@@ -93,8 +93,13 @@ def process_otlp_traces(db: Session, payload: dict, tenant_id: str = "default_te
                     json.dumps(events)
                 ))
 
-    # Write to ClickHouse
+    # Write to ClickHouse. insert_traces returns False (rather than raising) when
+    # the client is unavailable or the insert fails, so the result must be checked
+    # and propagated -- otherwise the caller records a success it never had.
     if ch_traces:
         from denoiser.storage.clickhouse_store import ClickHouseStore
         ch_store = ClickHouseStore()
-        ch_store.insert_traces(ch_traces)
+        if not ch_store.insert_traces(ch_traces, tenant_id=tenant_id):
+            raise RuntimeError(f"ClickHouse rejected {len(ch_traces)} spans for tenant {tenant_id}")
+
+    return True

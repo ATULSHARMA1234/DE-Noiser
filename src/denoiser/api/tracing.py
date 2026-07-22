@@ -16,23 +16,16 @@ from denoiser.tracing.otlp_collector import process_otlp_traces
 router = APIRouter(prefix="/traces", tags=["tracing"])
 
 import contextlib
+from datetime import UTC
 
 from fastapi import Header
 
 DATA_DIR = Path("data")
 _clickhouse_store = ClickHouseStore()
 
+from sqlalchemy import case, func
 
-def _load_demo_traces() -> list[dict]:
-    """Load demo traces from the local JSON file for in-memory fallback."""
-    demo_file = DATA_DIR / "demo_traces.json"
-    if not demo_file.exists():
-        return []
-    try:
-        with open(demo_file) as f:
-            return json.load(f)
-    except Exception:
-        return []
+from denoiser.storage.db import Span
 
 
 @router.post("/v1/traces", summary="OTLP HTTP Ingest")
@@ -62,9 +55,9 @@ async def ingest_traces(
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("", response_model=list[TraceSchema])
-def list_traces(from_ts: int | None = None, to_ts: int | None = None, limit: int = 50, current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
+def list_traces(from_ts: int | None = None, to_ts: int | None = None, limit: int = 50, db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
     """
-    List trace aggregates. Uses ClickHouse if available, else falls back to demo data.
+    List trace aggregates. Uses ClickHouse if available, else falls back to SQLite data.
     """
     client = _clickhouse_store.client
     if client:
@@ -120,42 +113,58 @@ def list_traces(from_ts: int | None = None, to_ts: int | None = None, limit: int
         except Exception:
             pass  # Fall through to in-memory
 
-    # In-memory fallback from demo file
-    demo_traces = _load_demo_traces()
-    from datetime import datetime, timezone
+    # SQLite fallback
+    try:
+        from datetime import datetime
+        query = db.query(
+            Span.trace_id,
+            func.min(Span.start_time).label("start_time"),
+            func.max(Span.end_time).label("end_time"),
+            func.count(Span.id).label("span_count"),
+            func.sum(case((Span.status_code == 'ERROR', 1), else_=0)).label("error_count")
+        ).filter(Span.tenant_id == current_user.tenant_id)
+        
+        if from_ts is not None:
+            query = query.filter(Span.start_time >= datetime.fromtimestamp(from_ts / 1000.0, tz=UTC))
+        if to_ts is not None:
+            query = query.filter(Span.start_time <= datetime.fromtimestamp(to_ts / 1000.0, tz=UTC))
+            
+        # SQLite doesn't let us easily pull the FIRST service_name per trace without a subquery or window func. 
+        # For fallback, we just pull aggregated info. Root service/operation can be looked up or approximated.
+        # But wait, we can just join or do an extra query if we really want root spans. For now we will approximate
+        # or do a slightly simpler group by.
+        results = query.group_by(Span.trace_id).order_by(func.min(Span.start_time).desc()).limit(limit).all()
+        
+        filtered = []
+        for row in results:
+            # We don't have root_service in this simplified group_by, so we fetch the root span or just label it
+            # To be efficient, let's just do a quick fetch of the root span for these trace_ids
+            root_span = db.query(Span).filter(Span.trace_id == row.trace_id, Span.parent_span_id.is_(None)).first()
+            if not root_span:
+                # If no strict root span found, just pick any span for the trace
+                root_span = db.query(Span).filter(Span.trace_id == row.trace_id).first()
 
-    filtered = []
-    for t in demo_traces:
-        ts = datetime.fromisoformat(t["start_time"])
-        if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=timezone.utc)
-        ts_ms = ts.timestamp() * 1000
-
-        if from_ts is not None and ts_ms < from_ts:
-            continue
-        if to_ts is not None and ts_ms > to_ts:
-            continue
-
-        filtered.append(TraceSchema(
-            trace_id=t["trace_id"],
-            root_service=t["root_service"],
-            root_operation=t["root_operation"],
-            start_time=t["start_time"],
-            duration_ms=t["duration_ms"],
-            span_count=t["span_count"],
-            error_count=t["error_count"],
-            spans=[]
-        ))
-
-        if len(filtered) >= limit:
-            break
-
-    return filtered
+            duration_ms = max(0, (row.end_time - row.start_time).total_seconds() * 1000.0) if row.end_time and row.start_time else 0
+            filtered.append(TraceSchema(
+                trace_id=row.trace_id,
+                root_service=root_span.service_name if root_span else "unknown",
+                root_operation=root_span.operation_name if root_span else "unknown",
+                start_time=row.start_time,
+                duration_ms=duration_ms,
+                span_count=row.span_count,
+                error_count=row.error_count or 0,
+                spans=[]
+            ))
+            
+        return filtered
+    except Exception as e:
+        print(f"SQLite fallback failed: {e}")
+        return []
 
 @router.get("/{trace_id}", response_model=TraceSchema)
-def get_trace(trace_id: str, current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
+def get_trace(trace_id: str, db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
     """
-    Get full trace details including all spans. Uses ClickHouse if available, else falls back to demo data.
+    Get full trace details including all spans. Uses ClickHouse if available, else falls back to SQLite.
     """
     client = _clickhouse_store.client
     if client:
@@ -217,36 +226,48 @@ def get_trace(trace_id: str, current_user: User = Depends(require_role(["VIEWER"
         except Exception:
             pass  # Fall through to in-memory
 
-    # In-memory fallback
-    demo_traces = _load_demo_traces()
-    for t in demo_traces:
-        if t["trace_id"] == trace_id:
-            spans = [
-                SpanSchema(
-                    trace_id=s["trace_id"],
-                    span_id=s["span_id"],
-                    parent_span_id=s.get("parent_span_id"),
-                    service_name=s["service_name"],
-                    operation_name=s["operation_name"],
-                    start_time=s["start_time"],
-                    end_time=s["end_time"],
-                    duration_ms=s["duration_ms"],
-                    status_code=s.get("status_code", "OK"),
-                    attributes=s.get("attributes", {}),
-                    events=s.get("events", [])
-                )
-                for s in t["spans"]
-            ]
-            return TraceSchema(
-                trace_id=t["trace_id"],
-                root_service=t["root_service"],
-                root_operation=t["root_operation"],
-                start_time=t["start_time"],
-                duration_ms=t["duration_ms"],
-                span_count=t["span_count"],
-                error_count=t["error_count"],
-                spans=spans
-            )
+    # SQLite fallback
+    try:
+        db_spans = db.query(Span).filter(Span.trace_id == trace_id, Span.tenant_id == current_user.tenant_id).order_by(Span.start_time.asc()).all()
+        if not db_spans:
+            raise HTTPException(status_code=404, detail="Trace not found")
+            
+        spans = []
+        for s in db_spans:
+            spans.append(SpanSchema(
+                trace_id=s.trace_id,
+                span_id=s.span_id,
+                parent_span_id=s.parent_span_id,
+                service_name=s.service_name,
+                operation_name=s.operation_name,
+                start_time=s.start_time,
+                end_time=s.end_time,
+                duration_ms=s.duration_ms,
+                status_code=s.status_code or "OK",
+                attributes=s.attributes or {},
+                events=s.events or []
+            ))
+            
+        root = next((s for s in spans if not s.parent_span_id), spans[0])
+        error_count = sum(1 for s in spans if s.status_code == 'ERROR')
 
-    raise HTTPException(status_code=404, detail="Trace not found")
+        start = min(s.start_time for s in spans)
+        end = max(s.end_time for s in spans)
+        duration_ms = max(0, (end - start).total_seconds() * 1000.0)
+        
+        return TraceSchema(
+            trace_id=root.trace_id,
+            root_service=root.service_name,
+            root_operation=root.operation_name,
+            start_time=start,
+            duration_ms=duration_ms,
+            span_count=len(spans),
+            error_count=error_count,
+            spans=spans
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"SQLite fallback failed: {e}")
+        raise HTTPException(status_code=404, detail="Trace not found")
 

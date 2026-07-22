@@ -6,6 +6,7 @@ from pathlib import Path
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
+from denoiser.api.joblock import single_instance
 from denoiser.logging import get_logger
 from denoiser.storage.object_store import ObjectStore
 
@@ -120,12 +121,29 @@ async def trigger_sso_s3_db_archival():
         logger.error(f"S3ArchiverEngine background job failed: {e}")
 
 scheduler = AsyncIOScheduler()
-# Run nightly
-scheduler.add_job(archive_old_logs_to_s3, 'cron', hour=2, minute=0)
-scheduler.add_job(cleanup_database_records, 'cron', hour=3, minute=0)
-scheduler.add_job(trigger_sso_s3_db_archival, 'cron', hour=4, minute=0)
+
+# Every job is wrapped so that only one replica executes a given occurrence.
+# APScheduler is in-process: without this, N replicas each run the nightly
+# archival, racing to gzip, upload and delete the same files.
+scheduler.add_job(single_instance("archive_old_logs_to_s3")(archive_old_logs_to_s3), 'cron', hour=2, minute=0)
+scheduler.add_job(single_instance("cleanup_database_records")(cleanup_database_records), 'cron', hour=3, minute=0)
+scheduler.add_job(single_instance("trigger_sso_s3_db_archival")(trigger_sso_s3_db_archival), 'cron', hour=4, minute=0)
+
+
+def scheduler_enabled() -> bool:
+    """Set SEMANTICOS_SCHEDULER_ENABLED=0 on replicas that should not schedule.
+
+    The lock already makes it safe to leave on everywhere. Turning it off lets
+    you run retention on a dedicated instance instead, which is easier to
+    reason about and to alert on.
+    """
+    return os.getenv("SEMANTICOS_SCHEDULER_ENABLED", "1").lower() in ("1", "true", "yes")
+
 
 def start_scheduler():
+    if not scheduler_enabled():
+        logger.info("Scheduler disabled via SEMANTICOS_SCHEDULER_ENABLED")
+        return
     if scheduler.running:
         return
     scheduler.start()

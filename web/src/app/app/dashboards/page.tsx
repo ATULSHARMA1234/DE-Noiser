@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { apiFetch, apiPut, apiPost } from '@/lib/api';
 import { useToast } from '@/context/ToastContext';
 import { ShimmerCardList } from '@/components/ShimmerSkeleton';
-import { LayoutGrid, Plus, Edit2, Trash2, ArrowLeft, BarChart2, Activity, List, X, PieChart as PieChartIcon } from 'lucide-react';
+import { LayoutGrid, Plus, Edit2, Trash2, ArrowLeft, BarChart2, Activity, List, X, PieChart as PieChartIcon, Hash, Gauge, Grid3x3, FileText } from 'lucide-react';
 import { Responsive, WidthProvider } from "react-grid-layout/legacy";
 import { ConfirmModal } from '@/components/ConfirmModal';
 import { ResponsiveContainer, PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip } from 'recharts';
@@ -13,6 +13,56 @@ import { WidgetConfigModal } from '@/components/widgets/WidgetConfigModal';
 import { MarkdownWidget } from '@/components/widgets/MarkdownWidget';
 
 const ResponsiveGridLayout = WidthProvider(Responsive);
+
+// Must mirror the server's alias map (api/dashboards.py) — dashboards created
+// earlier persist these legacy type names.
+const WIDGET_ALIAS: Record<string, string> = {
+ stat: 'metric_card',
+ timeseries: 'time_series',
+ logs: 'incident_feed',
+ log_table: 'incident_feed',
+};
+
+// Signal palette — severity reads the same here as everywhere else in the app.
+const SLICE_COLORS = ['var(--signal-crit)', 'var(--signal-warn)', 'var(--signal-info)', 'var(--signal-ok)', 'var(--signal-alt)', 'var(--text-muted)'];
+const CHART_TOOLTIP = {
+ backgroundColor: 'var(--bg-elevated)',
+ border: '1px solid var(--border)',
+ borderRadius: '3px',
+ fontSize: '11px',
+ color: 'var(--text-primary)',
+};
+
+// Every entry maps to a widget type + config the API already serves
+// (api/dashboards.py::get_widget_data). Named by what it tells you, not by the
+// chart primitive it happens to use.
+type CatalogItem = { key: string; title: string; kind: string; icon: any; type: string; config?: Record<string, any>; w: number; h: number };
+const WIDGET_CATALOG: CatalogItem[] = [
+ { key: 'open_incidents', title: 'Open Incidents', kind: 'Metric', icon: Hash, type: 'metric_card', config: { metric: 'open_incidents' }, w: 3, h: 3 },
+ { key: 'total_incidents', title: 'Total Incidents', kind: 'Metric', icon: Hash, type: 'metric_card', config: { metric: 'total_incidents' }, w: 3, h: 3 },
+ { key: 'resolved_incidents', title: 'Resolved', kind: 'Metric', icon: Hash, type: 'metric_card', config: { metric: 'resolved_incidents' }, w: 3, h: 3 },
+ { key: 'avg_impact', title: 'Avg Impact', kind: 'Metric', icon: Hash, type: 'metric_card', config: { metric: 'avg_impact' }, w: 3, h: 3 },
+ { key: 'slos_tracked', title: 'SLOs Tracked', kind: 'Metric', icon: Hash, type: 'metric_card', config: { metric: 'slos_tracked' }, w: 3, h: 3 },
+ { key: 'clusters_last_run', title: 'Clusters (last run)', kind: 'Metric', icon: Hash, type: 'metric_card', config: { metric: 'clusters_last_run' }, w: 3, h: 3 },
+ { key: 'runs_total', title: 'Analysis Runs', kind: 'Metric', icon: Hash, type: 'metric_card', config: { metric: 'runs_total' }, w: 3, h: 3 },
+ { key: 'incidents_per_day', title: 'Incidents / day', kind: 'Chart', icon: Activity, type: 'time_series', w: 6, h: 4 },
+ { key: 'top_domains', title: 'Top Domains', kind: 'Chart', icon: BarChart2, type: 'bar_chart', w: 6, h: 4 },
+ { key: 'severity_split', title: 'Severity Split', kind: 'Chart', icon: PieChartIcon, type: 'pie_chart', config: { by: 'severity' }, w: 4, h: 4 },
+ { key: 'resolved_ratio', title: 'Resolved Ratio', kind: 'Chart', icon: Gauge, type: 'gauge', w: 4, h: 4 },
+ { key: 'incident_heatmap', title: 'Incident Heatmap', kind: 'Chart', icon: Grid3x3, type: 'heatmap', config: { days: 30 }, w: 6, h: 4 },
+ { key: 'recent_incidents', title: 'Recent Incidents', kind: 'Feed', icon: List, type: 'incident_feed', w: 6, h: 5 },
+ { key: 'notes', title: 'Notes', kind: 'Markdown', icon: FileText, type: 'markdown', config: { content: '## Notes\n\nWrite anything here.' }, w: 4, h: 3 },
+];
+
+const DAY_LABELS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+
+function EmptyWidget({ label }: { label: string }) {
+ return (
+ <div className="h-full flex items-center justify-center">
+ <span className="eyebrow">{label}</span>
+ </div>
+ );
+}
 
 export default function DashboardsPage() {
  const { toast } = useToast();
@@ -33,6 +83,7 @@ export default function DashboardsPage() {
  const [globalTimeRange, setGlobalTimeRange] = useState('1h');
  const [autoRefreshInterval, setAutoRefreshInterval] = useState(0);
  const [showWidgetConfigModal, setShowWidgetConfigModal] = useState(false);
+ const [showCatalog, setShowCatalog] = useState(false);
  const [editingWidget, setEditingWidget] = useState<any>(null);
 
  useEffect(() => {
@@ -70,9 +121,14 @@ export default function DashboardsPage() {
  }
  };
 
- const fetchWidgetData = async (dashId: number, widgetId: string) => {
+ // range is passed explicitly by callers that just changed it — reading
+ // globalTimeRange from the closure here would use the pre-update value (the
+ // setState hasn't committed yet), so the picker always fetched the *previous*
+ // range. Default to current state for callers that didn't change it.
+ async function fetchWidgetData(dashId: number, widgetId: string, range?: string) {
  try {
- const data = await apiFetch(`/dashboards/${dashId}/widgets/${widgetId}/data?start_time=${globalTimeRange}`);
+ const r = range ?? globalTimeRange;
+ const data = await apiFetch(`/dashboards/${dashId}/widgets/${widgetId}/data?start_time=${r}`);
  setWidgetDataCache(prev => ({ ...prev, [widgetId]: data }));
  } catch (e: any) {
  console.error('Failed to fetch widget data', e);
@@ -163,6 +219,26 @@ export default function DashboardsPage() {
  setShowWidgetConfigModal(true);
  };
 
+ // Catalog entries already know their type + config, so they go straight onto the
+ // board rather than through the generic config modal.
+ const addFromCatalog = async (item: CatalogItem) => {
+ if (!selectedDashboard) return;
+ const id = `w_${item.key}_${selectedDashboard.widgets.length + 1}`;
+ const widget = { id, type: item.type, title: item.title, config: item.config || {} };
+ const widgets = [...selectedDashboard.widgets, widget];
+ const layout = selectedDashboard.layout || [];
+ const maxY = layout.length ? Math.max(...layout.map((l: any) => l.y + l.h)) : 0;
+ const nextLayout = [...layout, { i: id, x: 0, y: maxY, w: item.w, h: item.h, minW: 2, minH: 2 }];
+ try {
+ await apiPut(`/dashboards/${selectedDashboard.id}`, { widgets, layout: nextLayout });
+ updateDashboardState({ ...selectedDashboard, widgets, layout: nextLayout });
+ fetchWidgetData(selectedDashboard.id, id);
+ setShowCatalog(false);
+ } catch (e: any) {
+ toast({ title: 'Failed to add widget', description: e.message, type: 'error' });
+ }
+ };
+
  const onLayoutChange = async (layout: any) => {
  if (!selectedDashboard || !isEditing) return;
  
@@ -192,125 +268,225 @@ export default function DashboardsPage() {
 
  const renderWidget = (w: any) => {
  const data = widgetDataCache[w.id];
- 
- if (!data) return <div className="h-full flex items-center justify-center text-[var(--text-secondary)] animate-pulse">Loading...</div>;
+ // Dashboards created earlier store legacy type names. The API normalizes them,
+ // so the client has to as well — otherwise the data arrives fine and the widget
+ // still renders "unsupported" because it switched on the raw type.
+ const type = WIDGET_ALIAS[w.type] ?? w.type;
 
- if (w.type === 'metric_card') {
+ // Markdown is authored in the widget config — it has nothing to fetch, so it
+ // must render before the data guard or it would sit on "Loading" forever.
+ if (type === 'markdown') {
+ return <MarkdownWidget content={w.config?.content || ''} />;
+ }
+
+ if (!data) {
  return (
- <div className="flex flex-col items-center justify-center h-full">
- <div className="text-4xl font-bold text-[var(--text-primary)]">{data.value?.toLocaleString() || 0}</div>
- <div className="text-sm text-[var(--text-secondary)] mt-2">{w.title}</div>
+ <div className="h-full flex flex-col justify-center gap-2 px-1">
+ <div className="shimmer-bg h-2.5 w-1/3 rounded-[2px]" />
+ <div className="shimmer-bg h-2.5 w-2/3 rounded-[2px]" />
  </div>
  );
  }
 
- if (w.type === 'markdown') {
- return <MarkdownWidget content={w.config?.content || ''} />;
+ if (type === 'metric_card') {
+ const tone = data.tone === 'crit' ? 'var(--signal-crit)'
+ : data.tone === 'warn' ? 'var(--signal-warn)'
+ : data.tone === 'ok' ? 'var(--signal-ok)'
+ : 'var(--text-primary)';
+ return (
+ <div className="flex flex-col justify-center h-full">
+ <div className="text-[34px] leading-none font-semibold tnum mono" style={{ color: tone }}>
+ {typeof data.value === 'number' ? data.value.toLocaleString() : (data.value ?? 0)}
+ </div>
+ <div className="eyebrow mt-2">{data.label || w.title}</div>
+ </div>
+ );
  }
- 
- if (w.type === 'time_series') {
- // Mock simple sparkline
+
+ if (type === 'time_series') {
  const series = data.series?.[0]?.data || [];
- if (!series.length) return <div>No data</div>;
- 
- const max = Math.max(...series.map((d: any) => d.value));
- const min = 0;
- const range = max - min || 1;
- 
+ if (!series.length) return <EmptyWidget label="No incidents in range" />;
+
+ const max = Math.max(...series.map((d: any) => d.value), 1);
  const points = series.map((d: any, i: number) => {
- const x = (i / (series.length - 1)) * 100;
- const y = 100 - ((d.value - min) / range) * 100;
+ const x = (i / Math.max(1, series.length - 1)) * 100;
+ const y = 100 - (d.value / max) * 100;
  return `${x},${y}`;
  }).join(' ');
+ const latest = series[series.length - 1]?.value ?? 0;
 
  return (
  <div className="flex flex-col h-full w-full">
- <svg className="flex-1 w-full" preserveAspectRatio="none">
- <polyline points={points} fill="none" stroke="#a855f7" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+ <div className="flex items-baseline gap-2">
+ <span className="text-[20px] font-semibold tnum mono text-[var(--text-primary)]">{latest}</span>
+ <span className="eyebrow">peak {max}</span>
+ </div>
+ <svg className="flex-1 w-full mt-1" preserveAspectRatio="none" viewBox="0 0 100 100">
+ <polyline points={points} fill="none" stroke="var(--primary)" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
  </svg>
  </div>
  );
  }
 
- if (w.type === 'log_table') {
+ if (type === 'gauge') {
+ const pct = Math.round((data.value ?? 0) * 100);
+ const target = Math.round((data.target ?? 0.8) * 100);
+ const hit = pct >= target;
+ const color = hit ? 'var(--signal-ok)' : pct >= target * 0.6 ? 'var(--signal-warn)' : 'var(--signal-crit)';
+ // Semicircular arc: r=52, so the sweep is π·52 ≈ 163.4 units long.
+ const LEN = Math.PI * 52;
+ const targetAngle = Math.PI * (Math.min(100, target) / 100);
  return (
- <div className="overflow-auto h-full text-xs">
- <table className="w-full text-left">
- <tbody className="divide-y divide-[var(--border)]">
- {(data.logs || []).map((log: any, i: number) => (
- <tr key={i}>
- <td className="py-1 pr-2 whitespace-nowrap text-[var(--text-secondary)]">{new Date(log.timestamp).toLocaleTimeString()}</td>
- <td className={`py-1 pr-2 font-bold ${log.level === 'ERROR' ? 'text-red-400' : 'text-blue-400'}`}>{log.level}</td>
- <td className="py-1 text-[var(--text-primary)] truncate max-w-[200px]">{log.message}</td>
- </tr>
+ <div className="flex flex-col items-center justify-center h-full">
+ <svg viewBox="0 0 120 68" className="w-full max-w-[180px]">
+ <path d="M 8 60 A 52 52 0 0 1 112 60" fill="none" stroke="var(--bg-track)" strokeWidth="8" strokeLinecap="round" />
+ <path
+ d="M 8 60 A 52 52 0 0 1 112 60"
+ fill="none" stroke={color} strokeWidth="8" strokeLinecap="round"
+ strokeDasharray={`${(Math.min(100, pct) / 100) * LEN} ${LEN}`}
+ />
+ {/* target tick — a ratio without its target is just a number */}
+ <line
+ x1={60 - 57 * Math.cos(targetAngle)} y1={60 - 57 * Math.sin(targetAngle)}
+ x2={60 - 47 * Math.cos(targetAngle)} y2={60 - 47 * Math.sin(targetAngle)}
+ stroke="var(--text-secondary)" strokeWidth="1.5"
+ />
+ <text x="60" y="56" textAnchor="middle" className="mono" fontSize="19" fontWeight="600" fill={color}>{pct}%</text>
+ </svg>
+ <div className="eyebrow mt-1">{data.resolved ?? 0}/{data.total ?? 0} · target {target}%</div>
+ </div>
+ );
+ }
+
+ if (type === 'heatmap') {
+ const cells: any[] = data.cells || [];
+ if (!cells.length) return <EmptyWidget label="No incidents in range" />;
+ const max = data.max || 1;
+ const at = (d: number, h: number) => cells.find((c) => c.day === d && c.hour === h)?.value ?? 0;
+ return (
+ <div className="flex flex-col h-full gap-1 overflow-auto">
+ <span className="eyebrow">Last {data.days ?? 30}d · by weekday × hour</span>
+ <div className="flex flex-col gap-[2px]">
+ {DAY_LABELS.map((label, d) => (
+ <div key={d} className="flex items-center gap-[3px]">
+ <span className="eyebrow w-3 shrink-0">{label}</span>
+ <div className="flex gap-[2px]">
+ {Array.from({ length: 24 }, (_, h) => {
+ const v = at(d, h);
+ return (
+ <span
+ key={h}
+ title={`${label} ${h}:00 — ${v} incident${v === 1 ? '' : 's'}`}
+ className="w-2 h-2 rounded-[1px]"
+ style={{
+ background: v ? 'var(--signal-crit)' : 'var(--bg-track)',
+ opacity: v ? 0.25 + 0.75 * (v / max) : 1,
+ }}
+ />
+ );
+ })}
+ </div>
+ </div>
  ))}
+ </div>
+ </div>
+ );
+ }
+
+ if (type === 'incident_feed') {
+ // The backend serves this from the incident feed, so read `incidents` and
+ // fall back to `logs` for any dashboard still shaped the old way.
+ const rows = data.incidents || data.logs || [];
+ if (!rows.length) return <EmptyWidget label="Nothing to show" />;
+
+ return (
+ <div className="overflow-auto h-full mono text-[11px]">
+ <table className="w-full text-left">
+ <tbody className="divide-y divide-[var(--border-subtle)]">
+ {rows.map((r: any, i: number) => {
+ const open = (r.status || '').toUpperCase() === 'OPEN';
+ return (
+ <tr key={r.id ?? i} className="hover:bg-[var(--bg-surface-hover)]">
+ <td className="py-1.5 pr-2 whitespace-nowrap text-[var(--text-dimmed)]">
+ {r.created_at || r.timestamp
+ ? new Date(r.created_at || r.timestamp).toLocaleTimeString()
+ : '—'}
+ </td>
+ <td className="py-1.5 pr-2">
+ <span
+ className="px-1.5 py-0.5 rounded-[2px] text-[9px] uppercase tracking-wider"
+ style={{
+ color: open ? 'var(--signal-crit)' : 'var(--signal-ok)',
+ background: open ? 'var(--signal-crit-dim)' : 'var(--signal-ok-dim)',
+ }}
+ >
+ {r.status || r.level || 'INFO'}
+ </span>
+ </td>
+ <td className="py-1.5 text-[var(--text-secondary)] truncate max-w-[220px]">
+ {r.title || r.message}
+ </td>
+ </tr>
+ );
+ })}
  </tbody>
  </table>
  </div>
  );
  }
 
- if (w.type === 'pie_chart') {
- const mockPieData = [
- { name: 'Info', value: 400 },
- { name: 'Warning', value: 300 },
- { name: 'Error', value: 300 },
- { name: 'Critical', value: 200 },
- ];
- const COLORS = ['#3b82f6', '#f59e0b', '#ef4444', '#d946ef'];
- 
+ if (type === 'pie_chart') {
+ // Real distribution from /widgets/{id}/data — this used to render a
+ // hardcoded array, so every pie showed the same invented numbers.
+ const slices = data.slices || [];
+ if (!slices.length) return <EmptyWidget label="No incidents in range" />;
+
  return (
  <div className="flex flex-col items-center justify-center h-full w-full">
  <ResponsiveContainer width="100%" height="100%">
  <PieChart>
  <Pie
- data={mockPieData}
+ data={slices}
  cx="50%"
  cy="50%"
- innerRadius={40}
- outerRadius={80}
- fill="#8884d8"
- paddingAngle={5}
+ innerRadius={38}
+ outerRadius={72}
+ paddingAngle={2}
  dataKey="value"
+ stroke="var(--bg-card)"
+ strokeWidth={2}
  >
- {mockPieData.map((entry, index) => (
- <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+ {slices.map((entry: any, index: number) => (
+ <Cell key={`cell-${index}`} fill={SLICE_COLORS[index % SLICE_COLORS.length]} />
  ))}
  </Pie>
- <RechartsTooltip contentStyle={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border)' }} />
+ <RechartsTooltip contentStyle={CHART_TOOLTIP} />
  </PieChart>
  </ResponsiveContainer>
  </div>
  );
  }
 
- if (w.type === 'bar_chart') {
- const mockBarData = [
- { name: 'Mon', errors: 4000, warnings: 2400 },
- { name: 'Tue', errors: 3000, warnings: 1398 },
- { name: 'Wed', errors: 2000, warnings: 9800 },
- { name: 'Thu', errors: 2780, warnings: 3908 },
- { name: 'Fri', errors: 1890, warnings: 4800 },
- { name: 'Sat', errors: 2390, warnings: 3800 },
- { name: 'Sun', errors: 3490, warnings: 4300 },
- ];
+ if (type === 'bar_chart') {
+ // Top domains by incident count — was a hardcoded Mon..Sun array.
+ const bars = data.bars || [];
+ if (!bars.length) return <EmptyWidget label="No incidents in range" />;
 
  return (
  <div className="flex flex-col h-full w-full">
  <ResponsiveContainer width="100%" height="100%">
- <BarChart data={mockBarData}>
- <XAxis dataKey="name" tick={{ fill: 'var(--text-muted)', fontSize: 10 }} axisLine={false} tickLine={false} />
- <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 10 }} axisLine={false} tickLine={false} />
- <RechartsTooltip contentStyle={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border)' }} cursor={{ fill: 'var(--bg-surface-hover)' }} />
- <Bar dataKey="errors" stackId="a" fill="#ef4444" radius={[0, 0, 4, 4]} />
- <Bar dataKey="warnings" stackId="a" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+ <BarChart data={bars} margin={{ top: 8, right: 8, bottom: 0, left: -18 }}>
+ <XAxis dataKey="label" tick={{ fill: 'var(--text-muted)', fontSize: 10 }} axisLine={false} tickLine={false} />
+ <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 10 }} axisLine={false} tickLine={false} allowDecimals={false} />
+ <RechartsTooltip contentStyle={CHART_TOOLTIP} cursor={{ fill: 'var(--bg-surface-hover)' }} />
+ <Bar dataKey="value" fill="var(--signal-crit)" radius={[2, 2, 0, 0]} />
  </BarChart>
  </ResponsiveContainer>
  </div>
  );
  }
 
- return <div>Unknown Widget Type</div>;
+ return <EmptyWidget label={`Unsupported widget: ${w.type}`} />;
  };
 
  if (selectedDashboard) {
@@ -342,26 +518,53 @@ export default function DashboardsPage() {
  </div>
 
  {isEditing && (
- <div className="bg-[var(--bg-card)] border border-[var(--primary)] rounded-lg p-4 flex items-center gap-4">
- <span className="text-sm font-medium text-[var(--text-primary)]">Add Widget:</span>
- <button onClick={() => openWidgetConfig('metric_card')} className="flex items-center gap-2 px-3 py-1.5 bg-[var(--bg-app)] border border-[var(--border)] rounded text-sm hover:border-[var(--primary)] transition-colors">
- <Activity size={14} className="text-[var(--primary)]" /> Metric Card
+ <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-[3px] p-3 flex items-center gap-3">
+ <span className="eyebrow">Editing</span>
+ <button
+ onClick={() => setShowCatalog(true)}
+ className="flex items-center gap-1.5 px-3 h-8 rounded-[3px] bg-[var(--primary)] text-black text-[13px] hover:bg-[var(--primary-hover)] transition-colors border-none cursor-pointer"
+ >
+ <Plus size={14} /> Add widget
  </button>
- <button onClick={() => openWidgetConfig('time_series')} className="flex items-center gap-2 px-3 py-1.5 bg-[var(--bg-app)] border border-[var(--border)] rounded text-sm hover:border-[var(--primary)] transition-colors">
- <BarChart2 size={14} className="text-blue-400" /> Time Series
+ <span className="text-[12px] text-[var(--text-muted)]">Drag to move, drag a corner to resize. Layout saves automatically.</span>
+ </div>
+ )}
+
+ {/* Widget catalog — pick the thing you want to see, not the chart type it
+ happens to be drawn with. Each entry carries the config the API needs. */}
+ {showCatalog && (
+ <div className="fixed inset-0 bg-black/70 z-[100] flex items-center justify-center p-6" onClick={() => setShowCatalog(false)}>
+ <div className="bg-[var(--bg-modal)] border border-[var(--border)] rounded-[4px] w-[720px] max-h-[80vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+ <div className="flex items-start justify-between px-5 py-4 border-b border-[var(--border-subtle)]">
+ <div>
+ <div className="eyebrow mb-1">Widget catalog</div>
+ <h2 className="text-[16px] font-semibold text-[var(--text-primary)]">Add a widget</h2>
+ </div>
+ <button onClick={() => setShowCatalog(false)} className="text-[var(--text-muted)] hover:text-[var(--text-primary)] bg-transparent border-none cursor-pointer">
+ <X size={18} />
  </button>
- <button onClick={() => openWidgetConfig('log_table')} className="flex items-center gap-2 px-3 py-1.5 bg-[var(--bg-app)] border border-[var(--border)] rounded text-sm hover:border-[var(--primary)] transition-colors">
- <List size={14} className="text-emerald-400" /> Log Table
+ </div>
+ <div className="p-4 overflow-y-auto grid grid-cols-2 gap-2">
+ {WIDGET_CATALOG.map((item) => {
+ const Icon = item.icon;
+ return (
+ <button
+ key={item.key}
+ onClick={() => addFromCatalog(item)}
+ className="flex items-center gap-3 p-3 rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-card)] hover:border-[var(--primary-line)] hover:bg-[var(--bg-surface-hover)] transition-colors text-left cursor-pointer"
+ >
+ <span className="w-9 h-9 shrink-0 rounded-[3px] flex items-center justify-center border border-[var(--primary-line)] bg-[var(--primary-dim)]">
+ <Icon size={16} className="text-[var(--primary)]" />
+ </span>
+ <span className="min-w-0">
+ <span className="block text-[13px] text-[var(--text-primary)] truncate">{item.title}</span>
+ <span className="eyebrow">{item.kind}</span>
+ </span>
  </button>
- <button onClick={() => openWidgetConfig('pie_chart')} className="flex items-center gap-2 px-3 py-1.5 bg-[var(--bg-app)] border border-[var(--border)] rounded text-sm hover:border-[var(--primary)] transition-colors">
- <PieChartIcon size={14} className="text-purple-400" /> Pie Chart
- </button>
- <button onClick={() => openWidgetConfig('bar_chart')} className="flex items-center gap-2 px-3 py-1.5 bg-[var(--bg-app)] border border-[var(--border)] rounded text-sm hover:border-[var(--primary)] transition-colors">
- <BarChart2 size={14} className="text-orange-400" /> Bar Chart
- </button>
- <button onClick={() => openWidgetConfig('markdown')} className="flex items-center gap-2 px-3 py-1.5 bg-[var(--bg-app)] border border-[var(--border)] rounded text-sm hover:border-[var(--primary)] transition-colors">
- <span className="text-pink-400 font-bold">M↓</span> Markdown
- </button>
+ );
+ })}
+ </div>
+ </div>
  </div>
  )}
 
@@ -370,7 +573,8 @@ export default function DashboardsPage() {
  setGlobalTimeRange={(val) => {
  setGlobalTimeRange(val);
  if (selectedDashboard) {
- selectedDashboard.widgets.forEach((w: any) => fetchWidgetData(selectedDashboard.id, w.id));
+ // Pass val directly — state isn't committed yet on this tick.
+ selectedDashboard.widgets.forEach((w: any) => fetchWidgetData(selectedDashboard.id, w.id, val));
  }
  }}
  autoRefreshInterval={autoRefreshInterval}

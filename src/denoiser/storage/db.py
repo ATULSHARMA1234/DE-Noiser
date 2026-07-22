@@ -10,10 +10,9 @@ from __future__ import annotations
 import datetime
 import os
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, Float, Integer, String, create_engine, text
+from sqlalchemy import JSON, Boolean, Column, DateTime, Float, Integer, String, create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
-
 from sqlalchemy.pool import NullPool
 
 # ── Task 5: Dual-database support ───────────────────────────────────────────
@@ -125,6 +124,7 @@ class Span(Base):
     __tablename__ = "spans"
 
     id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, index=True, nullable=True)
     trace_id = Column(String, index=True, nullable=False)
     span_id = Column(String, index=True, nullable=False)
     parent_span_id = Column(String, index=True, nullable=True)
@@ -189,6 +189,7 @@ class MetricRule(Base):
     __tablename__ = "metric_rules"
 
     id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, index=True, nullable=True)  # nullable for backwards compat
     name = Column(String, nullable=False)
     query = Column(String, nullable=False)
     aggregation = Column(String, default="count")  # count, sum, avg, max, min
@@ -200,6 +201,7 @@ class ExtractedMetric(Base):
     __tablename__ = "extracted_metrics"
 
     id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, index=True, nullable=True)
     rule_id = Column(Integer, index=True, nullable=False)
     timestamp = Column(DateTime, default=datetime.datetime.utcnow, index=True)
     value = Column(Float, nullable=False)
@@ -238,7 +240,19 @@ class Monitor(Base):
     threshold_critical = Column(Float, nullable=True)
     threshold_warning = Column(Float, nullable=True)
     enabled = Column(Boolean, default=True)
+    muted_until = Column(DateTime, nullable=True)  # snooze: suppress alerts until this time
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+class Notebook(Base):
+    __tablename__ = "notebooks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, index=True, nullable=True)
+    title = Column(String, nullable=False, default="Untitled Notebook")
+    cells = Column(JSON, default=list)  # [{type, content, result?}]
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
 
 # ── Wave 4 Models ────────────────────────────────────────────────────────────
@@ -289,52 +303,13 @@ class DeploymentMarker(Base):
 # ── Session helpers ──────────────────────────────────────────────────────────
 
 def init_db():
-    """Create all tables if they don't exist and seed default admin."""
-    Base.metadata.create_all(bind=engine)
+    """Bring the schema to head and seed the default tenant and admin."""
+    from denoiser.storage.migrations import bootstrap_schema
+
+    bootstrap_schema(engine)
 
     db = SessionLocal()
     try:
-        try:
-            db.execute(text("SELECT is_active FROM users LIMIT 1"))
-        except Exception:
-            db.rollback()
-            try:
-                db.execute(text("ALTER TABLE users ADD COLUMN is_active BOOLEAN DEFAULT 1"))
-                db.commit()
-            except Exception:
-                db.rollback()
-
-        try:
-            db.execute(text("SELECT department FROM users LIMIT 1"))
-        except Exception:
-            db.rollback()
-            try:
-                db.execute(text("ALTER TABLE users ADD COLUMN department VARCHAR DEFAULT 'Engineering'"))
-                db.commit()
-            except Exception:
-                db.rollback()
-
-        try:
-            db.execute(text("SELECT environment_access FROM users LIMIT 1"))
-        except Exception:
-            db.rollback()
-            try:
-                db.execute(text("ALTER TABLE users ADD COLUMN environment_access JSON DEFAULT '[]'"))
-                db.commit()
-            except Exception:
-                db.rollback()
-
-        try:
-            db.execute(text("SELECT default_time_range FROM dashboards LIMIT 1"))
-        except Exception:
-            db.rollback()
-            try:
-                db.execute(text("ALTER TABLE dashboards ADD COLUMN default_time_range VARCHAR DEFAULT '1h'"))
-                db.execute(text("ALTER TABLE dashboards ADD COLUMN template_variables JSON DEFAULT '[]'"))
-                db.commit()
-            except Exception:
-                db.rollback()
-
         admin_email = "admin@semanticos.io"
         exists = db.query(User).filter(User.email == admin_email).first()
 

@@ -39,3 +39,7 @@ nginx/certs/*.key
 # Dynamic Data
 data/*.log
 data/*.jsonl
+
+# Generated at runtime by the analysis pipeline, not source
+data/lancedb/
+data/archive/

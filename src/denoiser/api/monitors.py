@@ -1,10 +1,12 @@
+import datetime
 from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from typing import Optional
-from denoiser.storage.db import Monitor, get_db
+from sqlalchemy.orm import Session
+
 from denoiser.api.auth import User, require_role
+from denoiser.storage.db import Monitor, get_db
 
 router = APIRouter(prefix="/monitors", tags=["monitors"])
 
@@ -12,21 +14,21 @@ class MonitorCreateSchema(BaseModel):
     name: str
     type: str = "log alert"
     query: str
-    message: Optional[str] = None
+    message: str | None = None
     severity: str = "warning"
-    threshold_critical: Optional[float] = None
-    threshold_warning: Optional[float] = None
+    threshold_critical: float | None = None
+    threshold_warning: float | None = None
     enabled: bool = True
 
 class MonitorUpdateSchema(BaseModel):
-    name: Optional[str] = None
-    type: Optional[str] = None
-    query: Optional[str] = None
-    message: Optional[str] = None
-    severity: Optional[str] = None
-    threshold_critical: Optional[float] = None
-    threshold_warning: Optional[float] = None
-    enabled: Optional[bool] = None
+    name: str | None = None
+    type: str | None = None
+    query: str | None = None
+    message: str | None = None
+    severity: str | None = None
+    threshold_critical: float | None = None
+    threshold_warning: float | None = None
+    enabled: bool | None = None
 
 @router.get("", response_model=list[dict[str, Any]])
 def list_monitors(db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
@@ -34,6 +36,7 @@ def list_monitors(db: Session = Depends(get_db), current_user: User = Depends(re
     if current_user.tenant_id:
         query = query.filter(Monitor.tenant_id == current_user.tenant_id)
     monitors = query.all()
+    now = datetime.datetime.utcnow()
     return [
         {
             "id": m.id,
@@ -45,6 +48,7 @@ def list_monitors(db: Session = Depends(get_db), current_user: User = Depends(re
             "threshold_critical": m.threshold_critical,
             "threshold_warning": m.threshold_warning,
             "enabled": m.enabled,
+            "muted_until": m.muted_until.isoformat() if m.muted_until and m.muted_until > now else None,
             "created_at": m.created_at.isoformat() if m.created_at else None
         }
         for m in monitors
@@ -114,3 +118,33 @@ def delete_monitor(monitor_id: int, db: Session = Depends(get_db), current_user:
     db.delete(m)
     db.commit()
     return {"status": "deleted", "id": m.id}
+
+
+class MuteRequest(BaseModel):
+    duration_minutes: int  # 0 = unmute
+
+@router.put("/{monitor_id}/mute", response_model=dict[str, Any])
+def mute_monitor(
+    monitor_id: int,
+    payload: MuteRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["ANALYST", "ADMIN"]))
+):
+    """Mute (snooze) a monitor for N minutes. Pass 0 to unmute."""
+    m = db.query(Monitor).filter(Monitor.id == monitor_id).first()
+    if not m:
+        raise HTTPException(status_code=404, detail="Monitor not found")
+    if current_user.tenant_id and m.tenant_id != current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    if payload.duration_minutes <= 0:
+        m.muted_until = None
+    else:
+        m.muted_until = datetime.datetime.utcnow() + datetime.timedelta(minutes=payload.duration_minutes)
+
+    db.commit()
+    return {
+        "status": "muted" if m.muted_until else "unmuted",
+        "id": m.id,
+        "muted_until": m.muted_until.isoformat() if m.muted_until else None
+    }

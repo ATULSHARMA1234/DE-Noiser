@@ -62,6 +62,7 @@ dependencies = [
     "statsmodels>=0.14.6",
     "pandas>=3.0.3",
     "aiokafka>=0.14.0",
+    "alembic>=1.13.0",
 ]
 
 [dependency-groups]
@@ -102,7 +103,10 @@ src = ["src"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "RUF"]
-ignore = ["E402", "E501", "E701", "E712", "E722", "E741", "RUF002", "RUF012", "RUF013", "B904", "B905", "SIM108", "N806", "F821", "F841", "W291", "W293", "RUF005", "N818", "B008"]
+# F821 (undefined name) and F841 (unused local) are deliberately NOT ignored:
+# they catch real defects — a NameError waiting to happen, and a computed value
+# that is silently thrown away — rather than style.
+ignore = ["E402", "E501", "E701", "E712", "E722", "E741", "RUF002", "RUF012", "RUF013", "B904", "B905", "SIM108", "N806", "W291", "W293", "RUF005", "N818", "B008"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

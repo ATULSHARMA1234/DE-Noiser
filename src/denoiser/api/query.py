@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from denoiser.api.auth import User, require_role
 from denoiser.query.models import QueryCreateSchema, QueryRequestSchema, SavedQuerySchema
-from denoiser.query.parser import compile_to_sql, evaluate_in_memory, parse_query, parse_plain_text_log
+from denoiser.query.parser import compile_to_sql, evaluate_in_memory, parse_plain_text_log, parse_query
 from denoiser.storage.clickhouse_store import ClickHouseStore
 from denoiser.storage.db import SavedQuery, get_db
 
@@ -17,7 +17,7 @@ clickhouse_store = ClickHouseStore()
 
 DATA_DIR = Path("data")
 
-def _get_all_memory_logs(from_ts: int | None = None, to_ts: int | None = None, file_name: str | None = None) -> list[dict]:
+def _get_all_memory_logs(from_ts: int | None = None, to_ts: int | None = None, file_name: str | None = None, tenant_id: int | None = None) -> list[dict]:
     """Helper to read and parse all .log files in DATA_DIR for in-memory fallbacks.
     If file_name is given, only that specific file is scanned.
     Each log entry is tagged with '_file' = the basename of its source file.
@@ -36,7 +36,7 @@ def _get_all_memory_logs(from_ts: int | None = None, to_ts: int | None = None, f
     for log_file in log_files:
         fname = log_file.name
         try:
-            with open(log_file, "r", encoding="utf-8") as f:
+            with open(log_file, encoding="utf-8") as f:
                 for line in f:
                     if not line.strip():
                         continue
@@ -54,6 +54,12 @@ def _get_all_memory_logs(from_ts: int | None = None, to_ts: int | None = None, f
                         if from_ts is not None and log_ts * 1000 < from_ts:
                             continue
                         if to_ts is not None and log_ts * 1000 > to_ts:
+                            continue
+                            
+                    # Tenant isolation check
+                    if tenant_id is not None:
+                        record_tenant = log_dict.get("_tenant_id") or log_dict.get("tenant_id")
+                        if str(record_tenant) != str(tenant_id):
                             continue
 
                     # Tag with the originating file name
@@ -94,7 +100,7 @@ def execute_query(payload: QueryRequestSchema, current_user: User = Depends(requ
 
     if clickhouse_store.client:
         try:
-            params = {'tenant_id': current_user.tenant_id}
+            params = {'tenant_id': str(current_user.tenant_id)}
             sql_where = compile_to_sql(ast, params)
             sql_where = f"tenant_id = {{tenant_id:String}} AND ({sql_where})"
 
@@ -144,7 +150,7 @@ def execute_query(payload: QueryRequestSchema, current_user: User = Depends(requ
             pass
 
     # In-memory fallback
-    all_logs = _get_all_memory_logs(payload.from_ts, payload.to_ts, payload.file_name)
+    all_logs = _get_all_memory_logs(payload.from_ts, payload.to_ts, payload.file_name, current_user.tenant_id)
     matched_logs = [log for log in all_logs if evaluate_in_memory(ast, log)]
     
     if payload.group_by == 'pattern':
@@ -177,7 +183,7 @@ def get_facets(from_ts: int | None = None, to_ts: int | None = None, file_name: 
             pass
             
     # In-memory fallback
-    all_logs = _get_all_memory_logs(from_ts, to_ts, file_name)
+    all_logs = _get_all_memory_logs(from_ts, to_ts, file_name, current_user.tenant_id)
     source_counts = {}
     level_counts = {}
     for log in all_logs:
@@ -212,7 +218,7 @@ def get_histogram(payload: QueryRequestSchema, current_user: User = Depends(requ
 
     # In-memory fallback
     ast = parse_query(payload.query)
-    all_logs = _get_all_memory_logs(payload.from_ts, payload.to_ts, payload.file_name)
+    all_logs = _get_all_memory_logs(payload.from_ts, payload.to_ts, payload.file_name, current_user.tenant_id)
     matched_logs = [log for log in all_logs if evaluate_in_memory(ast, log)]
     
     # Bucket by 1 hour (default) or scaled based on range

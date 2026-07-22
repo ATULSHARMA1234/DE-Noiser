@@ -242,6 +242,10 @@ export default function MetricsPage() {
  className="w-full bg-[var(--bg-app)] border border-[var(--border)] rounded-md py-2 px-3 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
  >
  <option value="count">Count Matches</option>
+ <option value="sum">Sum Values</option>
+ <option value="avg">Average</option>
+ <option value="max">Maximum</option>
+ <option value="min">Minimum</option>
  </select>
  </div>
  <div>

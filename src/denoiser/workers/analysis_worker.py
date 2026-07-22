@@ -466,27 +466,47 @@ def evaluate_slos():
                 db.add(dp)
 
                 if value < slo.target_percentage:
-                    # Current SLO Breach -> Incident
+                    # Current SLO Breach -> Incident.
+                    # Dedup: one OPEN breach incident per SLO. If an incident is
+                    # already open for this breach, refresh it instead of opening
+                    # a duplicate every evaluation cycle (was ~5/min of spam).
                     from denoiser.storage.db import Incident
-                    incident = Incident(
-                        tenant_id=slo.tenant_id,
-                        title=f"SLO Breach: {slo.name}",
-                        domain=slo.service,
-                        impact_score=1.0,
-                        summary=f"SLO '{slo.name}' breached for service '{slo.service}'. Target: {slo.target_percentage}%, Actual: {value:.2f}%",
-                        remediation_hints=["Check recent deployments", "Scale up service replicas"],
-                        source="SLO Evaluator",
-                        is_predictive=False
-                    )
-                    db.add(incident)
-                    db.commit() # commit early to trigger runbook
-                    db.refresh(incident)
+                    existing = db.query(Incident).filter(
+                        Incident.tenant_id == slo.tenant_id,
+                        Incident.domain == slo.service,
+                        Incident.title == f"SLO Breach: {slo.name}",
+                        Incident.status == "OPEN",
+                    ).order_by(Incident.created_at.desc()).first()
 
-                    try:
-                        from denoiser.automation.engine import process_incident
-                        process_incident(db, incident)
-                    except Exception as auto_err:
-                        logger.error(f"Failed to execute runbook on SLO breach: {auto_err}")
+                    if existing:
+                        # Already an open breach for this SLO — refresh the live
+                        # actual value in place. Do NOT touch created_at: that marks
+                        # when the incident first opened, not when it was last seen.
+                        existing.summary = (
+                            f"SLO '{slo.name}' breached for service '{slo.service}'. "
+                            f"Target: {slo.target_percentage}%, Actual: {value:.2f}%"
+                        )
+                        db.commit()
+                    else:
+                        incident = Incident(
+                            tenant_id=slo.tenant_id,
+                            title=f"SLO Breach: {slo.name}",
+                            domain=slo.service,
+                            impact_score=1.0,
+                            summary=f"SLO '{slo.name}' breached for service '{slo.service}'. Target: {slo.target_percentage}%, Actual: {value:.2f}%",
+                            remediation_hints=["Check recent deployments", "Scale up service replicas"],
+                            source="SLO Evaluator",
+                            is_predictive=False
+                        )
+                        db.add(incident)
+                        db.commit()  # commit early to trigger runbook
+                        db.refresh(incident)
+
+                        try:
+                            from denoiser.automation.engine import process_incident
+                            process_incident(db, incident)
+                        except Exception as auto_err:
+                            logger.error(f"Failed to execute runbook on SLO breach: {auto_err}")
 
                 else:
                     # Evaluate Predictive AI / Anomaly Forecasting using Holt-Winters
@@ -495,7 +515,6 @@ def evaluate_slos():
                     if len(recent_points) >= 10:
                         recent_points.reverse() # chronological
 
-                        import numpy as np
                         from statsmodels.tsa.holtwinters import ExponentialSmoothing
 
                         y_values = [p.value for p in recent_points]

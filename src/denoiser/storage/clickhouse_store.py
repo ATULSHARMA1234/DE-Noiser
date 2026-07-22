@@ -1,12 +1,70 @@
+import contextlib
 import json
 import os
-import time
 from datetime import UTC
 from typing import Any
 
 from denoiser.logging import get_logger
 
 logger = get_logger(__name__)
+
+# Where a log's originating service can be found, in priority order.
+#
+# Nothing in the wild sends a bare "source" key. Fluent Bit's Kubernetes filter
+# nests container_name under "kubernetes", OpenTelemetry uses the dotted
+# "service.name", Vector and most JSON loggers use "service". Reading only
+# "source" meant every log from every real shipper landed as "unknown", which
+# silently removes the per-service dimension that topology, causal correlation
+# and cross-service spike detection are all built on — the clustering still
+# works, it just has nothing to correlate across.
+#
+# Dotted entries are tried as a literal flat key first, then as a nested path,
+# because shippers disagree about whether they flatten.
+SOURCE_KEYS: tuple[str, ...] = (
+    "source",
+    "service",
+    "service_name",
+    "service.name",                 # OpenTelemetry resource attribute
+    "kubernetes.container_name",    # Fluent Bit kubernetes filter
+    "kubernetes.labels.app",
+    "container_name",               # Docker / Fluentd docker driver
+    "app",
+    "logger_name",
+)
+
+UNKNOWN_SOURCE = "unknown"
+
+
+def _lookup(log: dict[str, Any], key: str) -> Any:
+    """Read ``key`` as a flat key, falling back to a nested dotted path."""
+    if key in log:
+        return log[key]
+
+    if "." not in key:
+        return None
+
+    node: Any = log
+    for part in key.split("."):
+        if not isinstance(node, dict) or part not in node:
+            return None
+        node = node[part]
+    return node
+
+
+def resolve_source(log: dict[str, Any]) -> str:
+    """The service a log came from, or ``unknown`` when nothing identifies it."""
+    for key in SOURCE_KEYS:
+        value = _lookup(log, key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        # Numeric or otherwise non-string identifiers are still better than
+        # nothing, but skip containers and lists — those are structure, not a name.
+        if value is not None and not isinstance(value, dict | list):
+            text = str(value).strip()
+            if text:
+                return text
+    return UNKNOWN_SOURCE
+
 
 class ClickHouseStore:
     def __init__(self):
@@ -86,24 +144,41 @@ class ClickHouseStore:
         except Exception as e:
             logger.error(f"Failed to cleanup old data for tenant {tenant_id}: {e}")
 
+    @staticmethod
+    def _coerce_timestamp(ts):
+        """Accept an epoch number OR an ISO-8601 string.
+
+        ISO strings are the natural producer format (and what the API examples
+        use), but were previously dropped -- any non-numeric timestamp fell back
+        to ingestion wall-clock, so the stored time bore no relation to the event
+        and corrupted every time-range query and the volume histogram.
+        """
+        from datetime import datetime
+        if isinstance(ts, (int, float)):
+            return datetime.fromtimestamp(ts, UTC)
+        if isinstance(ts, str) and ts.strip():
+            with contextlib.suppress(ValueError):
+                return datetime.fromisoformat(ts.strip().replace("Z", "+00:00"))
+        return datetime.now(UTC)
+
     def insert_logs(self, logs: list[dict[str, Any]], tenant_id: str):
         """Dual-write logs to ClickHouse"""
         if not self.client:
             return False
 
         try:
+            # tenant_id is a String column in ClickHouse; callers may pass an int
+            # tenant id (e.g. Tenant.id). Coerce so the binary insert doesn't crash.
+            tenant_id = str(tenant_id)
             # Flatten log dicts to tuples matching schema
             data = []
             for log in logs:
-                ts = log.get("timestamp", time.time())
-                # If timestamp is seconds, convert to datetime object
-                from datetime import datetime
-                dt = datetime.fromtimestamp(ts, UTC) if isinstance(ts, (int, float)) else datetime.now(UTC)
+                dt = self._coerce_timestamp(log.get("timestamp"))
 
                 data.append((
                     tenant_id,
                     dt,
-                    log.get("source", "unknown"),
+                    resolve_source(log),
                     log.get("level", "INFO"),
                     log.get("message", str(log)),
                     json.dumps(log)
@@ -121,6 +196,8 @@ class ClickHouseStore:
             return False
 
         try:
+            # tenant_id is a String column; callers may pass an int Tenant.id.
+            tenant_id = str(tenant_id)
             # Insert tenant_id to the beginning of each tuple
             traces_data_with_tenant = [(tenant_id, *row) for row in traces_data]
 
@@ -147,7 +224,7 @@ class ClickHouseStore:
 
         if tenant_id:
             sql_where = f"tenant_id = {{tenant_id:String}} AND ({sql_where})"
-            params['tenant_id'] = tenant_id
+            params['tenant_id'] = str(tenant_id)
 
         if from_ts is not None:
             sql_where += " AND timestamp >= toDateTime64({from_ts:Float64}, 3, 'UTC')"
@@ -189,7 +266,7 @@ class ClickHouseStore:
         sql_where = "1=1"
         if tenant_id:
             sql_where += " AND tenant_id = {tenant_id:String}"
-            params['tenant_id'] = tenant_id
+            params['tenant_id'] = str(tenant_id)
 
         if from_ts is not None:
             sql_where += " AND timestamp >= toDateTime64({from_ts:Float64}, 3, 'UTC')"
@@ -228,7 +305,7 @@ class ClickHouseStore:
 
         if tenant_id:
             sql_where = f"tenant_id = {{tenant_id:String}} AND ({sql_where})"
-            params['tenant_id'] = tenant_id
+            params['tenant_id'] = str(tenant_id)
 
         if from_ts is not None:
             sql_where += " AND timestamp >= toDateTime64({from_ts:Float64}, 3, 'UTC')"

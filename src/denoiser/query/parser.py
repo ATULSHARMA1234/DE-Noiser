@@ -1,6 +1,8 @@
 import re
 from typing import Any
 
+FIELD_NAME = re.compile(r"^[A-Za-z0-9_]+$")
+
 
 class QueryNode:
     pass
@@ -33,18 +35,26 @@ def parse_query(query_str: str) -> QueryNode:
     """
     # For a real implementation, we'd use pyparsing or similar.
     # This is a naive regex-based tokenization for the demo.
-    tokens = re.findall(r'([A-Za-z0-9_]+:[A-Za-z0-9_]+|"[^"]*"|\S+)', query_str)
+    # field:"quoted value" | field:bare-value (hyphens/dots/slashes ok) | "phrase" | word
+    tokens = re.findall(r'([A-Za-z0-9_]+:"[^"]*"|[A-Za-z0-9_]+:[^\s"]+|"[^"]*"|\S+)', query_str)
 
     if not tokens:
         return TextMatch("")
 
-    # very naive evaluator
     nodes = []
     for token in tokens:
         if token in ("AND", "OR"):
             nodes.append(token)
         elif ":" in token and not token.startswith('"'):
             k, v = token.split(":", 1)
+            # The field name is interpolated into SQL (JSONExtractString), so it
+            # must be a plain identifier. Anything else is treated as free text
+            # rather than trusted as a column/JSON key.
+            if not FIELD_NAME.match(k):
+                nodes.append(TextMatch(token))
+                continue
+            if len(v) >= 2 and v.startswith('"') and v.endswith('"'):
+                v = v[1:-1]  # strip quotes from field:"quoted value"
             nodes.append(FieldMatch(k, v))
         elif token.startswith('"') and token.endswith('"'):
             nodes.append(TextMatch(token[1:-1]))
@@ -54,21 +64,26 @@ def parse_query(query_str: str) -> QueryNode:
     if not nodes:
         return TextMatch("")
 
-    # left associative building
-    current = nodes[0]
-    i = 1
-    while i < len(nodes) - 1:
-        op = nodes[i]
-        next_node = nodes[i+1]
-        if op == "AND":
-            current = AndNode(current, next_node)
-        elif op == "OR":
-            current = OrNode(current, next_node)
+    # Left-associative build. Terms sitting next to each other with no explicit
+    # operator are an implicit AND. The previous loop stopped at len(nodes)-1 and
+    # so silently dropped every term after the first in `level:ERROR timeout`,
+    # quietly widening the result set instead of erroring.
+    current = nodes[0] if not isinstance(nodes[0], str) else TextMatch("")
+    i = 1 if not isinstance(nodes[0], str) else 0
+    while i < len(nodes):
+        token = nodes[i]
+        if isinstance(token, str):  # AND / OR
+            if i + 1 >= len(nodes):
+                break  # dangling operator -- ignore
+            nxt = nodes[i + 1]
+            if isinstance(nxt, str):  # two operators in a row -- skip the first
+                i += 1
+                continue
+            current = AndNode(current, nxt) if token == "AND" else OrNode(current, nxt)
+            i += 2
         else:
-            # implicit AND
-            current = AndNode(current, op)
-            i -= 1
-        i += 2
+            current = AndNode(current, token)  # implicit AND
+            i += 1
 
     return current
 
@@ -101,6 +116,8 @@ def compile_to_sql(node: QueryNode, params: dict[str, Any]) -> str:
         if node.field in ("source", "level"):
             return f"{node.field} = {{{param_id}:String}}"
         else:
+            if not FIELD_NAME.match(node.field):
+                raise ValueError(f"Invalid field name: {node.field!r}")
             return f"JSONExtractString(raw_json, '{node.field}') = {{{param_id}:String}}"
 
     elif isinstance(node, AndNode):
@@ -124,7 +141,7 @@ def parse_plain_text_log(line: str) -> dict[str, Any] | None:
     # Format: 2026-05-29T10:15:00Z INFO [service-name] message...
     # Or: 2026-05-17 17:15:00 [info]: message
     import re
-    from datetime import datetime, UTC
+    from datetime import UTC, datetime
     
     # Try ISO8601 with level and source
     # Regex for: 2026-05-08T21:23:59.516165Z INFO  [API Gateway] 200 OK GET...

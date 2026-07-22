@@ -9,6 +9,25 @@ on:
 jobs:
   backend-test:
     runs-on: ubuntu-latest
+
+    # The migration gate runs against Postgres as well as SQLite. It used to run
+    # only on SQLite, which is how SQLite-shaped repair DDL ("BOOLEAN DEFAULT 1")
+    # passed CI while being rejected by Postgres — the dialect actually deployed.
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: semanticos_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - uses: actions/checkout@v4
 
@@ -34,6 +53,30 @@ jobs:
       - name: Type check with mypy (advisory)
         continue-on-error: true
         run: uv run mypy src/denoiser
+
+      # Blocking: the migrations must build the real schema from empty, and
+      # must match the models. Before this gate the chain had never been run at
+      # all: it failed on the second revision, and the schema was actually
+      # created by create_all with columns bolted on by ad-hoc ALTER probes.
+      # `alembic check` is what keeps models and migrations from drifting again
+      # — it fails whenever a model change has no accompanying migration.
+      - name: Migration integrity (SQLite)
+        env:
+          DATABASE_URL: sqlite:///./ci_migration_check.db
+        run: |
+          uv run alembic upgrade head
+          uv run alembic check
+
+      - name: Migration integrity (Postgres)
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/semanticos_ci
+        run: |
+          uv run alembic upgrade head
+          uv run alembic check
+          # Legacy adoption is the path a real upgrade takes, and it is where
+          # dialect-specific DDL breaks. Exercise it against Postgres, not just
+          # the SQLite fixtures in the unit tests.
+          uv run python -m tests.postgres_legacy_check
 
       # Blocking: tests + coverage floor. The floor is a ratchet — raise it as
       # coverage improves; it must never silently exceed real coverage again.
