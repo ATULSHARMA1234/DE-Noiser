@@ -175,7 +175,11 @@ def test_audit_middleware_fallback(db_session: Session):
     with TestClient(app) as client:
         # Perform a mutating action without authentication to trigger fallback in audit log
         response = client.put("/settings", json={"retention_days": 45})
-        
+        # The rejection is this test's precondition: if the request were ever to
+        # succeed unauthenticated, the audit assertions below would still pass
+        # while the actual bug went unnoticed.
+        assert response.status_code == 401
+
         # Let's check the database for the newest audit log
         audit_log = db_session.query(AuditLog).order_by(AuditLog.id.desc()).first()
         assert audit_log is not None
