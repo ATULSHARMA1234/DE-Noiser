@@ -25,6 +25,12 @@ export async function apiFetch(path: string, options: RequestInit = {}) {
  }
  }
 
+ // Auto-set Content-Type for JSON string bodies (prevents 422 errors
+ // when callers forget the header with body: JSON.stringify(...))
+ if (options.body && typeof options.body === 'string' && !headers.has('Content-Type')) {
+ headers.set('Content-Type', 'application/json');
+ }
+
  const res = await fetch(`${API_BASE}${path}`, {
  ...options,
  headers,
@@ -41,8 +47,17 @@ export async function apiFetch(path: string, options: RequestInit = {}) {
  }
 
  if (!res.ok) {
- const err = await res.json().catch(() => ({ detail: res.statusText }));
- throw new Error(err.detail || 'API request failed');
+  const err = await res.json().catch(() => ({ detail: res.statusText }));
+  // FastAPI validation errors return detail as an array of objects
+  let message = 'API request failed';
+  if (typeof err.detail === 'string') {
+   message = err.detail;
+  } else if (Array.isArray(err.detail)) {
+   message = err.detail.map((d: any) => d.msg || JSON.stringify(d)).join('; ');
+  } else if (err.detail) {
+   message = JSON.stringify(err.detail);
+  }
+  throw new Error(message);
  }
  return res.json();
 }

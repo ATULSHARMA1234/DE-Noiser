@@ -18,7 +18,12 @@ export default function RunbooksPage() {
  trigger_keyword: '',
  action_type: 'webhook',
  action_url: '',
- action_service: ''
+ action_service: '',
+ slack_webhook_url: '',
+ pagerduty_integration_key: '',
+ jira_url: '',
+ jira_user: '',
+ jira_api_token: ''
  });
 
  const [activeTab, setActiveTab] = useState('rules');
@@ -68,7 +73,14 @@ export default function RunbooksPage() {
  name: `Execute ${formData.action_type}`,
  action: formData.action_type,
  ...(formData.action_type === 'webhook' ? { url: formData.action_url } : {}),
- ...(formData.action_type === 'restart_service' ? { service: formData.action_service } : {}),
+ ...(formData.action_type === 'restart_service' || formData.action_type === 'scale_pods' ? { service: formData.action_service } : {}),
+ ...(formData.action_type === 'slack_notification' ? { slack_webhook_url: formData.slack_webhook_url } : {}),
+ ...(formData.action_type === 'escalate' ? { pagerduty_integration_key: formData.pagerduty_integration_key } : {}),
+ ...(formData.action_type === 'jira_issue' ? { 
+   jira_url: formData.jira_url, 
+   jira_user: formData.jira_user, 
+   jira_api_token: formData.jira_api_token 
+ } : {}),
  }
  ],
  enabled: true
@@ -284,6 +296,9 @@ export default function RunbooksPage() {
  <option value="webhook">Call Webhook</option>
  <option value="restart_service">Restart Service</option>
  <option value="escalate">Escalate via PagerDuty</option>
+ <option value="slack_notification">Send Slack Notification</option>
+ <option value="jira_issue">Create Jira Issue</option>
+ <option value="scale_pods">Scale Up Pods (K8s)</option>
  </select>
  </div>
 
@@ -301,7 +316,7 @@ export default function RunbooksPage() {
  </div>
  )}
 
- {formData.action_type === 'restart_service' && (
+ {(formData.action_type === 'restart_service' || formData.action_type === 'scale_pods') && (
  <div>
  <label className="block text-sm font-medium text-[var(--text-primary)] mb-1">Service Name</label>
  <input 
@@ -314,6 +329,72 @@ export default function RunbooksPage() {
  />
  </div>
  )}
+
+ {formData.action_type === 'slack_notification' && (
+  <div>
+  <label className="block text-sm font-medium text-[var(--text-primary)] mb-1">Slack Webhook URL</label>
+  <input 
+  type="url" 
+  required
+  value={formData.slack_webhook_url}
+  onChange={e => setFormData({...formData, slack_webhook_url: e.target.value})}
+  className="w-full bg-[var(--bg-app)] border border-[var(--border)] rounded-md py-2 px-3 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
+  placeholder="https://hooks.slack.com/services/..."
+  />
+  </div>
+  )}
+
+  {formData.action_type === 'escalate' && (
+  <div>
+  <label className="block text-sm font-medium text-[var(--text-primary)] mb-1">PagerDuty Routing Key</label>
+  <input 
+  type="text" 
+  required
+  value={formData.pagerduty_integration_key}
+  onChange={e => setFormData({...formData, pagerduty_integration_key: e.target.value})}
+  className="w-full bg-[var(--bg-app)] border border-[var(--border)] rounded-md py-2 px-3 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
+  placeholder="e.g. R02..."
+  />
+  </div>
+  )}
+
+  {formData.action_type === 'jira_issue' && (
+  <div className="space-y-3">
+  <div>
+  <label className="block text-sm font-medium text-[var(--text-primary)] mb-1">Jira Base URL</label>
+  <input 
+  type="url" 
+  required
+  value={formData.jira_url}
+  onChange={e => setFormData({...formData, jira_url: e.target.value})}
+  className="w-full bg-[var(--bg-app)] border border-[var(--border)] rounded-md py-2 px-3 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
+  placeholder="https://yourdomain.atlassian.net"
+  />
+  </div>
+  <div>
+  <label className="block text-sm font-medium text-[var(--text-primary)] mb-1">Jira User Email</label>
+  <input 
+  type="email" 
+  required
+  value={formData.jira_user}
+  onChange={e => setFormData({...formData, jira_user: e.target.value})}
+  className="w-full bg-[var(--bg-app)] border border-[var(--border)] rounded-md py-2 px-3 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
+  placeholder="sre@domain.com"
+  />
+  </div>
+  <div>
+  <label className="block text-sm font-medium text-[var(--text-primary)] mb-1">Jira API Token</label>
+  <input 
+  type="password" 
+  required
+  value={formData.jira_api_token}
+  onChange={e => setFormData({...formData, jira_api_token: e.target.value})}
+  className="w-full bg-[var(--bg-app)] border border-[var(--border)] rounded-md py-2 px-3 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
+  placeholder="Atlassian API Token"
+  />
+  </div>
+  </div>
+  )}
 
  <div className="pt-4 flex justify-end gap-3 border-t border-[var(--border)] mt-6">
  <button 

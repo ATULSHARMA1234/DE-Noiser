@@ -22,7 +22,6 @@ def list_metric_rules(
         )
     return query.order_by(DBMetricRule.created_at.desc()).all()
 
-
 @router.post("/rules", response_model=MetricRuleSchema)
 def create_metric_rule(
     payload: MetricRuleCreateSchema,
@@ -73,12 +72,17 @@ def get_metric_data(
     if current_user.tenant_id and rule.tenant_id and rule.tenant_id != current_user.tenant_id:
         raise HTTPException(status_code=403, detail="Forbidden")
 
-    metrics = (
-        db.query(DBExtractedMetric)
-        .filter(DBExtractedMetric.rule_id == rule_id)
-        .order_by(DBExtractedMetric.timestamp.asc())
-        .all()
-    )
+    # The rule is tenant-checked above, but the samples carry their own
+    # tenant_id: a rule that predates tenant scoping (tenant_id NULL) is
+    # readable by everyone, so filtering the rule alone would still hand back
+    # another tenant's datapoints.
+    metrics_query = db.query(DBExtractedMetric).filter(DBExtractedMetric.rule_id == rule_id)
+    if current_user.tenant_id:
+        metrics_query = metrics_query.filter(
+            (DBExtractedMetric.tenant_id == current_user.tenant_id) |
+            (DBExtractedMetric.tenant_id.is_(None))
+        )
+    metrics = metrics_query.order_by(DBExtractedMetric.timestamp.asc()).all()
 
     return {
         "rule_name": rule.name,

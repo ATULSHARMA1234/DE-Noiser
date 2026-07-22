@@ -1,11 +1,13 @@
 
+import datetime
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from denoiser.api.auth import User, require_role
 from denoiser.slo.engine import calculate_slo_status
 from denoiser.slo.models import SLOCreateSchema, SLOSchema, SLOStatusSchema
-from denoiser.storage.db import ServiceLevelObjective, get_db
+from denoiser.storage.db import AlertLog, ServiceLevelObjective, get_db
 
 router = APIRouter(prefix="/slos", tags=["slo"])
 
@@ -44,4 +46,26 @@ def get_slo_status(slo_id: int, db: Session = Depends(get_db), current_user: Use
     if not slo:
         raise HTTPException(status_code=404, detail="SLO not found")
 
-    return calculate_slo_status(db, slo)
+    status = calculate_slo_status(db, slo)
+
+    # Auto-alert on budget breach (Google SRE pattern)
+    if status.status == "BREACHED":
+        fingerprint = f"slo_breach_{slo.id}"
+        # Only create if no recent alert for this SLO (within 1 hour)
+        one_hour_ago = (datetime.datetime.utcnow() - datetime.timedelta(hours=1)).isoformat()
+        existing = db.query(AlertLog).filter(
+            AlertLog.alert_fingerprint == fingerprint,
+            AlertLog.timestamp > one_hour_ago
+        ).first()
+        if not existing:
+            alert = AlertLog(
+                webhook_id="slo_engine",
+                alert_fingerprint=fingerprint,
+                priority="critical",
+                status="fired",
+                error=f"SLO '{slo.name}' on {slo.service} has BREACHED — error budget exhausted (burn rate: {status.burn_rate:.1f}x)",
+            )
+            db.add(alert)
+            db.commit()
+
+    return status

@@ -1,3 +1,4 @@
+import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -35,6 +36,7 @@ def list_monitors(db: Session = Depends(get_db), current_user: User = Depends(re
     if current_user.tenant_id:
         query = query.filter(Monitor.tenant_id == current_user.tenant_id)
     monitors = query.all()
+    now = datetime.datetime.utcnow()
     return [
         {
             "id": m.id,
@@ -46,6 +48,7 @@ def list_monitors(db: Session = Depends(get_db), current_user: User = Depends(re
             "threshold_critical": m.threshold_critical,
             "threshold_warning": m.threshold_warning,
             "enabled": m.enabled,
+            "muted_until": m.muted_until.isoformat() if m.muted_until and m.muted_until > now else None,
             "created_at": m.created_at.isoformat() if m.created_at else None
         }
         for m in monitors
@@ -115,3 +118,33 @@ def delete_monitor(monitor_id: int, db: Session = Depends(get_db), current_user:
     db.delete(m)
     db.commit()
     return {"status": "deleted", "id": m.id}
+
+
+class MuteRequest(BaseModel):
+    duration_minutes: int  # 0 = unmute
+
+@router.put("/{monitor_id}/mute", response_model=dict[str, Any])
+def mute_monitor(
+    monitor_id: int,
+    payload: MuteRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["ANALYST", "ADMIN"]))
+):
+    """Mute (snooze) a monitor for N minutes. Pass 0 to unmute."""
+    m = db.query(Monitor).filter(Monitor.id == monitor_id).first()
+    if not m:
+        raise HTTPException(status_code=404, detail="Monitor not found")
+    if current_user.tenant_id and m.tenant_id != current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    if payload.duration_minutes <= 0:
+        m.muted_until = None
+    else:
+        m.muted_until = datetime.datetime.utcnow() + datetime.timedelta(minutes=payload.duration_minutes)
+
+    db.commit()
+    return {
+        "status": "muted" if m.muted_until else "unmuted",
+        "id": m.id,
+        "muted_until": m.muted_until.isoformat() if m.muted_until else None
+    }

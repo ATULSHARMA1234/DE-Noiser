@@ -102,6 +102,7 @@ from denoiser.api.deployments import router as deployments_router
 from denoiser.api.integrations import router as integrations_router
 from denoiser.api.metrics import router as metrics_router
 from denoiser.api.monitors import router as monitors_router
+from denoiser.api.notebooks import router as notebooks_router
 from denoiser.api.otlp import router as otlp_router
 from denoiser.api.query import router as query_router
 from denoiser.api.runbooks import router as runbooks_router
@@ -125,6 +126,7 @@ app.include_router(deployments_router)
 app.include_router(sso_router)
 app.include_router(otlp_router)
 app.include_router(storage_router)
+app.include_router(notebooks_router)
 
 # Register global exception handlers (Task 3)
 register_exception_handlers(app)

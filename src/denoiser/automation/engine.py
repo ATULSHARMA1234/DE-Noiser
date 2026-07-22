@@ -1,39 +1,148 @@
-import time
+import contextlib
 from datetime import datetime
 
+import requests
+from requests.auth import HTTPBasicAuth
 from sqlalchemy.orm import Session
+
+# Attempt to load Kubernetes config for cluster management actions
+try:
+    from kubernetes import client, config
+    try:
+        config.load_incluster_config()
+    except config.ConfigException:
+        with contextlib.suppress(config.ConfigException):
+            config.load_kube_config()  # Fallback handled in the action logic
+    K8S_AVAILABLE = True
+except ImportError:
+    K8S_AVAILABLE = False
+
 
 from denoiser.logging import get_logger
 from denoiser.storage.db import Incident, Runbook, RunbookExecution
 
 logger = get_logger(__name__)
 
-def execute_runbook_step(step: dict, execution_logs: list):
+def execute_runbook_step(step: dict, incident: Incident, execution_logs: list):
     """
-    Simulate the execution of a runbook step.
-    In a real environment, this might make HTTP requests, run scripts, etc.
+    Execute a runbook step with real API integrations.
     """
     action_type = step.get("action", "unknown")
     execution_logs.append(f"[{datetime.utcnow().isoformat()}] Starting step: {step.get('name', 'Unnamed step')}")
+    
+    incident_payload = {
+        "incident_id": incident.id,
+        "title": incident.title,
+        "severity": incident.severity,
+        "status": incident.status,
+    }
 
-    if action_type == "webhook":
-        url = step.get("url", "")
-        execution_logs.append(f"[{datetime.utcnow().isoformat()}] Sending POST request to {url}")
-        time.sleep(0.5) # Simulate network delay
-        execution_logs.append(f"[{datetime.utcnow().isoformat()}] Webhook returned 200 OK")
-    elif action_type == "restart_service":
-        service = step.get("service", "")
-        execution_logs.append(f"[{datetime.utcnow().isoformat()}] Issuing restart command for service {service}")
-        time.sleep(1.0)
-        execution_logs.append(f"[{datetime.utcnow().isoformat()}] Service {service} restarted successfully")
-    elif action_type == "escalate":
-        level = step.get("level", "P1")
-        execution_logs.append(f"[{datetime.utcnow().isoformat()}] Escalating incident to {level} via PagerDuty integration")
-        time.sleep(0.2)
-        execution_logs.append(f"[{datetime.utcnow().isoformat()}] Escalation successful")
-    else:
-        execution_logs.append(f"[{datetime.utcnow().isoformat()}] Unknown action type: {action_type}")
-        raise ValueError(f"Unsupported action: {action_type}")
+    try:
+        if action_type == "webhook":
+            url = step.get("url")
+            if not url:
+                raise ValueError("Webhook URL is missing.")
+            execution_logs.append(f"[{datetime.utcnow().isoformat()}] Sending POST request to {url}")
+            response = requests.post(url, json=incident_payload, timeout=10)
+            response.raise_for_status()
+            execution_logs.append(f"[{datetime.utcnow().isoformat()}] Webhook returned {response.status_code} OK")
+
+        elif action_type == "slack_notification":
+            slack_url = step.get("slack_webhook_url")
+            if not slack_url:
+                raise ValueError("Slack Webhook URL is not configured in this runbook step.")
+            
+            payload = {
+                "text": f"🚨 *New Incident:* {incident.title}\n*Severity:* {incident.severity}\n*Status:* {incident.status}"
+            }
+            execution_logs.append(f"[{datetime.utcnow().isoformat()}] Sending Slack notification...")
+            response = requests.post(slack_url, json=payload, timeout=10)
+            response.raise_for_status()
+            execution_logs.append(f"[{datetime.utcnow().isoformat()}] Slack message delivered")
+
+        elif action_type == "jira_issue":
+            jira_url = step.get("jira_url")
+            jira_user = step.get("jira_user")
+            jira_token = step.get("jira_api_token")
+            if not all([jira_url, jira_user, jira_token]):
+                raise ValueError("Jira integration is not fully configured in this runbook step.")
+            
+            url = f"{jira_url.rstrip('/')}/rest/api/2/issue"
+            auth = HTTPBasicAuth(jira_user, jira_token)
+            payload = {
+                "fields": {
+                    "project": {"key": "SRE"},
+                    "summary": f"Incident: {incident.title}",
+                    "description": f"Severity: {incident.severity}\nAuto-created from Semantic Log Denoiser.",
+                    "issuetype": {"name": "Task"}
+                }
+            }
+            execution_logs.append(f"[{datetime.utcnow().isoformat()}] Creating Jira Issue...")
+            response = requests.post(url, json=payload, auth=auth, timeout=15)
+            response.raise_for_status()
+            issue_key = response.json().get("key", "UNKNOWN")
+            execution_logs.append(f"[{datetime.utcnow().isoformat()}] Created Jira ticket {issue_key}")
+
+        elif action_type == "escalate":
+            pagerduty_key = step.get("pagerduty_integration_key")
+            if not pagerduty_key:
+                raise ValueError("PagerDuty Integration Key is not configured in this runbook step.")
+            
+            url = "https://events.pagerduty.com/v2/enqueue"
+            payload = {
+                "routing_key": pagerduty_key,
+                "event_action": "trigger",
+                "payload": {
+                    "summary": incident.title,
+                    "severity": "critical" if incident.severity == "critical" else "error",
+                    "source": "semantic-log-denoiser"
+                }
+            }
+            execution_logs.append(f"[{datetime.utcnow().isoformat()}] Escalating to PagerDuty...")
+            response = requests.post(url, json=payload, timeout=10)
+            response.raise_for_status()
+            execution_logs.append(f"[{datetime.utcnow().isoformat()}] PagerDuty escalation successful")
+
+        elif action_type == "restart_service" or action_type == "scale_pods":
+            if not K8S_AVAILABLE:
+                raise ValueError("Kubernetes python client is not installed or configured.")
+            
+            service = step.get("service")
+            if not service:
+                raise ValueError("Service name is missing.")
+            
+            apps_v1 = client.AppsV1Api()
+            # For simplicity, assuming default namespace or parsing from string
+            namespace = "default"
+            if "/" in service:
+                namespace, service = service.split("/", 1)
+
+            if action_type == "restart_service":
+                execution_logs.append(f"[{datetime.utcnow().isoformat()}] Issuing restart command for {namespace}/{service}")
+                # K8s standard way to restart a deployment is to patch its annotations
+                now = datetime.utcnow().isoformat("T") + "Z"
+                body = {"spec": {"template": {"metadata": {"annotations": {"kubectl.kubernetes.io/restartedAt": now}}}}}
+                apps_v1.patch_namespaced_deployment(name=service, namespace=namespace, body=body)
+                execution_logs.append(f"[{datetime.utcnow().isoformat()}] Service {service} restarted successfully")
+            else:
+                # scale_pods
+                execution_logs.append(f"[{datetime.utcnow().isoformat()}] Scaling up {namespace}/{service} (+2 replicas)")
+                deployment = apps_v1.read_namespaced_deployment(name=service, namespace=namespace)
+                current_replicas = deployment.spec.replicas or 1
+                body = {"spec": {"replicas": current_replicas + 2}}
+                apps_v1.patch_namespaced_deployment_scale(name=service, namespace=namespace, body=body)
+                execution_logs.append(f"[{datetime.utcnow().isoformat()}] Kubernetes scale up command issued successfully")
+                
+        else:
+            execution_logs.append(f"[{datetime.utcnow().isoformat()}] Unknown action type: {action_type}")
+            raise ValueError(f"Unsupported action: {action_type}")
+
+    except requests.exceptions.RequestException as e:
+        execution_logs.append(f"[{datetime.utcnow().isoformat()}] HTTP Request failed: {e}")
+        raise
+    except Exception as e:
+        execution_logs.append(f"[{datetime.utcnow().isoformat()}] Action failed: {e}")
+        raise
 
     execution_logs.append(f"[{datetime.utcnow().isoformat()}] Step completed successfully.")
 

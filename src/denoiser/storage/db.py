@@ -124,6 +124,7 @@ class Span(Base):
     __tablename__ = "spans"
 
     id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, index=True, nullable=True)
     trace_id = Column(String, index=True, nullable=False)
     span_id = Column(String, index=True, nullable=False)
     parent_span_id = Column(String, index=True, nullable=True)
@@ -200,6 +201,7 @@ class ExtractedMetric(Base):
     __tablename__ = "extracted_metrics"
 
     id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, index=True, nullable=True)
     rule_id = Column(Integer, index=True, nullable=False)
     timestamp = Column(DateTime, default=datetime.datetime.utcnow, index=True)
     value = Column(Float, nullable=False)
@@ -238,7 +240,19 @@ class Monitor(Base):
     threshold_critical = Column(Float, nullable=True)
     threshold_warning = Column(Float, nullable=True)
     enabled = Column(Boolean, default=True)
+    muted_until = Column(DateTime, nullable=True)  # snooze: suppress alerts until this time
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+class Notebook(Base):
+    __tablename__ = "notebooks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, index=True, nullable=True)
+    title = Column(String, nullable=False, default="Untitled Notebook")
+    cells = Column(JSON, default=list)  # [{type, content, result?}]
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
 
 # ── Wave 4 Models ────────────────────────────────────────────────────────────
@@ -335,17 +349,36 @@ def init_db():
             except Exception:
                 db.rollback()
 
-        # Issue #8: add tenant_id to metric_rules for proper multi-tenant isolation
+        # Add muted_until to monitors for snooze feature
         try:
-            db.execute(text("SELECT tenant_id FROM metric_rules LIMIT 1"))
+            db.execute(text("SELECT muted_until FROM monitors LIMIT 1"))
         except Exception:
             db.rollback()
             try:
-                db.execute(text("ALTER TABLE metric_rules ADD COLUMN tenant_id INTEGER REFERENCES tenants(id)"))
-                db.execute(text("CREATE INDEX IF NOT EXISTS ix_metric_rules_tenant_id ON metric_rules (tenant_id)"))
+                db.execute(text("ALTER TABLE monitors ADD COLUMN muted_until DATETIME"))
                 db.commit()
             except Exception:
                 db.rollback()
+
+        # Issue #8: add tenant_id to metric_rules, extracted_metrics and spans
+        # for proper multi-tenant isolation.
+        #
+        # Each table is probed separately. Gating all three behind a single
+        # probe on metric_rules silently skips the other two on any database
+        # that already picked up the metric_rules column, leaving the models
+        # declaring tenant_id against tables that don't have it — every insert
+        # then fails with "table spans has no column named tenant_id".
+        for table in ("metric_rules", "extracted_metrics", "spans"):
+            try:
+                db.execute(text(f"SELECT tenant_id FROM {table} LIMIT 1"))
+            except Exception:
+                db.rollback()
+                try:
+                    db.execute(text(f"ALTER TABLE {table} ADD COLUMN tenant_id INTEGER REFERENCES tenants(id)"))
+                    db.execute(text(f"CREATE INDEX IF NOT EXISTS ix_{table}_tenant_id ON {table} (tenant_id)"))
+                    db.commit()
+                except Exception:
+                    db.rollback()
 
         admin_email = "admin@semanticos.io"
         exists = db.query(User).filter(User.email == admin_email).first()

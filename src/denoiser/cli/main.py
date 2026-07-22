@@ -15,6 +15,7 @@ import os
 import sys
 import time
 from datetime import datetime
+from pathlib import Path
 
 import typer
 from rich.console import Console
@@ -278,8 +279,25 @@ def agent(
             if current_size > last_size:
                 console.print(f"[{datetime.now().strftime('%H:%M:%S')}] 📥 [bold]Signal Detected[/bold] - Triggering Batch Analysis...")
                 # Run a mini-analysis on the new data
-                # For the demo, we just trigger the full analyze logic on the file
-                analyze(source=path, intelligence=True, format="table")
+                # For the demo, we just trigger the full analyze logic on the file.
+                # All parameters are passed explicitly: when a Typer command is
+                # invoked as a plain function, any argument left unset resolves to
+                # its `typer.Option(...)` sentinel (an OptionInfo object) rather
+                # than the intended default, which then breaks the pipeline.
+                analyze(
+                    source=path,
+                    baseline=None,
+                    top=10,
+                    format="table",
+                    mode="general",
+                    fail_on_anomaly=None,
+                    local_only=False,
+                    redact=True,
+                    intelligence=True,
+                    slack_webhook=None,
+                    org_id=None,
+                    team_id=None,
+                )
                 last_size = current_size
 
             time.sleep(interval)
