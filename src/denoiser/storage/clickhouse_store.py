@@ -8,6 +8,64 @@ from denoiser.logging import get_logger
 
 logger = get_logger(__name__)
 
+# Where a log's originating service can be found, in priority order.
+#
+# Nothing in the wild sends a bare "source" key. Fluent Bit's Kubernetes filter
+# nests container_name under "kubernetes", OpenTelemetry uses the dotted
+# "service.name", Vector and most JSON loggers use "service". Reading only
+# "source" meant every log from every real shipper landed as "unknown", which
+# silently removes the per-service dimension that topology, causal correlation
+# and cross-service spike detection are all built on — the clustering still
+# works, it just has nothing to correlate across.
+#
+# Dotted entries are tried as a literal flat key first, then as a nested path,
+# because shippers disagree about whether they flatten.
+SOURCE_KEYS: tuple[str, ...] = (
+    "source",
+    "service",
+    "service_name",
+    "service.name",                 # OpenTelemetry resource attribute
+    "kubernetes.container_name",    # Fluent Bit kubernetes filter
+    "kubernetes.labels.app",
+    "container_name",               # Docker / Fluentd docker driver
+    "app",
+    "logger_name",
+)
+
+UNKNOWN_SOURCE = "unknown"
+
+
+def _lookup(log: dict[str, Any], key: str) -> Any:
+    """Read ``key`` as a flat key, falling back to a nested dotted path."""
+    if key in log:
+        return log[key]
+
+    if "." not in key:
+        return None
+
+    node: Any = log
+    for part in key.split("."):
+        if not isinstance(node, dict) or part not in node:
+            return None
+        node = node[part]
+    return node
+
+
+def resolve_source(log: dict[str, Any]) -> str:
+    """The service a log came from, or ``unknown`` when nothing identifies it."""
+    for key in SOURCE_KEYS:
+        value = _lookup(log, key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        # Numeric or otherwise non-string identifiers are still better than
+        # nothing, but skip containers and lists — those are structure, not a name.
+        if value is not None and not isinstance(value, dict | list):
+            text = str(value).strip()
+            if text:
+                return text
+    return UNKNOWN_SOURCE
+
+
 class ClickHouseStore:
     def __init__(self):
         self.host = os.getenv("CLICKHOUSE_HOST", "localhost")
@@ -120,7 +178,7 @@ class ClickHouseStore:
                 data.append((
                     tenant_id,
                     dt,
-                    log.get("source", "unknown"),
+                    resolve_source(log),
                     log.get("level", "INFO"),
                     log.get("message", str(log)),
                     json.dumps(log)
