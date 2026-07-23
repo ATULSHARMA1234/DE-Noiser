@@ -66,6 +66,54 @@ def resolve_source(log: dict[str, Any]) -> str:
     return UNKNOWN_SOURCE
 
 
+# Where a log's severity can be found, in priority order — same problem as the
+# source: only "level" was read, so OpenTelemetry ("severity_text"), syslog-
+# derived shippers ("severity") and anything using "log.level" (ECS) all fell
+# through to the INFO default. A real ERROR silently filed as INFO corrupts the
+# severity histogram, incident ranking and SLO error-budget maths.
+LEVEL_KEYS: tuple[str, ...] = (
+    "level",
+    "severity_text",   # OpenTelemetry
+    "severity",        # syslog-derived, many JSON loggers
+    "log.level",       # Elastic Common Schema
+    "loglevel",
+    "levelname",       # Python logging
+    "status",
+)
+
+DEFAULT_LEVEL = "INFO"
+
+# Aliases map onto the vocabulary the rest of the platform already uses —
+# DEBUG, INFO, WARN, ERROR, FATAL — not a "more standard" WARNING/CRITICAL set.
+# The Explore severity histogram hardcodes LEVEL_ORDER/LEVEL_COLOR on exactly
+# these five names, so a value outside them renders colorless and drops out of
+# the stack. Match the surrounding code rather than fight it.
+_LEVEL_ALIASES: dict[str, str] = {
+    "TRACE": "DEBUG", "DEBUG": "DEBUG", "DBG": "DEBUG",
+    "INFO": "INFO", "INFORMATION": "INFO", "INFORMATIONAL": "INFO", "NOTICE": "INFO",
+    "WARN": "WARN", "WARNING": "WARN",
+    "ERR": "ERROR", "ERROR": "ERROR",
+    "CRIT": "FATAL", "CRITICAL": "FATAL", "FATAL": "FATAL",
+    "ALERT": "FATAL", "EMERGENCY": "FATAL", "EMERG": "FATAL", "PANIC": "FATAL",
+    # Syslog numeric severities (RFC 5424): 0 emerg … 7 debug.
+    "0": "FATAL", "1": "FATAL", "2": "FATAL", "3": "ERROR",
+    "4": "WARN", "5": "INFO", "6": "INFO", "7": "DEBUG",
+}
+
+
+def resolve_level(log: dict[str, Any]) -> str:
+    """The canonical severity of a log, or ``INFO`` when nothing specifies one."""
+    for key in LEVEL_KEYS:
+        value = _lookup(log, key)
+        if value is None or isinstance(value, dict | list):
+            continue
+        raw = str(value).strip()
+        if not raw:
+            continue
+        return _LEVEL_ALIASES.get(raw.upper(), raw.upper())
+    return DEFAULT_LEVEL
+
+
 class ClickHouseStore:
     def __init__(self):
         self.host = os.getenv("CLICKHOUSE_HOST", "localhost")
@@ -179,7 +227,7 @@ class ClickHouseStore:
                     tenant_id,
                     dt,
                     resolve_source(log),
-                    log.get("level", "INFO"),
+                    resolve_level(log),
                     log.get("message", str(log)),
                     json.dumps(log)
                 ))
