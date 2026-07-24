@@ -1,7 +1,6 @@
-import contextlib
 import json
 import os
-from datetime import UTC
+from datetime import UTC, datetime
 from typing import Any
 
 from denoiser.logging import get_logger
@@ -114,6 +113,97 @@ def resolve_level(log: dict[str, Any]) -> str:
     return DEFAULT_LEVEL
 
 
+# Where a log's event time can be found, in priority order. Same "only one key
+# was read" problem as source and level: insert only looked at "timestamp", so
+# Elastic's "@timestamp", the Docker json-file driver's "time", OTel's
+# "timeUnixNano" and Fluent Bit's "date" all fell through to ingestion
+# wall-clock — which detaches the stored time from the event and corrupts every
+# time-range query and the volume histogram.
+TIMESTAMP_KEYS: tuple[str, ...] = (
+    "timestamp",
+    "@timestamp",           # Elastic Common Schema
+    "time",                 # Docker json-file driver
+    "ts",
+    "timeunixnano",         # OpenTelemetry (matched case-insensitively below)
+    "observedtimeunixnano",
+    "eventtime",
+    "date",                 # Fluent Bit
+)
+
+
+def _from_epoch(value: float) -> datetime | None:
+    """Epoch number to a UTC datetime, detecting the unit by magnitude.
+
+    Shippers send epochs in seconds, milliseconds (JavaScript Date.now, many
+    JSON loggers), microseconds, or nanoseconds (OpenTelemetry). Feeding a
+    millisecond epoch to fromtimestamp as if it were seconds does not just store
+    the wrong time — it raises ("year 56531 is out of range"), and because that
+    happens inside insert_logs' batch loop it fails the whole batch. In the
+    at-least-once worker a permanently failing batch is a poison pill that wedges
+    the partition, so one JavaScript service can stop ingestion outright.
+
+    Thresholds are chosen so a real timestamp (years ~2001-2100) is never
+    misread: seconds top out around 4.1e9, well below the 1e11 boundary.
+    """
+    magnitude = abs(value)
+    if magnitude >= 1e17:
+        value /= 1e9    # nanoseconds
+    elif magnitude >= 1e14:
+        value /= 1e6    # microseconds
+    elif magnitude >= 1e11:
+        value /= 1e3    # milliseconds
+
+    try:
+        return datetime.fromtimestamp(value, UTC)
+    except (ValueError, OSError, OverflowError):
+        return None
+
+
+def coerce_timestamp(value: Any) -> datetime | None:
+    """A single timestamp field value to a UTC datetime, or None if unparseable.
+
+    Never raises: a value it cannot understand returns None so the caller can
+    fall back, rather than taking down the batch it belongs to.
+    """
+    # bool is a subclass of int; a truthy flag is not an epoch.
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        return _from_epoch(float(value))
+    if isinstance(value, str):
+        s = value.strip()
+        if not s:
+            return None
+        # A bare number in a string is still an epoch.
+        try:
+            return _from_epoch(float(s))
+        except ValueError:
+            pass
+        try:
+            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        # A naive ISO string is assumed to be UTC rather than left tz-less,
+        # so ClickHouse does not reinterpret it in the server's local zone.
+        return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+    return None
+
+
+def resolve_timestamp(log: dict[str, Any]) -> datetime:
+    """The event time of a log, or ingestion wall-clock when none is present."""
+    lowered = {k.lower(): v for k, v in log.items()} if log else {}
+    for key in TIMESTAMP_KEYS:
+        value = _lookup(log, key)
+        if value is None:
+            value = lowered.get(key)  # case-insensitive (timeUnixNano etc.)
+        if value is None or isinstance(value, dict | list):
+            continue
+        dt = coerce_timestamp(value)
+        if dt is not None:
+            return dt
+    return datetime.now(UTC)
+
+
 class ClickHouseStore:
     def __init__(self):
         self.host = os.getenv("CLICKHOUSE_HOST", "localhost")
@@ -192,23 +282,6 @@ class ClickHouseStore:
         except Exception as e:
             logger.error(f"Failed to cleanup old data for tenant {tenant_id}: {e}")
 
-    @staticmethod
-    def _coerce_timestamp(ts):
-        """Accept an epoch number OR an ISO-8601 string.
-
-        ISO strings are the natural producer format (and what the API examples
-        use), but were previously dropped -- any non-numeric timestamp fell back
-        to ingestion wall-clock, so the stored time bore no relation to the event
-        and corrupted every time-range query and the volume histogram.
-        """
-        from datetime import datetime
-        if isinstance(ts, (int, float)):
-            return datetime.fromtimestamp(ts, UTC)
-        if isinstance(ts, str) and ts.strip():
-            with contextlib.suppress(ValueError):
-                return datetime.fromisoformat(ts.strip().replace("Z", "+00:00"))
-        return datetime.now(UTC)
-
     def insert_logs(self, logs: list[dict[str, Any]], tenant_id: str):
         """Dual-write logs to ClickHouse"""
         if not self.client:
@@ -221,7 +294,7 @@ class ClickHouseStore:
             # Flatten log dicts to tuples matching schema
             data = []
             for log in logs:
-                dt = self._coerce_timestamp(log.get("timestamp"))
+                dt = resolve_timestamp(log)
 
                 data.append((
                     tenant_id,
