@@ -253,18 +253,22 @@ def verify_ingest_auth(
     db: Session = Depends(get_db)
 ) -> str:
     """Allow ingest if X-API-Key header matches static config, or if a valid JWT is present. Returns tenant_id."""
+    from denoiser.api.credentials import matches_static_secret, tenant_for_api_key
     from denoiser.storage.db import Tenant
     if api_key:
-        tenant = db.query(Tenant).filter(Tenant.api_key == api_key).first()
+        # Accepts a key that is mid-rotation, so a fleet of shippers can be
+        # updated in sequence rather than all at the instant of rotation.
+        tenant = tenant_for_api_key(db, api_key)
         if tenant:
             return tenant.id
         # Optional static key for unattended ingest. No hardcoded production
         # default — it must be set via INGEST_API_KEY (a dev default is allowed
         # only under tests so the suite can exercise the path).
-        static_key = os.getenv("INGEST_API_KEY")
-        if not static_key and is_testing:
-            static_key = "semanticos-ingest-key-123"
-        if static_key and api_key == static_key:
+        # INGEST_API_KEY_PREVIOUS holds superseded values during a rotation.
+        matched_static = matches_static_secret(api_key, "INGEST_API_KEY")
+        if not matched_static and is_testing and not os.getenv("INGEST_API_KEY"):
+            matched_static = api_key == "semanticos-ingest-key-123"
+        if matched_static:
             # Resolve to a real tenant. Returning the literal "default_tenant"
             # writes rows under a tenant id that no user can ever hold, so
             # everything ingested with the static key was orphaned: stored, but

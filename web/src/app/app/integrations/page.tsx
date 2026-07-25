@@ -17,6 +17,10 @@ export default function IntegrationsPage() {
  // creating one; null means "connect".
  const [editing, setEditing] = useState<any | null>(null);
  const [credential, setCredential] = useState('');
+ // GitHub needs owner/name as well as a token — without it every call fails
+ // "not configured", and there was nowhere in this dialog to supply it.
+ const [repo, setRepo] = useState('');
+ const [busyId, setBusyId] = useState<number | null>(null);
 
  const [confirmOpen, setConfirmOpen] = useState(false);
  const [confirmTitle, setConfirmTitle] = useState('');
@@ -51,6 +55,7 @@ export default function IntegrationsPage() {
  setSelectedProvider(providerId);
  setEditing(null);
  setCredential('');
+ setRepo('');
  setShowConfigModal(true);
  };
 
@@ -58,7 +63,43 @@ export default function IntegrationsPage() {
  setSelectedProvider(providerId);
  setEditing(integration);
  setCredential('');
+ setRepo(integration?.config?.repo || '');
  setShowConfigModal(true);
+ };
+
+ // Verify the stored credential actually works, rather than finding out later
+ // when an alert silently fails to deliver.
+ const testIntegration = async (integration: any) => {
+ setBusyId(integration.id);
+ try {
+ const res = await apiFetch(`/integrations/${integration.id}/test`, { method: 'POST' });
+ toast({
+ title: res.status === 'ok' ? 'Connection verified' : `Test ${res.status}`,
+ description: res.detail,
+ type: res.status === 'failed' ? 'error' : 'info',
+ });
+ } catch (e: any) {
+ toast({ title: 'Test failed', description: e.message, type: 'error' });
+ } finally {
+ setBusyId(null);
+ }
+ };
+
+ // Pull deployments in as markers the Metrics page can correlate against.
+ const syncIntegration = async (integration: any) => {
+ setBusyId(integration.id);
+ try {
+ const res = await apiFetch(`/integrations/${integration.id}/sync`, { method: 'POST' });
+ toast({
+ title: `Synced ${res.repo}`,
+ description: `${res.deployments_imported} new deployment marker(s) from ${res.deployments_seen} deployment(s)`,
+ });
+ fetchIntegrations();
+ } catch (e: any) {
+ toast({ title: 'Sync failed', description: e.message, type: 'error' });
+ } finally {
+ setBusyId(null);
+ }
  };
 
  const handleSubmit = async (e: React.FormEvent) => {
@@ -70,6 +111,7 @@ export default function IntegrationsPage() {
  // "keep the stored token" rather than "erase it".
  const config: Record<string, any> = { updated_at: new Date().toISOString() };
  if (credential) config.api_key = credential;
+ if (selectedProvider === 'github') config.repo = repo.trim();
  await apiFetch(`/integrations/${editing.id}`, { method: 'PUT', body: JSON.stringify({ config }) });
  toast({ title: 'Integration updated' });
  } else {
@@ -81,6 +123,7 @@ export default function IntegrationsPage() {
  config: {
  connected_at: new Date().toISOString(),
  ...(credential ? { api_key: credential } : {}),
+ ...(selectedProvider === 'github' && repo.trim() ? { repo: repo.trim() } : {}),
  }
  })
  });
@@ -144,6 +187,15 @@ export default function IntegrationsPage() {
  <p className="text-sm text-[var(--text-secondary)] mb-6 flex-1">{provider.desc}</p>
  
  {connected ? (
+ <div className="space-y-2">
+ {activeIntegration?.config?.repo && (
+ <p className="text-xs font-mono text-[var(--text-muted)] truncate">
+ {activeIntegration.config.repo}
+ {activeIntegration.config.last_synced_at && (
+ <span className="ml-1">· synced {new Date(activeIntegration.config.last_synced_at).toLocaleDateString()}</span>
+ )}
+ </p>
+ )}
  <div className="flex gap-2">
  <button
  onClick={() => openConfigure(provider.id, activeIntegration)}
@@ -151,12 +203,31 @@ export default function IntegrationsPage() {
  >
  Configure
  </button>
- <button 
+ <button
+ onClick={() => testIntegration(activeIntegration)}
+ disabled={busyId === activeIntegration.id}
+ title="Verify the stored credential"
+ className="px-3 py-2 text-sm font-medium border border-[var(--border)] rounded text-[var(--text-primary)] hover:bg-[var(--bg-app)] transition-colors disabled:opacity-40"
+ >
+ Test
+ </button>
+ {provider.id === 'github' && (
+ <button
+ onClick={() => syncIntegration(activeIntegration)}
+ disabled={busyId === activeIntegration.id}
+ title="Import deployments as markers"
+ className="px-3 py-2 text-sm font-medium border border-[var(--border)] rounded text-[var(--text-primary)] hover:bg-[var(--bg-app)] transition-colors disabled:opacity-40"
+ >
+ Sync
+ </button>
+ )}
+ <button
  onClick={() => disconnect(activeIntegration.id)}
  className="px-3 py-2 text-sm font-medium border border-red-500/20 text-red-500 rounded hover:bg-red-500/10 transition-colors"
  >
  <Trash2 size={16} />
  </button>
+ </div>
  </div>
  ) : (
  <button
@@ -198,6 +269,22 @@ export default function IntegrationsPage() {
  />
  <p className="text-xs text-[var(--text-secondary)] mt-1">Stored server-side and never returned by the API.</p>
  </div>
+
+ {selectedProvider === 'github' && (
+ <div>
+ <label className="block text-sm font-medium text-[var(--text-primary)] mb-1">Repository</label>
+ <input
+ type="text"
+ value={repo}
+ onChange={(e) => setRepo(e.target.value)}
+ className="w-full bg-[var(--bg-app)] border border-[var(--border)] rounded-md py-2 px-3 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
+ placeholder="owner/name"
+ />
+ <p className="text-xs text-[var(--text-secondary)] mt-1">
+ Required — GitHub calls (issues, Actions logs, deployment sync) all target one repository.
+ </p>
+ </div>
+ )}
 
  <div className="pt-4 flex justify-end gap-3 border-t border-[var(--border)] mt-6">
  <button 

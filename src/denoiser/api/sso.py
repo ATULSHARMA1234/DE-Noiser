@@ -99,6 +99,40 @@ def _provision_sso_user(db: Session, fields: dict, default_environments: list[st
     return user
 
 
+@router.get("/providers")
+def sso_providers():
+    """Which sign-in methods this deployment actually offers.
+
+    The login page previously hardcoded a single "Enterprise SSO" button wired
+    to the OIDC flow, so a SAML-only deployment had a working, signature-
+    verifying SAML endpoint that no user could reach, and an unconfigured
+    deployment showed a button that could only 501. Unauthenticated on purpose:
+    it exposes no secrets, only which buttons to draw.
+    """
+    from denoiser.api.saml import saml_enabled
+    from denoiser.settings import get_settings
+
+    settings = get_settings()
+    return {
+        "oidc": {
+            "enabled": settings.oidc_enabled,
+            "start_url": "/auth/sso/login",
+            "label": "Sign in with Enterprise SSO",
+        },
+        "saml": {
+            "enabled": saml_enabled(),
+            "start_url": "/auth/sso/saml/login",
+            "label": "Sign in with SAML",
+        },
+        "mock": {
+            "enabled": _mock_sso_enabled() and not settings.oidc_enabled,
+            "start_url": "/auth/sso/login",
+            "label": "Sign in with the mock IdP (sandbox)",
+        },
+        "local_login": settings.local_login_enabled,
+    }
+
+
 @router.get("/login")
 def sso_login(provider: str = "okta", redirect_uri: str | None = None):
     """

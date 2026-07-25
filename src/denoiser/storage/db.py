@@ -307,6 +307,13 @@ class Tenant(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False, unique=True)
     api_key = Column(String, nullable=True, unique=True)
+    # Rotation with an overlap window, mirroring the JWT keyring: the superseded
+    # key keeps working until `api_key_previous_expires_at` so shippers can be
+    # updated one at a time instead of every agent breaking at once. A leaked key
+    # is revoked immediately by rotating without an overlap.
+    api_key_previous = Column(String, nullable=True, index=True)
+    api_key_previous_expires_at = Column(DateTime, nullable=True)
+    api_key_rotated_at = Column(DateTime, nullable=True)
     tier = Column(String, default="free")  # free, pro, enterprise
     created_at = Column(DateTime, default=utcnow)
 

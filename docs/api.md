@@ -13,12 +13,16 @@ Most endpoints require a Bearer JWT. Obtain one from `/auth/login`, send it as
 | POST | `/auth/login` | — | Exchange email/password for a JWT. Rate-limited (5 failures / 5 min per IP+email). |
 | GET | `/auth/me` | any | Current user profile. |
 | POST | `/auth/logout` | any | Revoke the caller's token (cannot be reused before expiry). |
+| GET | `/auth/sso/providers` | — | Which sign-in flows this deployment offers (OIDC / SAML / mock), so the login page renders only reachable buttons. |
 | GET | `/auth/sso/login` | — | SSO redirect. Uses the real OIDC provider when `OIDC_ISSUER`/`OIDC_CLIENT_ID`/`OIDC_CLIENT_SECRET` are set; otherwise the gated mock IdP. |
 | GET | `/auth/sso/callback` | — | OIDC callback: validates the ID token (JWKS), maps groups → role/teams, provisions the user, issues a JWT. |
 | GET | `/auth/sso/saml/login` | — | SP-initiated SAML: redirects to the IdP with a deflated `AuthnRequest`. `501` until SAML is configured. |
 | POST | `/auth/sso/saml/acs` | — | SAML ACS: verifies the assertion signature, audience, recipient, validity window and replay, then issues a JWT. `401` on any failure. |
 | GET | `/auth/sso/saml/metadata` | — | SP metadata XML to register with the IdP. |
 | GET | `/admin/signing-keys` | ADMIN | Active and retired JWT key ids, for confirming a key rotation landed. |
+| GET | `/admin/credentials` | ADMIN | Rotation state of every long-lived credential. Never returns a secret's value. |
+| POST | `/admin/tenant/api-key/rotate` | ADMIN | Issue a new tenant API key; the superseded one stays valid for `overlap_hours` (0 = revoke now). Returned once. |
+| POST | `/admin/tenant/api-key/revoke-previous` | ADMIN | End the overlap early, once every shipper carries the new key. |
 
 #### SAML 2.0 configuration
 
@@ -126,6 +130,17 @@ parameterized ClickHouse SQL.
 | GET/POST/PUT/DELETE | `/webhooks` … | ADMIN | Manage alert destinations (Slack/PagerDuty/Teams/generic). |
 | POST | `/webhooks/{id}/test` | ADMIN | Fire a synthetic test alert. |
 | POST | `/alerts/trigger` | ANALYST+ | Ingest an alert; P0 opens an incident and runs matching runbooks. |
+| POST | `/runbooks/{id}/run` | ANALYST+ | Execute a runbook now, without waiting for a matching incident. |
+| PUT | `/runbooks/{id}` | ANALYST+ | Update a runbook (the enable/disable toggle). |
+| POST | `/monitors/{id}/evaluate` | ANALYST+ | Run a monitor's query immediately and persist the result. |
+
+## Integrations
+
+| Method | Path | Role | Description |
+|--------|------|------|-------------|
+| GET/POST/PUT/DELETE | `/integrations` … | varies | Manage connected providers. Credentials are stored but never returned — reads show a mask. |
+| POST | `/integrations/{id}/test` | ANALYST+ | Verify the stored credential actually authenticates. |
+| POST | `/integrations/{id}/sync` | ANALYST+ | Pull provider metadata in. For GitHub this imports deployments as markers for deploy↔anomaly correlation (needs `config.repo` = `owner/name`). |
 
 ## Sources & connectors
 

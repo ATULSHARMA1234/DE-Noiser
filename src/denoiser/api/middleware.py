@@ -428,12 +428,15 @@ def _lookup_tenant(api_key: str | None, subject: str | None) -> tuple[str, str] 
     try:
         tenant = None
         if api_key:
-            tenant = db.query(Tenant).filter(Tenant.api_key == api_key).first()
+            from denoiser.api.credentials import matches_static_secret, tenant_for_api_key
+
+            # Honours a key mid-rotation, so a shipper still on the superseded
+            # key is billed to its own tenant's quota rather than escaping it.
+            tenant = tenant_for_api_key(db, api_key)
             if tenant is None:
                 # Static ingest key (unattended shippers) maps to the first tenant,
                 # matching verify_ingest_auth.
-                static_key = os.getenv("INGEST_API_KEY")
-                if static_key and api_key == static_key:
+                if matches_static_secret(api_key, "INGEST_API_KEY"):
                     tenant = db.query(Tenant).order_by(Tenant.id).first()
         elif subject:
             user = db.query(User).filter(User.email == subject).first()

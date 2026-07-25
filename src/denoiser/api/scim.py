@@ -35,13 +35,18 @@ ERROR_SCHEMA = "urn:ietf:params:scim:api:messages:2.0:Error"
 
 def require_scim_auth(authorization: str | None = Header(None)) -> bool:
     """Validate the SCIM bearer token. 403 when SCIM is not configured."""
+    from denoiser.api.credentials import matches_static_secret, secrets_match
+
     configured = get_settings().scim_bearer_token
     if not configured:
         raise HTTPException(status_code=403, detail="SCIM provisioning is not enabled")
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="Missing SCIM bearer token")
     token = authorization.split(" ", 1)[1].strip()
-    if token != configured:
+    # Compared in constant time, and SCIM_BEARER_TOKEN_PREVIOUS is accepted
+    # during a rotation — otherwise changing the token means the IdP's next
+    # provisioning run fails until someone updates it there too.
+    if not (secrets_match(token, configured) or matches_static_secret(token, "SCIM_BEARER_TOKEN")):
         raise HTTPException(status_code=401, detail="Invalid SCIM bearer token")
     return True
 

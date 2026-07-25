@@ -86,6 +86,44 @@ To force an *immediate* invalidation instead — a suspected key compromise — 
 step 3: rotate with no `JWT_SECRET_KEY_PREVIOUS` at all. Every outstanding token
 dies and all users re-authenticate, which is the correct trade under compromise.
 
+### Rotating a tenant's API key
+
+The tenant API key is what customers paste into their log shippers, so rotating
+it naively breaks every agent at the same instant. It rotates through the same
+overlap shape as the signing key: the superseded key keeps authenticating for a
+bounded window while shippers are updated one at a time.
+
+1. Issue the new key. It is returned **once** and is not retrievable again:
+   ```bash
+   curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
+        -H 'Content-Type: application/json' -d '{"overlap_hours": 24}' \
+        https://api.your-host/admin/tenant/api-key/rotate
+   ```
+2. Roll the new key out to your shippers. Both keys authenticate during the
+   window; requests on the old key are logged with the overlap's end time.
+3. Close the window as soon as the fleet is updated, rather than waiting for it
+   to lapse:
+   ```bash
+   curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
+        https://api.your-host/admin/tenant/api-key/revoke-previous
+   ```
+
+For a leaked key, rotate with `{"overlap_hours": 0}` — the old key stops working
+immediately, which is the correct trade under compromise.
+
+### Rotating the shared ingest and SCIM tokens
+
+`INGEST_API_KEY` (unattended shippers) and `SCIM_BEARER_TOKEN` (the IdP's
+provisioning calls) follow the same convention as the signing key: set
+`<VAR>_PREVIOUS` to the value being retired — comma-separated, most recent
+first — roll the new value out to the shippers or the IdP, then drop the
+`_PREVIOUS` entry. Both accept `<VAR>_FILE` for a mounted secret.
+
+`GET /admin/credentials` reports the rotation state of everything above —
+whether each secret is configured, whether a superseded value is still being
+accepted, and when this tenant's API key was last rotated. It never returns a
+secret's value.
+
 ## Tenant API quotas
 
 Each tenant gets a sliding-window request ceiling across the whole API, keyed on

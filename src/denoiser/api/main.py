@@ -32,7 +32,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from denoiser.analysis.drift import ClusterSnapshot, DriftDetector
@@ -66,11 +66,13 @@ from denoiser.storage.clickhouse_store import ClickHouseStore
 from denoiser.storage.db import (
     AnalysisRun,
     Incident,
+    Tenant,
     User,
     get_db,
     init_db,
 )
 from denoiser.telemetry.ebpf_collector import EBPFCollector
+from denoiser.utils.time import iso_utc, utcnow
 from denoiser.telemetry.metrics_collector import MetricsCollector
 
 # Background agents
@@ -472,6 +474,87 @@ def signing_key_status(current_user: User = Depends(require_role(["ADMIN"]))):
     from denoiser.api.keys import get_keyring
 
     return get_keyring().describe()
+
+
+@app.get("/admin/credentials")
+def credential_status(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["ADMIN"])),
+):
+    """Rotation state of the long-lived credentials, without exposing any of them.
+
+    Covers what /admin/signing-keys does for the JWT key: whether each shared
+    secret is set, whether a superseded value is still being accepted, and when
+    this tenant's API key was last rotated.
+    """
+    from denoiser.api.credentials import describe_static_rotation
+    from denoiser.api.keys import get_keyring
+
+    tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+    now = utcnow()
+    overlap_ends = tenant.api_key_previous_expires_at if tenant else None
+
+    return {
+        "jwt_signing_keys": get_keyring().describe(),
+        "ingest_api_key": describe_static_rotation("INGEST_API_KEY"),
+        "scim_bearer_token": describe_static_rotation("SCIM_BEARER_TOKEN"),
+        "tenant_api_key": {
+            "configured": bool(tenant and tenant.api_key),
+            "last_rotated_at": iso_utc(tenant.api_key_rotated_at) if tenant else None,
+            "previous_key_accepted_until": (
+                iso_utc(overlap_ends) if overlap_ends and overlap_ends > now else None
+            ),
+        },
+    }
+
+
+class RotateApiKeyRequest(BaseModel):
+    # 0 revokes the old key immediately — the correct choice for a leak.
+    overlap_hours: int = Field(default=24, ge=0, le=720)
+
+
+@app.post("/admin/tenant/api-key/rotate")
+def rotate_tenant_key(
+    payload: RotateApiKeyRequest | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["ADMIN"])),
+):
+    """Issue a new API key for the caller's tenant. The key is returned once.
+
+    The superseded key keeps working for `overlap_hours` so log shippers can be
+    updated one at a time; pass 0 to cut it off immediately.
+    """
+    from denoiser.api.credentials import rotate_tenant_api_key
+
+    tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    overlap = payload.overlap_hours if payload else 24
+    new_key = rotate_tenant_api_key(db, tenant, overlap_hours=overlap)
+    return {
+        "status": "rotated",
+        "api_key": new_key,
+        "overlap_hours": overlap,
+        "previous_key_accepted_until": iso_utc(tenant.api_key_previous_expires_at),
+        "warning": "Store this key now — it is not retrievable again.",
+    }
+
+
+@app.post("/admin/tenant/api-key/revoke-previous")
+def revoke_previous_tenant_key(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["ADMIN"])),
+):
+    """End the overlap early, once every shipper carries the new key."""
+    from denoiser.api.credentials import revoke_previous_api_key
+
+    tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    revoked = revoke_previous_api_key(db, tenant)
+    return {"status": "revoked" if revoked else "no_previous_key"}
 
 
 @app.get("/internal/metrics")
