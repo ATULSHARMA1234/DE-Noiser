@@ -16,8 +16,10 @@ Modern enterprise observability tools (like Datadog, Splunk, or New Relic) are e
 - **Local LLM Incident Narratives:** Generates human-readable root-cause summaries using a local, OpenAI-compatible model (e.g. Llama 3 via Ollama). Falls back to a heuristic summary when no model is configured.
 - **Log Query Language:** A custom query DSL compiled to parameterized ClickHouse SQL.
 - **Automated Runbooks:** Triggers automated workflows and multi-channel alerts (Slack, PagerDuty, Teams, generic webhooks) on anomalies.
+- **Enterprise Identity:** Real OIDC (Authorization Code + JWKS) *and* real SAML 2.0 SSO — assertions are signature-verified against the IdP certificate, with audience, recipient, validity-window and replay checks — plus SCIM 2.0 provisioning, per-tenant API quotas, and JWT signing-key rotation with an overlap window (no forced sign-out).
+- **CI Correlation:** Pulls GitHub Actions workflow logs and deployment/release metadata, so a failing pipeline or a deploy lands in the same timeline as the incident it caused.
 
-> **Sandbox mode.** Several integrations degrade gracefully when their backend isn't present: the Kubernetes, AWS CloudWatch, and Docker log connectors return clearly-labeled `"simulated"` sample data when no cluster/credentials/socket are detected, and the built-in **mock SSO IdP** is disabled in production (real OIDC/SAML must be configured). These paths are marked as such in every API response.
+> **Sandbox mode.** In **development**, the Kubernetes, AWS CloudWatch, and Docker log connectors fall back to clearly-labeled `"simulated"` sample data when no cluster/credentials/socket is detected, and a mock SSO IdP is available. In **production** both are off: the connectors return a real `502` (unless `ALLOW_SIMULATED_CONNECTORS` is explicitly set) and SSO requires a configured OIDC or SAML IdP. Simulated paths are labeled as such in every API response.
 
 ## Architecture
 

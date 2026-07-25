@@ -5,14 +5,41 @@ based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- **Real SAML 2.0 SSO.** `/auth/sso/saml/acs` verifies the assertion's XML
+  signature against the configured IdP certificate and checks issuer, audience,
+  `Destination`/`Recipient`, the validity window (with configurable skew) and
+  single-use assertion ids. Attributes are read only from the signature-covered
+  subtree, and a response carrying more than one assertion, a `DOCTYPE`, or an
+  `EncryptedAssertion` is refused. Adds SP-initiated login and SP metadata
+  (`/auth/sso/saml/login`, `/auth/sso/saml/metadata`). Configure with
+  `SAML_IDP_ENTITY_ID`, `SAML_IDP_SSO_URL`, `SAML_IDP_X509_CERT`,
+  `SAML_SP_ENTITY_ID`, `SAML_SP_ACS_URL`.
+- **Per-tenant API quotas.** A sliding window keyed on the tenant (from
+  `X-API-Key` or the Bearer subject) now applies across every route, with
+  per-tier ceilings (`TENANT_QUOTA_FREE`/`_PRO`/`_ENTERPRISE`). The previous
+  per-IP `/ingest` limiter did not bound a workspace shipping from many pods.
+  Health, metrics and auth routes stay exempt.
+- **JWT signing-key rotation.** `JWT_SECRET_KEY_PREVIOUS` keeps retired keys
+  verifying while their tokens drain, so rotating no longer signs every user
+  out; tokens carry a `kid` header. `GET /admin/signing-keys` reports which key
+  a replica is signing with. Any setting may be supplied as `<VAR>_FILE` from a
+  mounted secret, re-read within `JWT_KEYRING_REFRESH_SECONDS`.
+- **GitHub Actions log ingestion and deployment sync.** `fetch_logs` pulls and
+  flattens workflow-run log archives (filterable by workflow, branch or
+  conclusion; bounded by `GITHUB_MAX_WORKFLOW_RUNS` /
+  `GITHUB_MAX_LINES_PER_RUN`) and `sync_metadata` returns real deployments and
+  releases. Both previously raised `NotImplementedError`.
+
 ### Security
 - **AWS CloudWatch & Docker connectors are fail-closed in production.** Like the
   k8s connector, they now return a real `502` when the backend is unreachable
   instead of silently serving labeled `"simulated"` sample data (gated by
   `ALLOW_SIMULATED_CONNECTORS` / test mode).
-- **SAML ACS can no longer mint a session from unverified input.** Real SAML is
-  not implemented; the `/auth/sso/saml/acs` endpoint is now explicitly fail-
-  closed (returns `501` outside the dev mock mode) rather than issuing a token.
+- **SAML ACS can no longer mint a session from unverified input.** The endpoint
+  was first made fail-closed (`501` outside the dev mock mode) and is now backed
+  by real signature verification — see *Added* above. Unconfigured SAML still
+  returns `501` rather than degrading to anything weaker.
 
 ### Fixed
 - **AWS connector endpoints fail fast.** boto3 clients now carry explicit
