@@ -82,6 +82,42 @@ class TestConnectorFailClosed:
         assert res.json()["status"] == "simulated"
 
 
+class TestSimulationGate:
+    """The gate itself, which the tests above stub out.
+
+    Production must fail closed; a developer checkout must not answer every
+    connector page with a 502; and an explicit setting must win either way.
+    """
+
+    @staticmethod
+    def _allowed(monkeypatch, *, environment: str, explicit: str | None) -> bool:
+        import denoiser.api.main as main
+        from denoiser.settings import InfraSettings
+
+        monkeypatch.setattr(main, "is_testing", lambda: False, raising=False)
+        monkeypatch.setattr("denoiser.settings.is_testing", lambda: False)
+        monkeypatch.setattr(
+            "denoiser.settings.get_settings", lambda: InfraSettings(environment=environment)
+        )
+        if explicit is None:
+            monkeypatch.delenv("ALLOW_SIMULATED_CONNECTORS", raising=False)
+        else:
+            monkeypatch.setenv("ALLOW_SIMULATED_CONNECTORS", explicit)
+        return main._simulated_connectors_allowed()
+
+    def test_production_fails_closed_by_default(self, monkeypatch):
+        assert self._allowed(monkeypatch, environment="production", explicit=None) is False
+
+    def test_development_simulates_by_default(self, monkeypatch):
+        assert self._allowed(monkeypatch, environment="development", explicit=None) is True
+
+    def test_explicit_opt_in_wins_in_production(self, monkeypatch):
+        assert self._allowed(monkeypatch, environment="production", explicit="true") is True
+
+    def test_explicit_opt_out_wins_in_development(self, monkeypatch):
+        assert self._allowed(monkeypatch, environment="development", explicit="false") is False
+
+
 class TestSamlFailClosed:
     def test_saml_acs_501_when_mock_disabled(self, client, monkeypatch):
         import denoiser.api.sso as sso

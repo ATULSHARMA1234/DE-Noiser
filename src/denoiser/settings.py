@@ -219,6 +219,47 @@ def validate_for_production(settings: InfraSettings) -> list[str]:
     return problems
 
 
+def load_dotenv_into_environ(path: str | os.PathLike = ".env") -> int:
+    """Export ``.env`` into ``os.environ``. Returns how many keys were set.
+
+    ``InfraSettings`` parses ``.env`` itself, but plenty of infrastructure
+    clients (the ClickHouse store, the Redis and Kafka clients, the database
+    URL) still read ``os.getenv`` directly. Under docker-compose those come from
+    real environment variables so everything agrees; running the API straight
+    from a checkout, they did not — the app would authenticate to ClickHouse
+    with an empty password while ``.env`` held the real one, and report the
+    server as unavailable. Exporting once at import makes the two paths agree.
+
+    Real environment variables always win, so containers and CI are unaffected.
+    Skipped under pytest so the suite never inherits a developer's local ``.env``.
+    """
+    if is_testing():
+        return 0
+
+    env_path = Path(path)
+    if not env_path.is_file():
+        return 0
+
+    exported = 0
+    try:
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return 0
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, _, value = stripped.removeprefix("export ").partition("=")
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if not key or not value or key in os.environ:
+            continue
+        os.environ[key] = value
+        exported += 1
+    return exported
+
+
 @lru_cache
 def get_settings() -> InfraSettings:
     """Process-wide settings. Cached so the environment is read once."""

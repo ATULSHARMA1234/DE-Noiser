@@ -711,9 +711,20 @@ def query_logs_api(payload: LogQuery, current_user: User = Depends(require_role(
 def _simulated_connectors_allowed() -> bool:
     """Simulated connector data is a dev/sandbox aid only. In production a
     connector that can't reach its backend must return a real error, not fake
-    data a buyer could mistake for real infrastructure."""
-    from denoiser.settings import is_testing
-    return is_testing() or os.getenv("ALLOW_SIMULATED_CONNECTORS", "false").lower() in ("1", "true", "yes")
+    data a buyer could mistake for real infrastructure.
+
+    Outside production the fallback is on by default — that is what the README
+    and the connector UI describe, and requiring an extra opt-in meant a fresh
+    developer checkout answered every connector page with a 502. An explicit
+    ALLOW_SIMULATED_CONNECTORS still wins in both directions, so production can
+    opt in for a demo and a developer can opt out to rehearse the real failure.
+    """
+    from denoiser.settings import get_settings, is_testing
+
+    explicit = os.getenv("ALLOW_SIMULATED_CONNECTORS")
+    if explicit is not None:
+        return explicit.lower() in ("1", "true", "yes")
+    return is_testing() or not get_settings().is_production
 
 
 @app.get("/connectors/k8s/pods")

@@ -47,10 +47,13 @@ def get_slo_status(slo_id: int, db: Session = Depends(get_db), current_user: Use
     if not slo:
         raise HTTPException(status_code=404, detail="SLO not found")
 
+    # calculate_slo_status returns a plain dict, not the response model — reading
+    # it with attribute access raised AttributeError on every call, so the SLO
+    # page could never load a status at all.
     status = calculate_slo_status(db, slo)
 
     # Auto-alert on budget breach (Google SRE pattern)
-    if status.status == "BREACHED":
+    if status["status"] == "BREACHED":
         fingerprint = f"slo_breach_{slo.id}"
         # Only create if no recent alert for this SLO (within 1 hour)
         one_hour_ago = (utcnow() - datetime.timedelta(hours=1)).isoformat()
@@ -64,7 +67,7 @@ def get_slo_status(slo_id: int, db: Session = Depends(get_db), current_user: Use
                 alert_fingerprint=fingerprint,
                 priority="critical",
                 status="fired",
-                error=f"SLO '{slo.name}' on {slo.service} has BREACHED — error budget exhausted (burn rate: {status.burn_rate:.1f}x)",
+                error=f"SLO '{slo.name}' on {slo.service} has BREACHED — error budget exhausted (burn rate: {status['burn_rate']:.1f}x)",
             )
             db.add(alert)
             db.commit()

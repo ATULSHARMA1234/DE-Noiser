@@ -176,9 +176,16 @@ _TEST_ONLY_SECRET = "semantic-os-super-secure-production-secret-key-1234567890"
 
 
 def _build_keyring() -> KeyRing:
-    from denoiser.settings import is_testing
+    from denoiser.settings import get_settings, is_testing
 
+    # Environment (or a mounted secret file) first, then the parsed settings —
+    # which also cover a local ``.env``. Without the second source, an operator
+    # who configured JWT_SECRET_KEY in .env like every other setting gets a hard
+    # startup crash telling them to set the variable they already set.
     active_secret = read_secret("JWT_SECRET_KEY")
+    settings = get_settings()
+    if not active_secret:
+        active_secret = settings.jwt_secret_key
     if not active_secret:
         if not is_testing():
             raise ValueError(
@@ -186,7 +193,7 @@ def _build_keyring() -> KeyRing:
             )
         active_secret = _TEST_ONLY_SECRET
 
-    retired_raw = read_secret("JWT_SECRET_KEY_PREVIOUS") or ""
+    retired_raw = read_secret("JWT_SECRET_KEY_PREVIOUS") or settings.jwt_secret_key_previous or ""
     retired: list[SigningKey] = []
     seen = {active_secret}
     for part in retired_raw.split(","):

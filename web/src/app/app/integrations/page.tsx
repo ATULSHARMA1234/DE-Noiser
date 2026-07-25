@@ -13,6 +13,10 @@ export default function IntegrationsPage() {
  
  const [showConfigModal, setShowConfigModal] = useState(false);
  const [selectedProvider, setSelectedProvider] = useState('');
+ // Set when the modal is editing an already-connected integration rather than
+ // creating one; null means "connect".
+ const [editing, setEditing] = useState<any | null>(null);
+ const [credential, setCredential] = useState('');
 
  const [confirmOpen, setConfirmOpen] = useState(false);
  const [confirmTitle, setConfirmTitle] = useState('');
@@ -43,23 +47,50 @@ export default function IntegrationsPage() {
  }
  };
 
- const handleConnect = async (e: React.FormEvent) => {
+ const openConnect = (providerId: string) => {
+ setSelectedProvider(providerId);
+ setEditing(null);
+ setCredential('');
+ setShowConfigModal(true);
+ };
+
+ const openConfigure = (providerId: string, integration: any) => {
+ setSelectedProvider(providerId);
+ setEditing(integration);
+ setCredential('');
+ setShowConfigModal(true);
+ };
+
+ const handleSubmit = async (e: React.FormEvent) => {
  e.preventDefault();
  try {
  const providerInfo = MARKETPLACE.find(m => m.id === selectedProvider);
+ if (editing) {
+ // Only send the credential when one was typed; an empty field means
+ // "keep the stored token" rather than "erase it".
+ const config: Record<string, any> = { updated_at: new Date().toISOString() };
+ if (credential) config.api_key = credential;
+ await apiFetch(`/integrations/${editing.id}`, { method: 'PUT', body: JSON.stringify({ config }) });
+ toast({ title: 'Integration updated' });
+ } else {
  await apiFetch('/integrations', {
  method: 'POST',
  body: JSON.stringify({
  provider: selectedProvider,
  name: `${providerInfo?.name} Connection`,
- config: { connected_at: new Date().toISOString() }
+ config: {
+ connected_at: new Date().toISOString(),
+ ...(credential ? { api_key: credential } : {}),
+ }
  })
  });
  toast({ title: 'Integration connected' });
+ }
  setShowConfigModal(false);
+ setCredential('');
  fetchIntegrations();
  } catch (e: any) {
- toast({ title: 'Connection failed', description: e.message, type: 'error' });
+ toast({ title: editing ? 'Update failed' : 'Connection failed', description: e.message, type: 'error' });
  }
  };
 
@@ -114,7 +145,10 @@ export default function IntegrationsPage() {
  
  {connected ? (
  <div className="flex gap-2">
- <button className="flex-1 py-2 text-sm font-medium border border-[var(--border)] rounded text-[var(--text-primary)] hover:bg-[var(--bg-app)] transition-colors">
+ <button
+ onClick={() => openConfigure(provider.id, activeIntegration)}
+ className="flex-1 py-2 text-sm font-medium border border-[var(--border)] rounded text-[var(--text-primary)] hover:bg-[var(--bg-app)] transition-colors"
+ >
  Configure
  </button>
  <button 
@@ -125,8 +159,8 @@ export default function IntegrationsPage() {
  </button>
  </div>
  ) : (
- <button 
- onClick={() => { setSelectedProvider(provider.id); setShowConfigModal(true); }}
+ <button
+ onClick={() => openConnect(provider.id)}
  className="w-full py-2 text-sm font-medium bg-[var(--primary)] hover:bg-[var(--primary)] text-white rounded transition-colors"
  >
  Connect
@@ -141,21 +175,28 @@ export default function IntegrationsPage() {
  <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
  <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg shadow-xl w-full max-w-md overflow-hidden">
  <div className="p-4 border-b border-[var(--border)] flex justify-between items-center bg-[var(--bg-app)]">
- <h2 className="font-bold text-[var(--text-primary)]">Connect {MARKETPLACE.find(m => m.id === selectedProvider)?.name}</h2>
+ <h2 className="font-bold text-[var(--text-primary)]">{editing ? 'Configure' : 'Connect'} {MARKETPLACE.find(m => m.id === selectedProvider)?.name}</h2>
  <button onClick={() => setShowConfigModal(false)} className="text-[var(--text-secondary)] hover:text-[var(--text-primary)]">
  &times;
  </button>
  </div>
- <form onSubmit={handleConnect} className="p-6 space-y-4">
- <p className="text-sm text-[var(--text-secondary)]">Provide the necessary credentials to connect this integration. (Mock step for sandbox)</p>
- 
+ <form onSubmit={handleSubmit} className="p-6 space-y-4">
+ <p className="text-sm text-[var(--text-secondary)]">
+ {editing
+ ? 'Update the stored credential. Leave the field empty to keep the current one.'
+ : 'Provide the credential this integration should authenticate with.'}
+ </p>
+
  <div>
  <label className="block text-sm font-medium text-[var(--text-primary)] mb-1">API Key / Token</label>
- <input 
- type="password" 
+ <input
+ type="password"
+ value={credential}
+ onChange={(e) => setCredential(e.target.value)}
  className="w-full bg-[var(--bg-app)] border border-[var(--border)] rounded-md py-2 px-3 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
- placeholder="••••••••••••••••"
+ placeholder={editing ? 'Unchanged' : '••••••••••••••••'}
  />
+ <p className="text-xs text-[var(--text-secondary)] mt-1">Stored server-side and never returned by the API.</p>
  </div>
 
  <div className="pt-4 flex justify-end gap-3 border-t border-[var(--border)] mt-6">
@@ -167,10 +208,10 @@ export default function IntegrationsPage() {
  Cancel
  </button>
  <button 
- type="submit" 
+ type="submit"
  className="bg-[var(--primary)] hover:bg-[var(--primary)] text-white px-4 py-2 rounded text-sm font-medium transition-colors"
  >
- Authorize
+ {editing ? 'Save' : 'Authorize'}
  </button>
  </div>
  </form>

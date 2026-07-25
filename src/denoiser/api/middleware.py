@@ -62,6 +62,31 @@ class CorrelationIDMiddleware(BaseHTTPMiddleware):
 
 # ── Task 3: Global Exception Handler ────────────────────────────────────────
 
+def _cors_headers(request: Request) -> dict[str, str]:
+    """CORS headers for an error response, when the origin is allowlisted.
+
+    An unhandled exception is turned into a response *above* CORSMiddleware in
+    the stack, so it goes out with no CORS headers at all. The browser then
+    reports "blocked by CORS policy" and the real status is invisible — a 500
+    looks like a misconfigured API, and the actual bug stays hidden. Echoing the
+    allowlisted origin here keeps errors legible in the UI without widening what
+    is allowed.
+    """
+    origin = request.headers.get("origin")
+    if not origin:
+        return {}
+    from denoiser.settings import get_settings
+
+    allowed = get_settings().cors_origin_list
+    if origin.rstrip("/") not in [o.rstrip("/") for o in allowed]:
+        return {}
+    return {
+        "Access-Control-Allow-Origin": origin,
+        "Access-Control-Allow-Credentials": "true",
+        "Vary": "Origin",
+    }
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     """Register global exception handlers that return clean JSON errors."""
 
@@ -80,6 +105,7 @@ def register_exception_handlers(app: FastAPI) -> None:
                 "detail": str(exc) if logger.isEnabledFor(logging.DEBUG) else "An unexpected error occurred",
                 "request_id": rid,
             },
+            headers=_cors_headers(request),
         )
 
     @app.exception_handler(ValueError)
@@ -92,6 +118,7 @@ def register_exception_handlers(app: FastAPI) -> None:
                 "detail": str(exc),
                 "request_id": rid,
             },
+            headers=_cors_headers(request),
         )
 
 
