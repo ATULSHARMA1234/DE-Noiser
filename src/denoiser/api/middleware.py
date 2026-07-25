@@ -257,11 +257,18 @@ DEFAULT_TENANT_QUOTAS: dict[str, int] = {
 }
 
 # Paths that must stay reachable even for a tenant that is over quota:
-# liveness/readiness probes, scrape endpoints and the auth routes (which carry
-# their own brute-force throttle) — a 429 there would lock an operator out of
-# the workspace they are trying to fix.
+# liveness/readiness probes, the Prometheus scrape endpoint and the auth routes
+# (which carry their own brute-force throttle) — a 429 there would lock an
+# operator out of the workspace they are trying to fix, and would blind
+# monitoring at the exact moment it matters.
+#
+# These are the routes the app actually serves; see test_quota_exempt_paths_exist,
+# which fails if a path here stops existing. An exemption for a route that does
+# not exist protects nothing, and the probes it was meant to cover
+# (/health/live, /health/ready) and the scrape endpoint (/internal/metrics) were
+# not on the list.
 QUOTA_EXEMPT_PATHS = frozenset({
-    "/", "/health", "/healthz", "/readyz", "/metrics",
+    "/", "/health", "/health/live", "/health/ready", "/internal/metrics",
     "/docs", "/redoc", "/openapi.json",
     "/auth/login", "/auth/refresh", "/auth/logout",
 })

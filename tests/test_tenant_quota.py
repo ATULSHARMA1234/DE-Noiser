@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from denoiser.api.auth import create_access_token, get_password_hash
 from denoiser.api.middleware import (
     DEFAULT_TENANT_QUOTAS,
+    QUOTA_EXEMPT_PATHS,
     TenantQuotaMiddleware,
     _lookup_tenant,
 )
@@ -181,3 +182,33 @@ class TestQuotaConfiguration:
     def test_env_switch_beats_the_pytest_default(self, monkeypatch):
         monkeypatch.setenv("TENANT_QUOTA_ENABLED", "true")
         assert TenantQuotaMiddleware(FastAPI()).enabled is True
+
+
+class TestQuotaExemptions:
+    """The exempt list has to name routes the app actually serves.
+
+    It originally listed /healthz, /readyz and /metrics — none of which exist —
+    while the real probes (/health/live, /health/ready) and the Prometheus
+    scrape endpoint (/internal/metrics) were absent. An exemption for a route
+    that does not exist protects nothing, and a credentialed scrape or probe was
+    getting a 429 exactly when the tenant was in trouble.
+    """
+
+    @staticmethod
+    def _app_paths() -> set[str]:
+        from denoiser.api.main import app
+
+        return {getattr(route, "path", "") for route in app.routes}
+
+    def test_quota_exempt_paths_exist(self):
+        missing = {p for p in QUOTA_EXEMPT_PATHS if p not in self._app_paths()}
+        assert not missing, f"exempt paths that no route serves: {sorted(missing)}"
+
+    def test_probes_and_scrape_endpoint_are_exempt(self):
+        for path in ("/health", "/health/live", "/health/ready", "/internal/metrics"):
+            assert path in QUOTA_EXEMPT_PATHS, f"{path} must stay reachable over quota"
+
+    def test_data_routes_are_not_exempt(self):
+        """The quota is pointless if the expensive routes opt out of it."""
+        for path in ("/incidents", "/analyze", "/query", "/runs"):
+            assert path not in QUOTA_EXEMPT_PATHS
