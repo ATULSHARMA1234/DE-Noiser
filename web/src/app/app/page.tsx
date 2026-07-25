@@ -17,12 +17,6 @@ const cssVar = (name: string, fallback: string) => {
  return v || fallback;
 };
 
-const seededValue = (index: number, seed: number) => {
- const x = Math.sin(index * 12.9898 + seed * 78.233) * 43758.5453;
- return x - Math.floor(x);
-};
-
-
 function Sparkline({ data, dataKey, color }: { data: any[], dataKey: string, color: string }) {
  // A sparkline alone shows shape but no reading. State the current value's
  // drift from the window average, so the shape means something.
@@ -189,15 +183,21 @@ export default function CommandCenter() {
  }
  }, [failedAnalysisTask]);
 
- // Timer for loading state
+ // Timer for loading state. Derived from the task's startedAt rather than
+ // counted up from zero: this component unmounts whenever you navigate away,
+ // so a local counter restarted at 0 on every return and claimed a long-running
+ // analysis had just begun.
+ const analysisStartedAt = activeAnalysisTask?.startedAt;
  useEffect(() => {
- let interval: any;
- if (loading) {
+ if (!analysisStartedAt) {
  setElapsedTime(0);
- interval = setInterval(() => setElapsedTime(t => t + 1), 1000);
+ return;
  }
+ const tick = () => setElapsedTime(Math.floor((Date.now() - analysisStartedAt) / 1000));
+ tick();
+ const interval = setInterval(tick, 1000);
  return () => clearInterval(interval);
- }, [loading]);
+ }, [analysisStartedAt]);
 
  const taskIdForSource = (name: string) => `analysis:${name}`;
 
@@ -328,22 +328,31 @@ export default function CommandCenter() {
  };
  };
 
- const getTopologyOption = () => {
- // Use real cluster data if available
- if (data?.clusters) {
+ // Real UMAP coordinates for the current run, or null when the run carries
+ // none. Never invent points: a synthetic scatter under a "HDBSCAN Projection"
+ // heading reads as a real clustering result.
+ const projectionPoints = () => {
+ if (!data?.clusters) return null;
  const scatterData: any[] = [];
- data.clusters.forEach((c: any, idx: number) => {
- if (c.projection_2d && c.projection_2d.length > 0) {
- c.projection_2d.forEach((point: [number, number], i: number) => {
+ data.clusters.forEach((c: any) => {
+ (c.projection_2d || []).forEach((point: [number, number]) => {
  scatterData.push([
  point[0],
  point[1],
- c.size > 50 ? 5 + (c.size / 50) : 3 + (c.size / 10), // Base symbol size on cluster size
+ // Marker radius grows with cluster size, but on a sqrt scale and
+ // clamped: the old linear formula turned a 2,913-log cluster into a
+ // ~126px blob that swallowed the whole panel.
+ Math.max(4, Math.min(16, 3 + Math.sqrt(c.size))),
  c.cluster_id === -1 ? 'Noise' : `C${c.cluster_id}`
  ]);
  });
- }
  });
+ return scatterData.length > 0 ? scatterData : null;
+ };
+
+ const getTopologyOption = () => {
+ const scatterData = projectionPoints();
+ if (scatterData) {
  const groups = [...new Set(scatterData.map(d => d[3]))];
  const colors = [cssVar('--signal-alt', '#9d7bff'), cssVar('--signal-info', '#4a9eff'), cssVar('--signal-ok', '#35c08e'), cssVar('--signal-warn', '#f5a623'), cssVar('--signal-crit', '#f2555a')];
  return {
@@ -355,30 +364,19 @@ export default function CommandCenter() {
  series: groups.map((g, gi) => ({
  name: g,
  type: 'scatter',
- symbolSize: (d: any) => d[2] * 2,
+ symbolSize: (d: any) => d[2],
  data: scatterData.filter(d => d[3] === g),
- itemStyle: { color: colors[gi % colors.length], opacity: g === 'Noise' ? 0.3 : 0.8 },
+ itemStyle: { color: colors[gi % colors.length], opacity: g === 'Noise' ? 0.35 : 0.75 },
  })),
  };
  }
- // Fallback placeholder
- const scatterData = Array.from({ length: 150 }, (_, i) => [
- seededValue(i, 8) * 10,
- seededValue(i, 9) * 10,
- seededValue(i, 10) * 5 + 2,
- seededValue(i, 11) > 0.9 ? 'C1' : seededValue(i, 12) > 0.8 ? 'C2' : 'Noise'
- ]);
+ // No projection in this run — render an empty grid; the caller shows why.
  return {
  backgroundColor: 'transparent',
  tooltip: { show: false },
- legend: { bottom: 0, left: 10, textStyle: { color: cssVar('--text-muted', '#6a717a'), fontSize: 9 }, icon: 'circle' },
  grid: { top: 10, bottom: 30, left: 10, right: 10 },
  xAxis: { show: false }, yAxis: { show: false },
- series: [
- { name: 'C1', type: 'scatter', symbolSize: (d: any) => d[2] * 2, data: scatterData.filter(d => d[3] === 'C1'), itemStyle: { color: cssVar('--signal-alt', '#9d7bff'), opacity: 0.8 } },
- { name: 'C2', type: 'scatter', symbolSize: (d: any) => d[2] * 2, data: scatterData.filter(d => d[3] === 'C2'), itemStyle: { color: cssVar('--signal-info', '#4a9eff'), opacity: 0.8 } },
- { name: 'Noise', type: 'scatter', symbolSize: (d: any) => d[2] * 2, data: scatterData.filter(d => d[3] === 'Noise'), itemStyle: { color: cssVar('--signal-ok', '#35c08e'), opacity: 0.3 } }
- ]
+ series: [],
  };
  };
 
@@ -755,6 +753,15 @@ export default function CommandCenter() {
  <p className="text-xs text-[var(--text-muted)] mb-6">HDBSCAN Projection</p>
  <div className="h-[200px] bg-[var(--bg-inset)] rounded-lg border border-[var(--border-subtle)] relative">
  <ReactEcharts option={getTopologyOption()} style={{ height: '100%', width: '100%' }} />
+ {!projectionPoints() && (
+ <div className="absolute inset-0 flex items-center justify-center text-xs text-[var(--text-muted)] text-center px-6 pointer-events-none">
+ {loading
+ ? 'Computing UMAP projection…'
+ : data?.clusters
+ ? 'This run carries no 2D projection.'
+ : 'Run an analysis to project clusters.'}
+ </div>
+ )}
  </div>
  </div>
 

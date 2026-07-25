@@ -250,6 +250,10 @@ def run_analysis_task(self, request_dict: dict):
             "representative_log": c.representative_raw,
             "representative_template": c.representative_template,
             "representative_timestamp_ms": getattr(c, "representative_timestamp_ms", 0),
+            # The clusterer's UMAP coordinates (up to 50 points per cluster).
+            # Dropping them here meant the Neural Topology chart never received
+            # a real projection and silently fell back to a synthetic scatter.
+            "projection_2d": [list(point) for point in (getattr(c, "projection_2d", None) or [])],
             "anomaly_label": "known",
             "anomaly_score": 0.0
         }
