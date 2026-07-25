@@ -41,5 +41,6 @@ data/*.log
 data/*.jsonl
 
 # Generated at runtime by the analysis pipeline, not source
+data/dlq/
 data/lancedb/
 data/archive/
