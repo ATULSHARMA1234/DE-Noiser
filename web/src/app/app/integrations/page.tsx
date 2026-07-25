@@ -20,6 +20,10 @@ export default function IntegrationsPage() {
  // GitHub needs owner/name as well as a token — without it every call fails
  // "not configured", and there was nowhere in this dialog to supply it.
  const [repo, setRepo] = useState('');
+ // Deployments sync into markers under a service name. Defaulting to the repo
+ // name is right for one-service repos and collapses a monorepo's services into
+ // a single series, so it is overridable.
+ const [serviceName, setServiceName] = useState('');
  const [busyId, setBusyId] = useState<number | null>(null);
 
  const [confirmOpen, setConfirmOpen] = useState(false);
@@ -56,6 +60,7 @@ export default function IntegrationsPage() {
  setEditing(null);
  setCredential('');
  setRepo('');
+ setServiceName('');
  setShowConfigModal(true);
  };
 
@@ -64,6 +69,7 @@ export default function IntegrationsPage() {
  setEditing(integration);
  setCredential('');
  setRepo(integration?.config?.repo || '');
+ setServiceName(integration?.config?.service || '');
  setShowConfigModal(true);
  };
 
@@ -111,7 +117,10 @@ export default function IntegrationsPage() {
  // "keep the stored token" rather than "erase it".
  const config: Record<string, any> = { updated_at: new Date().toISOString() };
  if (credential) config.api_key = credential;
- if (selectedProvider === 'github') config.repo = repo.trim();
+ if (selectedProvider === 'github') {
+ config.repo = repo.trim();
+ config.service = serviceName.trim();
+ }
  await apiFetch(`/integrations/${editing.id}`, { method: 'PUT', body: JSON.stringify({ config }) });
  toast({ title: 'Integration updated' });
  } else {
@@ -124,6 +133,7 @@ export default function IntegrationsPage() {
  connected_at: new Date().toISOString(),
  ...(credential ? { api_key: credential } : {}),
  ...(selectedProvider === 'github' && repo.trim() ? { repo: repo.trim() } : {}),
+ ...(selectedProvider === 'github' && serviceName.trim() ? { service: serviceName.trim() } : {}),
  }
  })
  });
@@ -282,6 +292,22 @@ export default function IntegrationsPage() {
  />
  <p className="text-xs text-[var(--text-secondary)] mt-1">
  Required — GitHub calls (issues, Actions logs, deployment sync) all target one repository.
+ </p>
+ </div>
+ )}
+
+ {selectedProvider === 'github' && (
+ <div>
+ <label className="block text-sm font-medium text-[var(--text-primary)] mb-1">Service name <span className="text-[var(--text-muted)] font-normal">(optional)</span></label>
+ <input
+ type="text"
+ value={serviceName}
+ onChange={(e) => setServiceName(e.target.value)}
+ className="w-full bg-[var(--bg-app)] border border-[var(--border)] rounded-md py-2 px-3 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
+ placeholder={repo.trim() ? repo.trim().split('/').pop() : 'defaults to the repo name'}
+ />
+ <p className="text-xs text-[var(--text-secondary)] mt-1">
+ Deployment markers are recorded under this service. Set it explicitly for a monorepo, where the repo name alone would merge every service into one series.
  </p>
  </div>
  )}

@@ -65,7 +65,9 @@ class TestReadiness:
             res = client.get("/health/ready")
             body = res.json()
             # Status code is 200 or 503, but the component map is always present.
-            assert set(body["checks"].keys()) == {"database", "redis", "clickhouse", "kafka"}
+            assert set(body["checks"].keys()) == {
+                "database", "redis", "clickhouse", "kafka", "ingestion_consumer",
+            }
             assert body["checks"]["database"] == "ok"
 
 

@@ -6,11 +6,17 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from aiokafka import AIOKafkaConsumer
+from redis import asyncio as redis_asyncio
 
 from denoiser.logging import get_logger
 from denoiser.storage.clickhouse_store import ClickHouseStore
 from denoiser.storage.db import SessionLocal
 from denoiser.tracing.otlp_collector import process_otlp_traces
+from denoiser.workers.heartbeat import (
+    HEARTBEAT_INTERVAL_SECONDS,
+    HEARTBEAT_KEY,
+    publish_heartbeat,
+)
 
 logger = get_logger(__name__)
 
@@ -42,6 +48,14 @@ async def run_ingestion_worker():
 
     # Initialize ClickHouse Store
     ch_store = ClickHouseStore()
+
+    # Heartbeat channel. The API's readiness probe reads this; without it a
+    # stopped consumer is invisible and /ingest keeps returning 200 for records
+    # that will never be queryable.
+    heartbeat_redis = redis_asyncio.from_url(
+        os.getenv("REDIS_URL", "redis://localhost:6379/0"), decode_responses=True
+    )
+    last_heartbeat = 0.0
 
     consumer = AIOKafkaConsumer(
         "logs_topic",
@@ -84,6 +98,16 @@ async def run_ingestion_worker():
 
         while True:
             records = await consumer.getmany(timeout_ms=int(LINGER_SECONDS * 1000))
+
+            # Check in regardless of whether anything arrived — an idle consumer
+            # is healthy, and only a silent one is a problem.
+            if time.monotonic() - last_heartbeat >= HEARTBEAT_INTERVAL_SECONDS:
+                await publish_heartbeat(
+                    heartbeat_redis,
+                    lag=await _consumer_lag(consumer),
+                    assigned=len(consumer.assignment()),
+                )
+                last_heartbeat = time.monotonic()
 
             for tp, msgs in records.items():
                 st = state.get(tp.topic)
@@ -173,6 +197,13 @@ async def run_ingestion_worker():
         except Exception as e:
             logger.error(f"Failed to flush/commit on shutdown: {e}")
         await consumer.stop()
+        # Drop the heartbeat immediately so a deliberate shutdown fails readiness
+        # now rather than after the stale window elapses.
+        try:
+            await heartbeat_redis.delete(HEARTBEAT_KEY)
+            await heartbeat_redis.aclose()
+        except Exception as e:
+            logger.warning(f"Could not clear ingestion heartbeat on shutdown: {e}")
 
 def _flush_logs(ch_store, batch_logs) -> bool:
     """Write a batch to ClickHouse. Returns True only if every tenant's rows landed."""
@@ -230,6 +261,32 @@ def _flush_traces(batch_traces) -> bool:
     else:
         logger.info(f"Flushed {stored} traces")
     return failed == 0
+
+
+async def _consumer_lag(consumer) -> int | None:
+    """Total uncommitted backlog across the partitions this consumer owns.
+
+    Returns None when the lag cannot be determined (no assignment yet, or the
+    broker did not answer) — an unknown lag must not be reported as zero, which
+    would read as "fully caught up".
+    """
+    try:
+        partitions = list(consumer.assignment())
+        if not partitions:
+            return None
+        end_offsets = await consumer.end_offsets(partitions)
+        lag = 0
+        for tp in partitions:
+            end = end_offsets.get(tp)
+            if end is None:
+                continue
+            position = await consumer.position(tp)
+            lag += max(0, end - position)
+        return lag
+    except Exception as e:
+        logger.debug(f"Could not compute consumer lag: {e}")
+        return None
+
 
 if __name__ == "__main__":
     asyncio.run(run_ingestion_worker())

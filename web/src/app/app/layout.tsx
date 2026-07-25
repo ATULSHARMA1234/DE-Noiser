@@ -24,7 +24,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
  const [sources, setSources] = useState<any[]>([]);
  const [selectedSource, setSelectedSource] = useState('');
  const [searchQuery, setSearchQuery] = useState('');
- const { tasks, executeTask } = useTasks();
+ const { tasks, executeTask, attachRemoteTask } = useTasks();
  const runningTasksCount = tasks.filter(t => t.status === 'running').length;
 
  // Grouped by the job each tool does, so a long list stays scannable.
@@ -174,7 +174,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
  const sourceName = sources.find(s => s.path === selectedSource)?.name || 'Source';
  const taskId = `analysis:${sourceName}`;
  
- executeTask(taskId, `Analyzing ${sourceName}`, runAnalysis({ source: selectedSource, intelligence: true }));
+ executeTask(taskId, `Analyzing ${sourceName}`, runAnalysis(
+ { source: selectedSource, intelligence: true },
+ (remoteId) => attachRemoteTask(taskId, remoteId),
+ ));
  
  router.push('/app');
  };

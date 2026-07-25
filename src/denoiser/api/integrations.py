@@ -217,12 +217,20 @@ def sync_integration(
         raise HTTPException(status_code=502, detail=f"Sync failed: {e}")
 
     repo = metadata.get("repo") or integration.name
-    service = repo.split("/")[-1] if repo else "unknown"
+    config = integration.config or {}
+
+    # Which service a deployment belongs to. Deriving it from the repo name is a
+    # fine default and wrong for a monorepo, where every service would collapse
+    # into one marker series — so it is overridable, and a per-environment map
+    # covers repos that deploy different services to different environments.
+    default_service = config.get("service") or (repo.split("/")[-1] if repo else "unknown")
+    service_by_environment = config.get("service_by_environment") or {}
     imported = 0
 
     for deployment in metadata.get("deployments", []):
         version = (deployment.get("sha") or "")[:12] or deployment.get("ref") or "unknown"
         environment = deployment.get("environment") or "production"
+        service = service_by_environment.get(environment, default_service)
         existing = db.query(DeploymentMarker).filter(
             DeploymentMarker.tenant_id == current_user.tenant_id,
             DeploymentMarker.service == service,
@@ -253,6 +261,7 @@ def sync_integration(
     return {
         "status": "synced",
         "repo": repo,
+        "service": default_service,
         "deployments_imported": imported,
         "deployments_seen": len(metadata.get("deployments", [])),
         "latest_release": (metadata.get("latest_release") or {}).get("tag"),

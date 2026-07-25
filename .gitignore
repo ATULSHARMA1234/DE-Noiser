@@ -44,3 +44,7 @@ data/*.jsonl
 data/dlq/
 data/lancedb/
 data/archive/
+
+# Playwright run artifacts — regenerated on every run, never reviewed
+web/test-results/
+web/playwright-report/

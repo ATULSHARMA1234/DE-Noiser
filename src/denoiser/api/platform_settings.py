@@ -1,0 +1,110 @@
+"""Platform settings, stored in the database rather than on a local disk.
+
+These lived in ``data/settings.json`` on the API's own filesystem, which made
+the API stateful: a second replica could not see a setting the first one wrote,
+so running more than one required a ReadWriteMany volume and the two replicas
+could still race each other's writes. The database is already shared by every
+replica and already backed up, so that is where this belongs.
+
+The legacy file is imported once on first read and then left alone, so an
+existing deployment keeps its configuration across the upgrade.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+from typing import Any
+
+from denoiser.logging import get_logger
+from denoiser.storage.db import PlatformSetting, SessionLocal
+from denoiser.utils.time import utcnow
+
+logger = get_logger(__name__)
+
+# One row holds the whole document. These are deployment-wide operator settings,
+# not per-tenant ones, so there is exactly one of them.
+SETTINGS_ROW_ID = 1
+
+DEFAULT_SETTINGS: dict[str, Any] = {
+    "store_raw_logs": True,
+    "redact_pii": True,
+    "llm_model": "llama-3.3-70b",
+    "confidence_threshold": 70,
+    "retention_days": 30,
+    "sampling_threshold": 50000,
+    "auto_analyze": False,
+    "s3_enabled": False,
+    "s3_endpoint": os.getenv("S3_ENDPOINT", "http://localhost:9000"),
+    "s3_bucket": os.getenv("S3_BUCKET", "semanticos-logs"),
+    # No credentials baked into source — supplied via env or the settings UI.
+    "s3_access_key": os.getenv("S3_ACCESS_KEY", ""),
+    "s3_secret_key": os.getenv("S3_SECRET_KEY", ""),
+}
+
+
+def _legacy_file() -> Path:
+    return Path(os.getenv("SEMANTICOS_DATA_DIR", "data")) / "settings.json"
+
+
+def _import_legacy_file() -> dict[str, Any] | None:
+    """Read the pre-migration settings.json, if one is still lying around."""
+    path = _legacy_file()
+    if not path.exists():
+        return None
+    try:
+        loaded = json.loads(path.read_text())
+        if isinstance(loaded, dict):
+            logger.info(f"Importing legacy settings from {path} into the database")
+            return loaded
+    except (OSError, ValueError) as e:
+        logger.warning(f"Could not read legacy settings file {path}: {e}")
+    return None
+
+
+def load_settings(db=None) -> dict[str, Any]:
+    """Current settings, with defaults filled in for keys added since they were saved."""
+    owns_session = db is None
+    db = db or SessionLocal()
+    try:
+        row = db.query(PlatformSetting).filter(PlatformSetting.id == SETTINGS_ROW_ID).first()
+        stored = dict(row.data or {}) if row else None
+
+        if stored is None:
+            stored = _import_legacy_file()
+            if stored is not None:
+                save_settings(stored, db=db)
+
+        # Defaults underneath, so a new setting appears without a migration and
+        # an operator's saved value always wins.
+        return {**DEFAULT_SETTINGS, **(stored or {})}
+    except Exception as e:
+        logger.error(f"Failed to load platform settings: {e}")
+        return DEFAULT_SETTINGS.copy()
+    finally:
+        if owns_session:
+            db.close()
+
+
+def save_settings(settings: dict[str, Any], db=None) -> dict[str, Any]:
+    """Persist settings for every replica. Returns what was stored."""
+    owns_session = db is None
+    db = db or SessionLocal()
+    try:
+        row = db.query(PlatformSetting).filter(PlatformSetting.id == SETTINGS_ROW_ID).first()
+        if row is None:
+            row = PlatformSetting(id=SETTINGS_ROW_ID, data=dict(settings))
+            db.add(row)
+        else:
+            row.data = dict(settings)
+        row.updated_at = utcnow()
+        db.commit()
+        return dict(settings)
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to save platform settings: {e}")
+        raise
+    finally:
+        if owns_session:
+            db.close()

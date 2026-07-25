@@ -192,6 +192,9 @@ class ServiceLevelObjective(Base):
     sli_type = Column(String, nullable=False)  # availability, latency
     target_percentage = Column(Float, nullable=False)
     window_days = Column(Integer, default=30)
+    # The objective a latency SLI is measured against. Was hardcoded to 500ms in
+    # the engine, which is not an SLO anyone agreed to.
+    latency_threshold_ms = Column(Float, nullable=True, default=500.0)
     created_at = Column(DateTime, default=utcnow)
 
 class SLODataPoint(Base):
@@ -316,6 +319,19 @@ class Tenant(Base):
     api_key_rotated_at = Column(DateTime, nullable=True)
     tier = Column(String, default="free")  # free, pro, enterprise
     created_at = Column(DateTime, default=utcnow)
+
+class PlatformSetting(Base):
+    """Deployment-wide operator settings, as a single JSON document.
+
+    Previously `data/settings.json` on the API's local disk, which meant a
+    second API replica could not see what the first one saved.
+    """
+    __tablename__ = "platform_settings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    data = Column(JSON, nullable=False, default=dict)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
 
 class BillingMeter(Base):
     __tablename__ = "billing_meters"

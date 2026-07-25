@@ -6,6 +6,7 @@ import os
 import time
 from collections import deque
 from contextlib import asynccontextmanager
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -151,33 +152,12 @@ register_exception_handlers(app)
 
 # --- Data directory ---
 DATA_DIR = Path("data")
-SETTINGS_FILE = DATA_DIR / "settings.json"
+SETTINGS_FILE = DATA_DIR / "settings.json"  # legacy; imported once, then unused
 
-DEFAULT_SETTINGS = {
-    "store_raw_logs": True,
-    "redact_pii": True,
-    "llm_model": "llama-3.3-70b",
-    "confidence_threshold": 70,
-    "retention_days": 30,
-    "sampling_threshold": 50000,
-    "auto_analyze": False,
-    "s3_enabled": False,
-    "s3_endpoint": os.getenv("S3_ENDPOINT", "http://localhost:9000"),
-    "s3_bucket": os.getenv("S3_BUCKET", "semanticos-logs"),
-    # No credentials baked into source — supplied via env or the settings UI.
-    "s3_access_key": os.getenv("S3_ACCESS_KEY", ""),
-    "s3_secret_key": os.getenv("S3_SECRET_KEY", ""),
-}
-
-
-def _load_settings() -> dict:
-    if SETTINGS_FILE.exists():
-        return json.loads(SETTINGS_FILE.read_text())
-    return DEFAULT_SETTINGS.copy()
-
-
-def _save_settings(s: dict):
-    SETTINGS_FILE.write_text(json.dumps(s, indent=2))
+# Settings now live in the database so every API replica sees the same values.
+from denoiser.api.platform_settings import DEFAULT_SETTINGS  # noqa: E402
+from denoiser.api.platform_settings import load_settings as _load_settings  # noqa: E402
+from denoiser.api.platform_settings import save_settings as _save_settings  # noqa: E402
 
 
 async def _startup() -> None:
@@ -197,8 +177,9 @@ async def _startup() -> None:
 
     init_db()
     DATA_DIR.mkdir(exist_ok=True)
-    if not SETTINGS_FILE.exists():
-        _save_settings(DEFAULT_SETTINGS)
+    # Materialise the settings row (and import any legacy settings.json) so the
+    # first replica to boot establishes them, not the first request to arrive.
+    _load_settings()
     metrics_agent.start()
     ebpf_agent.start()
     start_scheduler()
@@ -457,7 +438,23 @@ async def readiness_check(response: Response):
     # Kafka producer (non-critical: falls back to direct ClickHouse insert)
     checks["kafka"] = "ok" if kafka_producer is not None else "unavailable"
 
-    critical_ok = checks["database"] == "ok" and checks["redis"] == "ok"
+    # Ingestion consumer. Only meaningful when we are actually publishing to
+    # Kafka — without a producer, /ingest writes straight to ClickHouse and the
+    # consumer is not in the path. When it *is* in the path, a missing consumer
+    # means every accepted write is silently unqueryable, so it is critical.
+    consumer_required = kafka_producer is not None
+    if consumer_required:
+        from denoiser.workers.heartbeat import evaluate_heartbeat, read_heartbeat
+
+        consumer_ok, detail = evaluate_heartbeat(await read_heartbeat(redis_client))
+        checks["ingestion_consumer"] = detail
+    else:
+        consumer_ok = True
+        checks["ingestion_consumer"] = "not_required (no Kafka producer; direct writes)"
+
+    critical_ok = (
+        checks["database"] == "ok" and checks["redis"] == "ok" and consumer_ok
+    )
     if not critical_ok:
         response.status_code = 503
     return {"status": "ready" if critical_ok else "degraded", "checks": checks}
@@ -506,6 +503,68 @@ def credential_status(
             ),
         },
     }
+
+
+@app.get("/admin/usage")
+def usage_meters(
+    days: int = 30,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["ADMIN"])),
+):
+    """Per-day ingest volume for the caller's tenant, and their retention tier.
+
+    The meters were being written by a task no deployment ever started, and no
+    endpoint read them — so metered usage existed only as a table definition.
+    """
+    from denoiser.storage.db import BillingMeter
+    from denoiser.workers.billing_worker import (
+        DEFAULT_RETENTION_DAYS,
+        RETENTION_DAYS_BY_TIER,
+    )
+
+    days = max(1, min(days, 365))
+    since = utcnow() - timedelta(days=days)
+
+    meters = (
+        db.query(BillingMeter)
+        .filter(BillingMeter.tenant_id == current_user.tenant_id, BillingMeter.date >= since)
+        .order_by(BillingMeter.date.desc())
+        .all()
+    )
+    tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+    tier = (tenant.tier if tenant else None) or "free"
+
+    return {
+        "tier": tier,
+        "retention_days": RETENTION_DAYS_BY_TIER.get(tier.lower(), DEFAULT_RETENTION_DAYS),
+        "window_days": days,
+        "totals": {
+            "logs": sum(m.total_logs_ingested or 0 for m in meters),
+            "bytes": sum(m.total_bytes_ingested or 0 for m in meters),
+            "traces": sum(m.total_traces_ingested or 0 for m in meters),
+        },
+        "daily": [
+            {
+                "date": iso_utc(m.date),
+                "logs": m.total_logs_ingested or 0,
+                "bytes": m.total_bytes_ingested or 0,
+                "traces": m.total_traces_ingested or 0,
+            }
+            for m in meters
+        ],
+    }
+
+
+@app.post("/admin/usage/recalculate")
+def recalculate_usage(current_user: User = Depends(require_role(["ADMIN"]))):
+    """Re-run today's metering now instead of waiting for the nightly pass.
+
+    Retention is left alone: deleting data is the scheduled pass's job, not a
+    side effect of asking for a fresh number.
+    """
+    from denoiser.workers.billing_worker import aggregate_billing
+
+    return aggregate_billing(enforce_retention=False)
 
 
 class RotateApiKeyRequest(BaseModel):
@@ -563,16 +622,59 @@ def internal_metrics():
     return metrics_response()
 
 
+@app.get("/telemetry/kernel-events")
+def kernel_events(
+    limit: int = 200,
+    since_ms: int | None = None,
+    current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"])),
+):
+    """Kernel events (TCP retransmits, OOM kills) captured by the eBPF collector.
+
+    The collector was running and writing these to disk with no reader anywhere
+    in the codebase. They now feed anomaly correlation, and this exposes them
+    directly.
+    """
+    from denoiser.telemetry.ebpf_collector import EVENT_TYPES, read_events
+
+    limit = max(1, min(int(limit), 2000))
+    events = read_events(since_ms=since_ms, limit=limit)
+
+    counts = {name: 0 for name in EVENT_TYPES.values()}
+    for event in events:
+        name = event.get("event_name")
+        if name in counts:
+            counts[name] += 1
+
+    return {
+        # Distinguish "tracing is off" from "tracing is on and the kernel is quiet".
+        "tracing_supported": ebpf_agent.is_supported,
+        "tracing_active": ebpf_agent.is_supported and getattr(ebpf_agent, "_running", False),
+        "counts": counts,
+        "events": events,
+    }
+
+
 # ─── TELEMETRY — Live-ish host vitals (Task 16) ──────────────────────────────
 @app.get("/vitals")
 def get_vitals(limit: int = 20, current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
     """
     Returns the latest host telemetry points for dashboard sparkline charts.
     Backed by `data/metrics_stream.jsonl` written by `MetricsCollector` (Task 14).
+
+    These are the vitals of the node running SemanticOS, not of the services it
+    monitors. The response says so explicitly — unlabelled, a CPU spike here
+    reads as a spike in the customer's own infrastructure.
     """
+    scope = {
+        "scope": "semanticos_api_host",
+        "host": metrics_agent.host,
+        "description": "Vitals of the SemanticOS API host, not the monitored fleet.",
+    }
     try:
+        if not metrics_agent.enabled:
+            return {"status": "disabled", "vitals": [], **scope}
         if not metrics_agent.stream_path.exists():
-            return {"status": "no_telemetry_available", "vitals": []}
+            return {"status": "no_telemetry_available", "vitals": [], **scope}
 
         limit = max(1, min(int(limit), 120))
         buf: deque[dict[str, Any]] = deque(maxlen=limit)
@@ -597,10 +699,10 @@ def get_vitals(limit: int = 20, current_user: User = Depends(require_role(["VIEW
                 }
             )
 
-        return {"status": "ok", "vitals": vitals}
+        return {"status": "ok", "vitals": vitals, **scope}
     except Exception as e:
         logger.error(f"Failed to load /vitals: {e}")
-        return {"status": "error", "message": str(e), "vitals": []}
+        return {"status": "error", "message": str(e), "vitals": [], **scope}
 
 
 @app.get("/metrics/current")

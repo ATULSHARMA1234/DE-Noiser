@@ -84,33 +84,34 @@ export async function apiDelete(path: string, options: RequestInit = {}) {
  return apiFetch(path, { method: 'DELETE', ...options });
 }
 
-export async function runAnalysis(body: any) {
- // Submit the job to Celery
- const initRes = await apiPost('/analyze', body);
- 
- if (!initRes.task_id) {
- return initRes; // fallback in case it was synchronous
- }
+const MAX_POLL_MS = 5 * 60 * 1000; // 5 minute hard timeout
+const STUCK_PENDING_MS = 30 * 1000; // If still PENDING after 30s, no worker is running
+const POLL_INTERVAL_MS = 2000;
 
- const taskId = initRes.task_id;
- 
- const MAX_POLL_MS = 5 * 60 * 1000; // 5 minute hard timeout
- const STUCK_PENDING_MS = 30 * 1000; // If still PENDING after 30s, no worker is running
- const POLL_INTERVAL_MS = 2000;
- const startTime = Date.now();
+/**
+ * Poll a Celery task to completion.
+ *
+ * Split out of runAnalysis so a task can be followed without having submitted
+ * it in this page load: the analysis keeps running on the worker across a hard
+ * reload, and only the browser's poll loop was lost.
+ *
+ * `startTime` is the moment the job was *submitted*, not the moment we started
+ * watching — otherwise a resumed task gets a fresh five-minute budget and a
+ * timer that restarts from zero.
+ */
+export async function pollTask(taskId: string, startTime: number = Date.now()) {
  let lastNonPending = false; // Track if task ever left PENDING
- 
- // Poll until completion (with timeout)
+
  while (true) {
  await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
- 
+
  const elapsed = Date.now() - startTime;
  if (elapsed > MAX_POLL_MS) {
    throw new Error('Analysis timed out after 5 minutes. The backend may be overloaded.');
  }
 
  const statusRes = await apiFetch(`/tasks/${taskId}`);
- 
+
  if (statusRes.status === 'SUCCESS') {
    return statusRes.result;
  } else if (statusRes.status === 'FAILURE') {
@@ -128,4 +129,19 @@ export async function runAnalysis(body: any) {
    }
  }
  }
+}
+
+export async function runAnalysis(body: any, onSubmitted?: (taskId: string) => void) {
+ // Submit the job to Celery
+ const initRes = await apiPost('/analyze', body);
+
+ if (!initRes.task_id) {
+ return initRes; // fallback in case it was synchronous
+ }
+
+ // Hand the server-side id back so the caller can persist it and reattach after
+ // a reload instead of orphaning a job that is still running on the worker.
+ onSubmitted?.(initRes.task_id);
+
+ return pollTask(initRes.task_id);
 }

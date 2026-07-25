@@ -144,13 +144,71 @@ exempt so a quota breach cannot lock an operator out of their own workspace.
 The window lives in Redis so it is shared across replicas; if Redis is down it
 degrades to a per-replica in-memory window rather than failing open entirely.
 
+## The ingestion consumer is on the write path
+
+`POST /ingest` returns 200 as soon as a record is handed to Kafka. If the
+ingestion consumer is not running, the topic fills and **nothing reaches
+ClickHouse** — successful writes, and no logs to query.
+
+Readiness checks this. The consumer publishes a heartbeat (with its current
+lag) to Redis every few seconds, and `GET /health/ready` reports it as
+`ingestion_consumer`. A missing, stale, or badly-lagging consumer fails
+readiness with 503:
+
+```json
+{"status": "degraded",
+ "checks": {"database": "ok", "redis": "ok", "kafka": "ok",
+            "ingestion_consumer": "error: no ingestion consumer has checked in (is the worker running?)"}}
+```
+
+When no Kafka producer is configured the API writes to ClickHouse directly, the
+consumer is not in the path, and the check reports `not_required`.
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `INGESTION_HEARTBEAT_INTERVAL` | 5s | How often the consumer checks in. |
+| `INGESTION_HEARTBEAT_STALE_SECONDS` | 60s | Age at which the consumer is treated as gone. |
+| `INGESTION_LAG_CRITICAL` | 500,000 | Backlog above which readiness fails. |
+
+## Usage metering and retention
+
+The nightly pass (midnight UTC, on the platform's own beat) meters each
+tenant's ingest volume into `billing_meters` and applies their tier's retention
+to ClickHouse: free 7 days, pro 30, enterprise 90.
+
+- `GET /admin/usage?days=30` — daily logs/bytes/traces for the caller's tenant.
+- `POST /admin/usage/recalculate` — re-meter today now. Retention is **not**
+  applied by this call; asking for a fresh number must not delete data.
+
+Metering needs the analysis worker's **beat** running
+(`celery -A denoiser.workers.analysis_worker beat`), not just a worker.
+
 ## Scaling
 
 | Component | Scaling |
 |-----------|---------|
 | Analysis worker, ingestion worker, syslog | Stateless — scale replicas freely. |
-| API | Writes local state (`settings.json`, `live_stream.log`) to its data volume; running >1 replica needs a ReadWriteMany volume. |
+| API | Stateless for configuration (settings live in the database). `live_stream.log` is a local convenience buffer; nothing depends on it being shared. |
 | Web | Stateless. |
+
+Operator settings used to live in `data/settings.json` on the API's own disk,
+which required a ReadWriteMany volume for more than one replica. They are now a
+row in the database; an existing `settings.json` is imported automatically on
+first boot after upgrading, and can then be deleted.
+
+## Host telemetry vs. monitored services
+
+`GET /vitals` and the Command Center's vitals panel report the CPU, memory,
+disk and network of **the node running SemanticOS** — under Kubernetes, the API
+pod. They say nothing about the services you are monitoring. Every sample is
+stamped with `scope: semanticos_api_host` and its hostname so the numbers cannot
+be mistaken for fleet metrics. Set `HOST_TELEMETRY_ENABLED=false` to turn the
+collection off entirely.
+
+Kernel events from the eBPF collector (TCP retransmits, OOM kills; Linux only,
+requires `bcc`) are exposed at `GET /telemetry/kernel-events` and folded into
+anomaly correlation, so an OOM kill next to a burst of anomalies shows up as
+evidence rather than sitting unread in a file.
 
 ### Analysis input cap
 

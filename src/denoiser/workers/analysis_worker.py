@@ -547,17 +547,21 @@ def evaluate_slos():
 
         for slo in slos:
             try:
-                # Real SLI from ingested logs — no fabricated data. When the
-                # service produced no traffic in the window, total_events is 0
-                # and we record nothing rather than inventing a data point.
+                # Real SLI from ingested logs — no fabricated data. When nothing
+                # in the window could be measured the engine reports NO_DATA and
+                # we record nothing rather than inventing a data point. For a
+                # latency SLO the denominator is the measurable subset, not every
+                # log line, so persist that as the data point's total.
                 status = calculate_slo_status(db, slo)
-                total_events = status.get("total_events", 0)
+                measured_events = status.get("measured_events", status.get("total_events", 0))
                 good_events = status.get("good_events", 0)
-                value = status.get("current_value", 100.0)
+                value = status.get("current_value", 0.0)
 
-                if total_events <= 0:
-                    # No real events to measure; skip this SLO this cycle.
+                if status.get("status") == "NO_DATA" or measured_events <= 0:
+                    # Nothing measurable this cycle; skip rather than record a
+                    # perfect score earned by an absence of evidence.
                     continue
+                total_events = measured_events
 
                 dp = SLODataPoint(
                     slo_id=slo.id,
@@ -754,10 +758,33 @@ def evaluate_monitors():
         db.close()
 
 
+@celery_app.task
+def aggregate_billing():
+    """Periodic task: meter per-tenant usage and enforce tier retention.
+
+    This lived on a second Celery app with its own beat that no deployment ever
+    started, so usage was never metered and retention was never applied. It runs
+    on the platform's own beat now.
+    """
+    from denoiser.workers.billing_worker import aggregate_billing as run_aggregation
+
+    try:
+        return run_aggregation()
+    except Exception as e:
+        logger.error(f"Billing aggregation failed: {e}")
+        return {"error": str(e)}
+
+
 # Setup periodic tasks
 @celery_app.on_after_configure.connect
 def setup_periodic_tasks(sender, **kwargs):
+    from celery.schedules import crontab
+
     # Execute every minute
     sender.add_periodic_task(60.0, evaluate_slos.s(), name='evaluate_slos_every_minute')
     sender.add_periodic_task(60.0, extract_metrics.s(), name='extract_metrics_every_minute')
     sender.add_periodic_task(60.0, evaluate_monitors.s(), name='evaluate_monitors_every_minute')
+    # Usage metering + tier retention, daily at midnight UTC.
+    sender.add_periodic_task(
+        crontab(minute=0, hour=0), aggregate_billing.s(), name='aggregate_billing_daily'
+    )

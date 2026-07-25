@@ -45,7 +45,7 @@ function Sparkline({ data, dataKey, color }: { data: any[], dataKey: string, col
 
 export default function CommandCenter() {
  const { timeRange } = useTimeRange();
- const { tasks, executeTask } = useTasks();
+ const { tasks, executeTask, attachRemoteTask } = useTasks();
  const [data, setData] = useState<any>(null);
  const [loading, setLoading] = useState(false);
  const [error, setError] = useState<string | null>(null);
@@ -123,6 +123,9 @@ export default function CommandCenter() {
  const [vitals, setVitals] = useState<any[]>(
  Array.from({ length: 20 }, () => ({ cpu: 0, mem: 0, disk: 0, net: 0 }))
  );
+ // These vitals are the SemanticOS host's own, not the monitored fleet's. The
+ // panel said only "System Vitals", which invited exactly that misreading.
+ const [vitalsHost, setVitalsHost] = useState<string | null>(null);
 
  useEffect(() => {
  const padToWindow = (arr: any[]) =>
@@ -140,6 +143,7 @@ export default function CommandCenter() {
  try {
  const res = await apiFetch('/vitals');
  if (res?.vitals) setVitals(padToWindow(res.vitals));
+ if (res?.host) setVitalsHost(res.host);
  } catch {
  // Keep previous vitals if the backend is temporarily unavailable.
  }
@@ -207,7 +211,11 @@ export default function CommandCenter() {
 
  const sourceName = sources.find(s => s.path === target)?.name || 'Source';
  // Use a stable ID so the same source can't be analyzed twice simultaneously
- executeTask(taskIdForSource(sourceName), `Analyzing ${sourceName}`, runAnalysisJob({ source: target, intelligence: true }));
+ const taskId = taskIdForSource(sourceName);
+ executeTask(taskId, `Analyzing ${sourceName}`, runAnalysisJob(
+ { source: target, intelligence: true },
+ (remoteId) => attachRemoteTask(taskId, remoteId),
+ ));
  };
 
  const handleSearch = async (e: React.FormEvent) => {
@@ -466,7 +474,13 @@ export default function CommandCenter() {
  )}
  </div>
 
- {/* System Vitals Panel */}
+ {/* System Vitals Panel — the SemanticOS host, not the monitored fleet */}
+ <div className="flex items-baseline gap-2 -mb-1">
+ <p className="eyebrow">SemanticOS Host Vitals</p>
+ <span className="text-[10px] text-[var(--text-muted)]">
+ {vitalsHost ? `${vitalsHost} — this platform node, not your monitored services` : 'this platform node, not your monitored services'}
+ </span>
+ </div>
  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
  <div className="bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-[3px] p-3.5 flex items-center justify-between">
  <div>

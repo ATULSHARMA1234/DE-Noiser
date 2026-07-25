@@ -25,6 +25,7 @@ def create_slo(payload: SLOCreateSchema, db: Session = Depends(get_db), current_
         sli_type=payload.sli_type,
         target_percentage=payload.target_percentage,
         window_days=payload.window_days,
+        latency_threshold_ms=payload.latency_threshold_ms,
         tenant_id=current_user.tenant_id
     )
     db.add(slo)

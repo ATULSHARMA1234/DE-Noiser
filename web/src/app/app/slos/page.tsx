@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { apiFetch } from '@/lib/api';
 import { useToast } from '@/context/ToastContext';
-import { Zap, Plus, Settings, AlertCircle, Activity, ShieldAlert, CheckCircle2, X } from 'lucide-react';
+import { Zap, Plus, Settings, AlertCircle, Activity, ShieldAlert, CheckCircle2, HelpCircle, X } from 'lucide-react';
 import { ConfirmModal } from '@/components/ConfirmModal';
 
 export default function SLOsPage() {
@@ -17,7 +17,8 @@ export default function SLOsPage() {
  service: '',
  sli_type: 'availability',
  target_percentage: 99.9,
- window_days: 30
+ window_days: 30,
+ latency_threshold_ms: 500
  });
 
  const [confirmOpen, setConfirmOpen] = useState(false);
@@ -63,7 +64,7 @@ export default function SLOsPage() {
  });
  toast({ title: 'SLO created' });
  setShowModal(false);
- setFormData({ name: '', service: '', sli_type: 'availability', target_percentage: 99.9, window_days: 30 });
+ setFormData({ name: '', service: '', sli_type: 'availability', target_percentage: 99.9, window_days: 30, latency_threshold_ms: 500 });
  fetchSLOs();
  } catch (e: any) {
  toast({ title: 'Failed to create SLO', description: e.message, type: 'error' });
@@ -158,7 +159,16 @@ export default function SLOsPage() {
  let statusBadge = <span className="bg-green-500/10 text-green-500 px-2 py-0.5 rounded text-xs font-medium uppercase tracking-wider">Healthy</span>;
  let gaugeColor = 'bg-green-500';
  
- if (status?.status === 'WARNING') {
+ // NO_DATA means nothing in the window could be measured. It must not render
+ // as a green "Healthy" card — an unmeasured objective is the one an operator
+ // most needs to notice.
+ const noData = status?.status === 'NO_DATA';
+
+ if (noData) {
+ statusIcon = <HelpCircle size={24} className="text-[var(--text-muted)]" />;
+ statusBadge = <span className="bg-[var(--bg-app)] text-[var(--text-muted)] px-2 py-0.5 rounded text-xs font-medium uppercase tracking-wider">No data</span>;
+ gaugeColor = 'bg-[var(--text-dimmed)]';
+ } else if (status?.status === 'WARNING') {
  statusIcon = <AlertCircle size={24} className="text-yellow-500" />;
  statusBadge = <span className="bg-yellow-500/10 text-yellow-500 px-2 py-0.5 rounded text-xs font-medium uppercase tracking-wider">Warning</span>;
  gaugeColor = 'bg-yellow-500';
@@ -168,7 +178,10 @@ export default function SLOsPage() {
  gaugeColor = 'bg-red-500';
  }
 
- const budgetPercent = status ? Math.max(0, (status.error_budget_remaining / status.error_budget_total) * 100) : 100;
+ // Guard the divide: a zero budget produced NaN and an unrenderable bar.
+ const budgetPercent = status && status.error_budget_total > 0
+ ? Math.max(0, Math.min(100, (status.error_budget_remaining / status.error_budget_total) * 100))
+ : 0;
 
  return (
  <div key={slo.id} className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-6 relative group overflow-hidden">
@@ -191,7 +204,20 @@ export default function SLOsPage() {
  {statusIcon}
  </div>
 
- {status ? (
+ {status && noData ? (
+ <div className="py-6 text-center">
+ <HelpCircle className="mx-auto mb-2 text-[var(--text-dimmed)]" size={24} />
+ <div className="text-sm font-medium text-[var(--text-secondary)]">Not enough data to measure</div>
+ <p className="text-xs text-[var(--text-muted)] mt-1.5 leading-relaxed max-w-[320px] mx-auto">
+ {slo.sli_type === 'latency'
+ ? `No logs from ${slo.service} in the last ${slo.window_days}d carry a duration field, so this objective cannot be evaluated.`
+ : `No logs from ${slo.service} in the last ${slo.window_days}d.`}
+ </p>
+ {status.threshold_ms ? (
+ <p className="text-[10px] text-[var(--text-dimmed)] mt-2 font-mono">objective ≤ {status.threshold_ms}ms</p>
+ ) : null}
+ </div>
+ ) : status ? (
  <>
  <div className="grid grid-cols-2 gap-4 mb-6">
  <div>
@@ -284,9 +310,28 @@ export default function SLOsPage() {
  className="w-full bg-[var(--bg-app)] border border-[var(--border)] rounded-md py-2 px-3 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-blue-500"
  >
  <option value="availability">Availability (Success Rate)</option>
- <option value="latency">Latency (P99 &lt; 500ms)</option>
+ <option value="latency">Latency (request duration)</option>
  </select>
  </div>
+
+ {/* The latency objective used to be a 500ms constant inside the engine, so
+ every latency SLO shared a threshold nobody chose. */}
+ {formData.sli_type === 'latency' && (
+ <div>
+ <label className="block text-sm font-medium text-[var(--text-primary)] mb-1">Latency Objective (ms)</label>
+ <input
+ type="number"
+ min="1" max="600000"
+ required
+ value={formData.latency_threshold_ms}
+ onChange={e => setFormData({...formData, latency_threshold_ms: parseFloat(e.target.value)})}
+ className="w-full bg-[var(--bg-app)] border border-[var(--border)] rounded-md py-2 px-3 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-blue-500"
+ />
+ <p className="text-xs text-[var(--text-muted)] mt-1.5 leading-relaxed">
+ Measured only over log lines carrying a duration field (duration_ms, latency_ms, elapsed_ms, response_time_ms). Lines without one are excluded, not counted as passing.
+ </p>
+ </div>
+ )}
 
  <div className="grid grid-cols-2 gap-4">
  <div>

@@ -13,26 +13,19 @@ from denoiser.storage.object_store import ObjectStore
 logger = get_logger(__name__)
 
 DATA_DIR = Path("data")
-SETTINGS_FILE = DATA_DIR / "settings.json"
-
-def get_retention_days():
-    import json
-    try:
-        if SETTINGS_FILE.exists():
-            cfg = json.loads(SETTINGS_FILE.read_text())
-            return cfg.get("retention_days", 7)
-    except Exception:
-        pass
-    return 7
 
 def get_storage_settings():
-    import json
+    """Settings as every replica sees them (database-backed, not a local file)."""
     try:
-        if SETTINGS_FILE.exists():
-            return json.loads(SETTINGS_FILE.read_text())
-    except Exception:
-        pass
-    return {}
+        from denoiser.api.platform_settings import load_settings
+
+        return load_settings()
+    except Exception as e:
+        logger.error(f"Could not load settings for the retention job: {e}")
+        return {}
+
+def get_retention_days():
+    return get_storage_settings().get("retention_days", 7)
 
 async def archive_old_logs_to_s3():
     """

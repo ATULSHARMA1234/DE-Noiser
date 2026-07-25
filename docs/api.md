@@ -58,7 +58,7 @@ IdP-driven user lifecycle. Auth: `Authorization: Bearer <SCIM_BEARER_TOKEN>`
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/health` · `/health/live` | Liveness — process is serving. |
-| GET | `/health/ready` | Readiness — probes DB, Redis, ClickHouse, Kafka; `503` if a critical dep is down. |
+| GET | `/health/ready` | Readiness — probes DB, Redis, ClickHouse, Kafka **and the ingestion consumer**; `503` if a critical dep is down. A stopped consumer means `/ingest` accepts writes that never become queryable, so it fails readiness. |
 | GET | `/internal/metrics` | Prometheus exposition (request rate, errors, latency). |
 
 ## Ingestion
@@ -140,7 +140,7 @@ parameterized ClickHouse SQL.
 |--------|------|------|-------------|
 | GET/POST/PUT/DELETE | `/integrations` … | varies | Manage connected providers. Credentials are stored but never returned — reads show a mask. |
 | POST | `/integrations/{id}/test` | ANALYST+ | Verify the stored credential actually authenticates. |
-| POST | `/integrations/{id}/sync` | ANALYST+ | Pull provider metadata in. For GitHub this imports deployments as markers for deploy↔anomaly correlation (needs `config.repo` = `owner/name`). |
+| POST | `/integrations/{id}/sync` | ANALYST+ | Pull provider metadata in. For GitHub this imports deployments as markers for deploy↔anomaly correlation (needs `config.repo` = `owner/name`). Markers are filed under `config.service` (default: the repo name) or `config.service_by_environment` — set one for a monorepo, or every service lands in a single series. |
 
 ## Sources & connectors
 
@@ -154,7 +154,11 @@ parameterized ClickHouse SQL.
 | Method | Path | Role | Notes |
 |--------|------|------|-------|
 | GET/POST/DELETE | `/users` … | ADMIN | Manage operators. `GET` is **paginated**. |
-| GET/PUT | `/settings` | VIEWER+/ADMIN | Read / update platform settings. |
+| GET/PUT | `/settings` | VIEWER+/ADMIN | Read / update platform settings. Stored in the database, so every API replica sees the same values. |
+| GET | `/admin/usage` | ADMIN | Per-day ingest volume (logs, bytes, traces) and the tenant's retention tier. |
+| POST | `/admin/usage/recalculate` | ADMIN | Re-meter today immediately. Does not apply retention. |
+| GET | `/vitals` · `/metrics/current` | VIEWER+ | Vitals of the **SemanticOS host**, not the monitored fleet; the response carries `scope` and `host`. |
+| GET | `/telemetry/kernel-events` | VIEWER+ | eBPF kernel events (TCP retransmits, OOM kills). Linux + `bcc` only. |
 | WS | `/stream?token=` | any | Live per-tenant log tail (Redis pub/sub). |
 
 ## Conventions
@@ -162,3 +166,4 @@ parameterized ClickHouse SQL.
 - **Pagination**: list endpoints accept `limit` (1–1000, default 200) and `offset` (≥0).
 - **Errors**: JSON `{error, detail, request_id}`; every response carries `X-Request-ID`.
 - **Time**: `from_ts` / `to_ts` are epoch milliseconds.
+- **SLO status**: `GET /slos/{id}/status` returns `HEALTHY` / `WARNING` / `BREACHED` / `NO_DATA`. A latency SLI is measured only over log lines carrying a duration (`duration_ms`, `latency_ms`, `elapsed_ms`, `response_time_ms`, `duration`, `latency`) against the SLO's own `latency_threshold_ms`; lines without one are excluded from both numerator and denominator, never counted as passing. When nothing in the window is measurable the status is `NO_DATA` — not a passing score.
