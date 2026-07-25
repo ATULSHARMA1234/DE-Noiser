@@ -47,6 +47,65 @@ Migrations run automatically via the Job; deployments set
 - [ ] Backups scheduled and a restore has been **tested** (see below).
 - [ ] Log retention / data-tiering configured per tenant (`cleanup_old_data`).
 
+## Secrets: sourcing and rotation
+
+Every setting may be supplied as a **file** instead of an environment variable:
+set `<VAR>_FILE` to a mounted path (`JWT_SECRET_KEY_FILE`,
+`SCIM_BEARER_TOKEN_FILE`, `DATABASE_URL_FILE`, …). That is the shape Vault
+Agent, External Secrets and the AWS/GCP secret CSI drivers already mount, and
+unlike an env var a mounted file can be updated under a running process. An
+explicit env var always wins over the file.
+
+### Rotating the JWT signing key with no forced sign-out
+
+The signing key rotates through an **overlap window**: `JWT_SECRET_KEY` signs
+new tokens, `JWT_SECRET_KEY_PREVIOUS` (comma-separated, most recent first) is
+still accepted while tokens signed with it drain. Every token carries a `kid`
+header identifying its key, so verification picks the right one.
+
+1. Move the current key to the retired list and install the new one:
+   ```bash
+   JWT_SECRET_KEY=<new 32+ char random>
+   JWT_SECRET_KEY_PREVIOUS=<the key being retired>
+   ```
+   With file-backed secrets, write the two files — replicas pick the change up
+   within `JWT_KEYRING_REFRESH_SECONDS` (default 30s) without a restart.
+2. Confirm every replica is signing with the new key:
+   ```bash
+   curl -H "Authorization: Bearer $ADMIN_TOKEN" https://api.your-host/admin/signing-keys
+   # {"active_kid": "...", "retired_kids": ["..."], "accepts_retired_tokens": true}
+   ```
+3. Wait out the longest token lifetime — `REFRESH_TOKEN_EXPIRE_MINUTES`
+   (default 7 days) — so no valid token is still signed with the retired key.
+4. Drop `JWT_SECRET_KEY_PREVIOUS`. Tokens signed with the old key now fail.
+
+The startup checks refuse production if the retired list contains the active key
+(the rotation never took effect) or the publicly known development default.
+
+To force an *immediate* invalidation instead — a suspected key compromise — skip
+step 3: rotate with no `JWT_SECRET_KEY_PREVIOUS` at all. Every outstanding token
+dies and all users re-authenticate, which is the correct trade under compromise.
+
+## Tenant API quotas
+
+Each tenant gets a sliding-window request ceiling across the whole API, keyed on
+the tenant (resolved from `X-API-Key` or the Bearer subject) rather than the
+client IP — a workspace shipping from a hundred pods is one bucket, not a
+hundred. Defaults per 60s window, tunable without a code change:
+
+| Tier | Requests / window | Override |
+|------|-------------------|----------|
+| free | 600 | `TENANT_QUOTA_FREE` |
+| pro | 6,000 | `TENANT_QUOTA_PRO` |
+| enterprise | 60,000 | `TENANT_QUOTA_ENTERPRISE` |
+
+Window length is `TENANT_QUOTA_WINDOW_SECONDS`; `TENANT_QUOTA_ENABLED=false`
+disables enforcement. Responses carry `X-RateLimit-Limit` / `-Remaining`, and a
+breach returns 429 with `Retry-After`. Health, metrics and auth routes are
+exempt so a quota breach cannot lock an operator out of their own workspace.
+The window lives in Redis so it is shared across replicas; if Redis is down it
+degrades to a per-replica in-memory window rather than failing open entirely.
+
 ## Scaling
 
 | Component | Scaling |

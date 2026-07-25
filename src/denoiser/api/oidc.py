@@ -21,7 +21,7 @@ from urllib.parse import urlencode
 import httpx
 from jose import JWTError, jwt
 
-from denoiser.api.auth import ALGORITHM, SECRET_KEY
+from denoiser.api.auth import decode_token, encode_token
 from denoiser.logging import get_logger
 from denoiser.settings import get_settings
 
@@ -82,13 +82,13 @@ def issue_state(redirect_uri: str) -> str:
         "exp": datetime.now(UTC) + timedelta(seconds=_STATE_TTL_SECONDS),
         "purpose": "oidc_state",
     }
-    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+    return encode_token(payload)
 
 
 def verify_state(state: str) -> str:
     """Validate a state token and return its redirect. Raises on tamper/expiry."""
     try:
-        payload = jwt.decode(state, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = decode_token(state)
     except JWTError as e:
         raise OIDCError(f"Invalid or expired state: {e}")
     if payload.get("purpose") != "oidc_state":

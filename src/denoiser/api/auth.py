@@ -11,16 +11,57 @@ from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
+from denoiser.api.keys import get_keyring
 from denoiser.storage.db import User, get_db
 
 is_testing = "pytest" in sys.modules or any("pytest" in arg for arg in sys.argv) or "PYTEST_CURRENT_TEST" in os.environ
-SECRET_KEY = os.getenv("JWT_SECRET_KEY")
-if not SECRET_KEY:
-    if is_testing:
-        SECRET_KEY = "semantic-os-super-secure-production-secret-key-1234567890"
-    else:
-        raise ValueError("JWT_SECRET_KEY environment variable is mandatory in non-test mode.")
 ALGORITHM = "HS256"
+# Tokens are signed with the keyring's active key and verified against every key
+# still in the ring, so a rotation drains outstanding tokens instead of signing
+# everyone out. Raises at import in non-test mode when no secret is configured.
+_keyring = get_keyring()
+
+
+def __getattr__(name: str):
+    """``SECRET_KEY`` stays readable as the *current* active signing secret.
+
+    It is a module attribute rather than a constant so that a key rotated at
+    runtime is reflected here too, instead of handing callers a stale secret.
+    """
+    if name == "SECRET_KEY":
+        return get_keyring().active.secret
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def encode_token(claims: dict) -> str:
+    """Sign a token with the active key, stamping its kid into the header."""
+    key = get_keyring().active
+    return jwt.encode(claims, key.secret, algorithm=ALGORITHM, headers={"kid": key.kid})
+
+
+def decode_token(token: str) -> dict:
+    """Verify a token against the keyring. Raises ``JWTError`` if no key matches.
+
+    The ``kid`` header selects the key directly. Tokens minted before kid
+    stamping (or by a replica mid-rotation) carry none, so every key in the ring
+    is tried before the token is rejected.
+    """
+    ring = get_keyring()
+    try:
+        kid = jwt.get_unverified_header(token).get("kid")
+    except JWTError:
+        kid = None
+
+    candidates = [named] if (named := ring.by_kid(kid)) else list(ring.all_keys)
+    last_error: JWTError | None = None
+    for key in candidates:
+        try:
+            return jwt.decode(token, key.secret, algorithms=[ALGORITHM])
+        except JWTError as e:
+            last_error = e
+    raise last_error or JWTError("Token could not be verified with any active key")
+
+
 # Short-lived access tokens limit the blast radius of a leaked token; a
 # longer-lived, single-use refresh token (rotated on every use) keeps sessions
 # alive without a 24h bearer floating around. Both are env-tunable.
@@ -51,7 +92,7 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
     # Every token carries a unique jti so it can be individually revoked, and a
     # type so a refresh token can never be presented as an access token.
     to_encode.update({"exp": expire, "jti": uuid.uuid4().hex, "type": "access"})
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encode_token(to_encode)
 
 
 def create_refresh_token(data: dict, expires_delta: timedelta | None = None) -> str:
@@ -59,7 +100,7 @@ def create_refresh_token(data: dict, expires_delta: timedelta | None = None) -> 
     to_encode = data.copy()
     expire = datetime.now(UTC) + (expires_delta or timedelta(minutes=REFRESH_TOKEN_EXPIRE_MINUTES))
     to_encode.update({"exp": expire, "jti": uuid.uuid4().hex, "type": "refresh"})
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encode_token(to_encode)
 
 
 def issue_token_pair(sub: str) -> dict:
@@ -87,7 +128,7 @@ def rotate_refresh_token(refresh_token: str, db: Session) -> tuple[dict, User]:
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
-        payload = jwt.decode(refresh_token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = decode_token(refresh_token)
     except JWTError:
         raise invalid
 
@@ -119,7 +160,7 @@ def revoke_token(token: str, db: Session) -> bool:
     from denoiser.storage.db import RevokedToken
 
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = decode_token(token)
     except JWTError:
         return False
 
@@ -152,7 +193,7 @@ def get_current_user(
         raise credentials_exception
 
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = decode_token(token)
         email: str = payload.get("sub")
         if email is None:
             raise credentials_exception

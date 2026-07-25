@@ -461,6 +461,19 @@ async def readiness_check(response: Response):
     return {"status": "ready" if critical_ok else "degraded", "checks": checks}
 
 
+@app.get("/admin/signing-keys")
+def signing_key_status(current_user: User = Depends(require_role(["ADMIN"]))):
+    """Which JWT signing key is active and which retired keys are still accepted.
+
+    An operator rolling the secret needs to confirm the new key took effect on
+    every replica before dropping the old one from JWT_SECRET_KEY_PREVIOUS.
+    Key ids are truncated hashes — the secrets themselves are never exposed.
+    """
+    from denoiser.api.keys import get_keyring
+
+    return get_keyring().describe()
+
+
 @app.get("/internal/metrics")
 def internal_metrics():
     """Prometheus exposition of SemanticOS's own request rate, errors and latency."""
