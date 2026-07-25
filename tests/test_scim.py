@@ -152,6 +152,44 @@ class TestScimDeprovisionCutsAccess:
         assert body["active"] is False
         assert body["externalId"] == "idp|new-ext"
 
+    def test_patch_full_attributes(self, client):
+        """PATCH updates more than `active`: role, externalId, userName."""
+        email = self._make_active_user("full-patch@bigcorp.com")
+        uid = client.post("/scim/v2/Users", headers=_h(), json={
+            "userName": email, "active": True,
+            "emails": [{"value": email, "primary": True}],
+        }).json()["id"]
+
+        res = client.patch(f"/scim/v2/Users/{uid}", headers=_h(), json={
+            "Operations": [
+                {"op": "replace", "path": "externalId", "value": "idp|xyz"},
+                {"op": "replace", "path": "role", "value": "ANALYST"},
+            ],
+        })
+        assert res.status_code == 200
+        assert res.json()["externalId"] == "idp|xyz"
+
+        from denoiser.storage.db import SessionLocal, User
+        db = SessionLocal()
+        assert db.query(User).filter(User.id == int(uid)).first().role == "ANALYST"
+        db.close()
+
+    def test_patch_nodpath_dict_updates_multiple(self, client):
+        """A no-path replace with a value object updates several attributes."""
+        email = self._make_active_user("multi-patch@bigcorp.com")
+        uid = client.post("/scim/v2/Users", headers=_h(), json={
+            "userName": email, "active": True,
+            "emails": [{"value": email, "primary": True}],
+        }).json()["id"]
+
+        res = client.patch(f"/scim/v2/Users/{uid}", headers=_h(), json={
+            "Operations": [{"op": "replace", "value": {"active": False, "externalId": "idp|multi"}}],
+        })
+        assert res.status_code == 200
+        body = res.json()
+        assert body["active"] is False
+        assert body["externalId"] == "idp|multi"
+
     def test_operations_on_missing_user_404(self, client):
         assert client.get("/scim/v2/Users/999999", headers=_h()).status_code == 404
         assert client.put("/scim/v2/Users/999999", headers=_h(), json={}).status_code == 404

@@ -188,8 +188,18 @@ def sso_callback(
 
 @router.post("/saml/acs", response_model=TokenResponse)
 def saml_acs(db: Session = Depends(get_db)):
+    """SAML Assertion Consumer Service.
+
+    Real SAML is NOT implemented — this endpoint does not parse or verify signed
+    XML assertions. It must therefore never mint a session from posted input in
+    production; enterprises should use the (real, signature-validated) OIDC flow.
+    It is fail-closed: outside the mock/sandbox mode it returns 501, and only the
+    dev mock operator session is issued when the mock IdP is explicitly enabled.
     """
-    ACS endpoint mapping to post-back SAML XML assertions.
-    """
-    # SAML POST callback simulation
+    if not _mock_sso_enabled():
+        raise HTTPException(
+            status_code=501,
+            detail="SAML SSO is not implemented; configure OIDC SSO instead.",
+        )
+    # Dev/sandbox only: mock SAML operator session (no assertion verification).
     return sso_callback(code="mock_okta_code_saml", provider="saml", db=db)

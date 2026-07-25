@@ -777,8 +777,10 @@ def list_aws_groups(current_user: User = Depends(require_role(["VIEWER", "ANALYS
                 "stored_bytes": g.get("storedBytes", 0),
             })
         return {"status": "connected", "groups": result}
-    except Exception:
-        # Fallback to simulated CloudWatch log groups
+    except Exception as e:
+        if not _simulated_connectors_allowed():
+            raise HTTPException(status_code=502, detail=f"AWS CloudWatch not reachable: {e}")
+        # Dev/sandbox fallback to simulated CloudWatch log groups.
         return {
             "status": "simulated",
             "message": "AWS credentials not detected. Operating in sandbox mode.",
@@ -808,8 +810,10 @@ async def fetch_aws_logs(log_group: str = Form(...), log_stream: str | None = Fo
                 f.write(r.raw_text + "\n")
 
         return {"status": "success", "source": filename, "lines": len(records)}
-    except Exception:
-        # Simulated log generation
+    except Exception as e:
+        if not _simulated_connectors_allowed():
+            raise HTTPException(status_code=502, detail=f"AWS CloudWatch not reachable: {e}")
+        # Dev/sandbox simulated log generation.
         simulated_logs = [
             "1715934500000\t[INFO]\tINIT\tContainer runtime: fargate-2.0",
             "1715934502000\t[INFO]\tSTART\tRequest ID: req-8219-cba0",
@@ -845,7 +849,9 @@ def list_docker_containers(current_user: User = Depends(require_role(["VIEWER", 
                 "status": c.status,
             })
         return {"status": "connected", "containers": result}
-    except Exception:
+    except Exception as e:
+        if not _simulated_connectors_allowed():
+            raise HTTPException(status_code=502, detail=f"Docker daemon not reachable: {e}")
         return {
             "status": "simulated",
             "message": "Docker socket not detected. Operating in sandbox mode.",
@@ -874,7 +880,9 @@ async def fetch_docker_logs(container_name: str = Form(...), current_user: User 
             f.write(logs)
 
         return {"status": "success", "source": filename, "lines": len(logs.splitlines())}
-    except Exception:
+    except Exception as e:
+        if not _simulated_connectors_allowed():
+            raise HTTPException(status_code=502, detail=f"Docker daemon not reachable: {e}")
         simulated_logs = [
             "node-api-1 | 2026-05-17 17:15:00 [info]: Express app listening on port 3000",
             "node-api-1 | 2026-05-17 17:15:02 [info]: Connected to PostgreSQL database at postgres-db:5432",

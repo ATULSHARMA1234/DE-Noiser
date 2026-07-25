@@ -6,6 +6,13 @@ based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Security
+- **AWS CloudWatch & Docker connectors are fail-closed in production.** Like the
+  k8s connector, they now return a real `502` when the backend is unreachable
+  instead of silently serving labeled `"simulated"` sample data (gated by
+  `ALLOW_SIMULATED_CONNECTORS` / test mode).
+- **SAML ACS can no longer mint a session from unverified input.** Real SAML is
+  not implemented; the `/auth/sso/saml/acs` endpoint is now explicitly fail-
+  closed (returns `501` outside the dev mock mode) rather than issuing a token.
 - **Tenant isolation is now fail-closed** (audit H1). The ClickHouse store
   rejected an empty/falsy `tenant_id` instead of silently running an unscoped,
   cross-tenant query; every read/write is now scoped or refused. Regression
@@ -41,6 +48,13 @@ based on [Keep a Changelog](https://keepachangelog.com/).
 - **Migrated all Pydantic models from class-based `Config` to `ConfigDict`** and
   dropped the deprecated `Field(env=...)` kwarg (audit L3) — eliminates every
   Pydantic-v2 deprecation warning (27 → 0) ahead of the v3 removal.
+- **SCIM PATCH now updates full attributes** (userName/emails, externalId, role)
+  and both the path-scoped and no-path value-object operation shapes, not just
+  the `active` toggle.
+- **GitHub integration is honest**: `send_alert` creates a real issue via the
+  REST API and returns actual delivery success (no more unconditional `True`);
+  unimplemented log/deployment sync now raise instead of returning fabricated
+  data.
 
 ## [0.1.0] - 2026-07-25
 

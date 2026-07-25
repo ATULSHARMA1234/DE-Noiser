@@ -150,19 +150,46 @@ def create_user(payload: dict, _: bool = Depends(require_scim_auth), db: Session
     return _user_to_scim(user)
 
 
+def _set_user_attr(user: User, attr: str, value: Any) -> None:
+    """Map one SCIM attribute onto the User model. Unknown attributes ignored."""
+    attr = attr.lower()
+    if attr == "active":
+        user.is_active = _as_bool(value)
+    elif attr in ("username", "emails") and isinstance(value, str):
+        user.email = value
+    elif attr == "emails" and isinstance(value, list):
+        primary = next((e.get("value") for e in value if e.get("primary")), None)
+        if primary:
+            user.email = primary
+    elif attr == "externalid":
+        user.external_id = value
+    elif attr in ("role", "roles") and value:
+        # Okta/Azure may send roles as a list of {value: ...}; take the first.
+        if isinstance(value, list):
+            value = (value[0].get("value") if isinstance(value[0], dict) else value[0]) if value else None
+        if value:
+            user.role = str(value).upper()
+
+
 def _apply_user_patch(user: User, payload: dict) -> None:
-    """Apply a SCIM PATCH (used by Okta/Azure to toggle `active`)."""
+    """Apply a SCIM PATCH. Supports the two shapes IdPs send:
+
+    - path-scoped:  ``{"op":"replace","path":"active","value":false}``
+    - no-path dict: ``{"op":"replace","value":{"active":false,"userName":"x"}}``
+
+    Covers active (de/re-provision), userName/emails, externalId, and role.
+    """
     for op in payload.get("Operations", []):
         action = (op.get("op") or "").lower()
+        if action not in ("replace", "add"):
+            continue
         path = (op.get("path") or "").lower()
         value = op.get("value")
-        if action in ("replace", "add"):
-            if path == "active":
-                user.is_active = _as_bool(value)
-            elif isinstance(value, dict) and "active" in value:
-                user.is_active = _as_bool(value["active"])
-            elif path == "username" and isinstance(value, str):
-                user.email = value
+        if path:
+            _set_user_attr(user, path, value)
+        elif isinstance(value, dict):
+            for attr, val in value.items():
+                _set_user_attr(user, attr, val)
 
 
 def _as_bool(v: Any) -> bool:
