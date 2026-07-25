@@ -95,3 +95,4 @@ class TestSamlFailClosed:
         res = client.post("/auth/sso/saml/acs")
         assert res.status_code == 200
         assert "access_token" in res.json()
+

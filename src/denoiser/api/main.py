@@ -766,8 +766,8 @@ async def fetch_k8s_logs(namespace: str = Form(...), pod_name: str = Form(...), 
 def list_aws_groups(current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
     """Discover AWS CloudWatch log groups. Falls back to mock if AWS is not available."""
     try:
-        import boto3
-        client = boto3.client('logs')
+        from denoiser.integrations.aws import build_logs_client
+        client = build_logs_client()
         groups = client.describe_log_groups(limit=50)
         result = []
         for g in groups.get('logGroups', []):

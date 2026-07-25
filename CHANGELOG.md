@@ -13,6 +13,12 @@ based on [Keep a Changelog](https://keepachangelog.com/).
 - **SAML ACS can no longer mint a session from unverified input.** Real SAML is
   not implemented; the `/auth/sso/saml/acs` endpoint is now explicitly fail-
   closed (returns `501` outside the dev mock mode) rather than issuing a token.
+
+### Fixed
+- **AWS connector endpoints fail fast.** boto3 clients now carry explicit
+  connect/read timeouts and bounded IMDS credential resolution, so an
+  unreachable or credential-less AWS returns in ~2s instead of blocking ~20s on
+  EC2 metadata-endpoint retries before the `502`.
 - **Tenant isolation is now fail-closed** (audit H1). The ClickHouse store
   rejected an empty/falsy `tenant_id` instead of silently running an unscoped,
   cross-tenant query; every read/write is now scoped or refused. Regression
