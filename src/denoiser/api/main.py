@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import time
@@ -23,6 +24,9 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Query,
+    Request,
+    Response,
     UploadFile,
     WebSocket,
     WebSocketDisconnect,
@@ -33,7 +37,7 @@ from sqlalchemy.orm import Session
 
 from denoiser.analysis.drift import ClusterSnapshot, DriftDetector
 from denoiser.api.abac import require_abac
-from denoiser.api.auth import create_access_token, get_current_user, require_role, verify_ingest_auth, verify_password
+from denoiser.api.auth import create_access_token, get_current_user, oauth2_scheme, require_role, revoke_token, verify_ingest_auth, verify_password
 from denoiser.api.middleware import (
     CorrelationIDMiddleware,
     RateLimitMiddleware,
@@ -96,21 +100,26 @@ app.add_middleware(CorrelationIDMiddleware)
 from denoiser.api.alerts import router as alerts_router
 from denoiser.api.audit import AuditMiddleware
 from denoiser.api.audit import router as audit_router
+from denoiser.api.compat import router as compat_router
 from denoiser.api.dashboards import router as dashboards_router
 from denoiser.api.deployments import router as deployments_router
 from denoiser.api.integrations import router as integrations_router
 from denoiser.api.metrics import router as metrics_router
 from denoiser.api.monitors import router as monitors_router
 from denoiser.api.notebooks import router as notebooks_router
+from denoiser.api.observability import MetricsMiddleware, metrics_response
 from denoiser.api.otlp import router as otlp_router
 from denoiser.api.query import router as query_router
 from denoiser.api.runbooks import router as runbooks_router
+from denoiser.api.scim import router as scim_router
 from denoiser.api.slo import router as slo_router
 from denoiser.api.sso import router as sso_router
 from denoiser.api.storage import router as storage_router
 from denoiser.api.tracing import router as tracing_router
 
 app.add_middleware(AuditMiddleware)
+# Outermost: time the full request (including every other middleware).
+app.add_middleware(MetricsMiddleware)
 app.include_router(audit_router)
 app.include_router(alerts_router)
 app.include_router(tracing_router)
@@ -126,6 +135,8 @@ app.include_router(sso_router)
 app.include_router(otlp_router)
 app.include_router(storage_router)
 app.include_router(notebooks_router)
+app.include_router(scim_router)
+app.include_router(compat_router)
 
 # Register global exception handlers (Task 3)
 register_exception_handlers(app)
@@ -230,11 +241,60 @@ app.router.lifespan_context = lifespan
 
 # ─── AUTHENTICATION ───────────────────────────────────────────────────────────
 
+# ── Login brute-force throttle ───────────────────────────────────────────────
+# The login route was previously unlimited (the RateLimitMiddleware only guards
+# /ingest), leaving credential-stuffing unmitigated. Track failed attempts per
+# (client IP, email) in Redis with an in-memory fallback, and lock the pair out
+# once too many accumulate inside the window.
+LOGIN_MAX_ATTEMPTS = 5
+LOGIN_WINDOW_SECONDS = 300
+_login_attempts: dict[str, list[float]] = {}
+
+
+def _client_ip(request: Request) -> str:
+    """Best-effort client IP, preferring the proxy-set X-Forwarded-For hop."""
+    xff = request.headers.get("x-forwarded-for", "")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+async def _login_locked_out(key: str) -> bool:
+    now = time.time()
+    cutoff = now - LOGIN_WINDOW_SECONDS
+    try:
+        rk = f"login_fail:{key}"
+        await redis_client.zremrangebyscore(rk, 0, cutoff)
+        return int(await redis_client.zcard(rk)) >= LOGIN_MAX_ATTEMPTS
+    except Exception:
+        recent = [t for t in _login_attempts.get(key, []) if t > cutoff]
+        _login_attempts[key] = recent
+        return len(recent) >= LOGIN_MAX_ATTEMPTS
+
+
+async def _record_login_failure(key: str) -> None:
+    now = time.time()
+    try:
+        rk = f"login_fail:{key}"
+        await redis_client.zadd(rk, {f"{now}": now})
+        await redis_client.expire(rk, LOGIN_WINDOW_SECONDS)
+    except Exception:
+        _login_attempts.setdefault(key, []).append(now)
+
+
 @app.post("/auth/login", response_model=TokenResponse)
-def login(payload: UserLogin, db: Session = Depends(get_db)):
+async def login(payload: UserLogin, request: Request, db: Session = Depends(get_db)):
     """Authenticate an operator and return an access token."""
+    throttle_key = f"{_client_ip(request)}:{payload.email.lower()}"
+    if await _login_locked_out(throttle_key):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many failed login attempts. Please wait and try again.",
+        )
+
     user = db.query(User).filter(User.email == payload.email).first()
     if not user or not verify_password(payload.password, user.hashed_password):
+        await _record_login_failure(throttle_key)
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     if not getattr(user, "is_active", True):
@@ -254,10 +314,26 @@ def get_me(current_user: User = Depends(get_current_user)):
     return current_user
 
 
+@app.post("/auth/logout")
+def logout(
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Revoke the caller's token so it cannot be reused before it expires."""
+    revoke_token(token, db)
+    return {"status": "logged_out"}
+
+
 @app.get("/users", response_model=list[UserResponse])
-def list_users(db: Session = Depends(get_db), current_user: User = Depends(require_role(["ADMIN"]))):
-    """List all registered operators."""
-    return db.query(User).all()
+def list_users(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["ADMIN"])),
+    limit: int = Query(200, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+):
+    """List registered operators (paginated)."""
+    return db.query(User).order_by(User.id).limit(limit).offset(offset).all()
 
 
 @app.post("/users", response_model=UserResponse, status_code=201)
@@ -316,9 +392,58 @@ def deactivate_user(user_id: int, db: Session = Depends(get_db), current_user: U
 # ─── HEALTH ───────────────────────────────────────────────────────────────────
 
 @app.get("/health")
+@app.get("/health/live")
 def health_check():
-    """Perform a system health check."""
+    """Liveness: the process is up and serving. Cheap, no dependency I/O."""
     return {"status": "healthy", "version": "2.0.0"}
+
+
+@app.get("/health/ready")
+async def readiness_check(response: Response):
+    """Readiness: probe every critical dependency and report per-component status.
+
+    Returns 503 when any critical dependency is down so an orchestrator can pull
+    the instance out of rotation instead of routing traffic into a broken pod.
+    """
+    checks: dict[str, str] = {}
+
+    # Database (critical)
+    try:
+        from sqlalchemy import text
+
+        from denoiser.storage.db import SessionLocal
+        db = SessionLocal()
+        try:
+            db.execute(text("SELECT 1"))
+            checks["database"] = "ok"
+        finally:
+            db.close()
+    except Exception as e:
+        checks["database"] = f"error: {e}"
+
+    # Redis (critical: rate limiting, websocket fan-out)
+    try:
+        await redis_client.ping()
+        checks["redis"] = "ok"
+    except Exception as e:
+        checks["redis"] = f"error: {e}"
+
+    # ClickHouse (non-critical: log storage/query degrade, API still serves)
+    checks["clickhouse"] = "ok" if clickhouse_store.client is not None else "unavailable"
+
+    # Kafka producer (non-critical: falls back to direct ClickHouse insert)
+    checks["kafka"] = "ok" if kafka_producer is not None else "unavailable"
+
+    critical_ok = checks["database"] == "ok" and checks["redis"] == "ok"
+    if not critical_ok:
+        response.status_code = 503
+    return {"status": "ready" if critical_ok else "degraded", "checks": checks}
+
+
+@app.get("/internal/metrics")
+def internal_metrics():
+    """Prometheus exposition of SemanticOS's own request rate, errors and latency."""
+    return metrics_response()
 
 
 # ─── TELEMETRY — Live-ish host vitals (Task 16) ──────────────────────────────
@@ -476,31 +601,40 @@ async def ingest_logs(payload: IngestPayload, tenant_id: str = Depends(verify_in
             stream_file.rename(DATA_DIR / rotated_name)
             logger.info(f"Rotated live_stream.log to {rotated_name}")
 
+        # Serialize each entry once and append the whole batch in a single write.
+        serialized = [
+            json.dumps(e) if isinstance(e, dict) else str(e)
+            for e in body
+        ]
         with open(stream_file, "a") as f:
-            for log_entry in body:
-                # Ensure it's a JSON string
-                if isinstance(log_entry, dict):
-                    f.write(json.dumps(log_entry) + "\n")
-                else:
-                    f.write(str(log_entry) + "\n")
+            f.write("".join(f"{line}\n" for line in serialized))
 
-        # Hyperscale ingestion (Phase 24): Push to Redpanda/Kafka instead of ClickHouse directly
+        # Hyperscale ingestion (Phase 24): Push to Redpanda/Kafka instead of ClickHouse directly.
+        # send() enqueues without blocking on the broker ack; awaiting the futures
+        # together lets aiokafka batch them into few round-trips. The previous
+        # send_and_wait per message paid a full round-trip per log — the opposite
+        # of hyperscale.
         if kafka_producer:
+            futures = []
             for log_entry in body:
                 payload_to_send = log_entry if isinstance(log_entry, dict) else {"raw_text": str(log_entry)}
                 payload_to_send["_tenant_id"] = tenant_id
                 msg_bytes = json.dumps(payload_to_send).encode('utf-8')
-                await kafka_producer.send_and_wait("logs_topic", msg_bytes)
+                futures.append(await kafka_producer.send("logs_topic", msg_bytes))
+            if futures:
+                await asyncio.gather(*futures)
         else:
             # Fallback to direct ClickHouse insert if Kafka is unavailable
             if isinstance(body[0], dict):
                 clickhouse_store.insert_logs(body, tenant_id=tenant_id)
 
-        # Task 45: Publish to Redis Pub/Sub for horizontally scaled WebSockets
+        # Task 45: Publish to Redis Pub/Sub for horizontally scaled WebSockets.
+        # Pipelined so the fan-out is one round-trip, not one per log.
         try:
-            for log_entry in body:
-                msg = json.dumps(log_entry) if isinstance(log_entry, dict) else str(log_entry)
-                await redis_client.publish(f"log_stream:{tenant_id}", msg)
+            async with redis_client.pipeline(transaction=False) as pipe:
+                for msg in serialized:
+                    pipe.publish(f"log_stream:{tenant_id}", msg)
+                await pipe.execute()
         except Exception as re:
             logger.warning(f"Failed to publish ingest logs to Redis: {re}")
 
@@ -540,25 +674,25 @@ def query_logs_api(payload: LogQuery, current_user: User = Depends(require_role(
 
 # ─── CONNECTORS — Kubernetes, AWS, and Docker ───────────────────────────────
 
+def _simulated_connectors_allowed() -> bool:
+    """Simulated connector data is a dev/sandbox aid only. In production a
+    connector that can't reach its backend must return a real error, not fake
+    data a buyer could mistake for real infrastructure."""
+    from denoiser.settings import is_testing
+    return is_testing() or os.getenv("ALLOW_SIMULATED_CONNECTORS", "false").lower() in ("1", "true", "yes")
+
+
 @app.get("/connectors/k8s/pods")
 def list_k8s_pods(current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
-    """Discover K8s namespaces and pods. Falls back to mock if K8s is not available."""
+    """Discover K8s namespaces and pods via the real Kubernetes API."""
     try:
-        from kubernetes import client, config
-        config.load_kube_config()
-        v1 = client.CoreV1Api()
-        pods = v1.list_pod_for_all_namespaces(limit=50)
-        result = []
-        for pod in pods.items:
-            result.append({
-                "name": pod.metadata.name,
-                "namespace": pod.metadata.namespace,
-                "status": pod.status.phase,
-                "ip": pod.status.pod_ip,
-            })
-        return {"status": "connected", "pods": result}
-    except Exception:
-        # Fallback to simulated enterprise clusters for demo purposes
+        from denoiser.integrations.k8s import KubernetesReader
+        pods = KubernetesReader().list_pods()
+        return {"status": "connected", "pods": pods[:50]}
+    except Exception as e:
+        if not _simulated_connectors_allowed():
+            raise HTTPException(status_code=502, detail=f"Kubernetes API not reachable: {e}")
+        # Dev/sandbox fallback to simulated clusters.
         return {
             "status": "simulated",
             "message": "Local kubeconfig not detected. Operating in high-fidelity sandbox mode.",
@@ -589,8 +723,10 @@ async def fetch_k8s_logs(namespace: str = Form(...), pod_name: str = Form(...), 
                 f.write(r.raw_text + "\n")
 
         return {"status": "success", "source": filename, "lines": len(records)}
-    except Exception:
-        # Simulated log generation for sandbox demo
+    except Exception as e:
+        if not _simulated_connectors_allowed():
+            raise HTTPException(status_code=502, detail=f"Kubernetes API not reachable: {e}")
+        # Dev/sandbox simulated log generation.
         simulated_logs = [
             f"2026-05-17T17:15:00Z [INFO] [{pod_name}] Starting bootstrap process...",
             f"2026-05-17T17:15:02Z [INFO] [{pod_name}] Loaded active configuration schema version 4.2.1",
@@ -924,8 +1060,20 @@ def get_task_status(task_id: str, current_user: User = Depends(require_role(["VI
 # ─── INCIDENTS — CRUD + drill-down ───────────────────────────────────────────
 
 @app.get("/incidents")
-def get_incidents(db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
-    incidents = db.query(Incident).filter(Incident.tenant_id == current_user.tenant_id).order_by(Incident.created_at.desc()).all()
+def get_incidents(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"])),
+    limit: int = Query(200, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+):
+    incidents = (
+        db.query(Incident)
+        .filter(Incident.tenant_id == current_user.tenant_id)
+        .order_by(Incident.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+        .all()
+    )
     return [_incident_to_dict(inc) for inc in incidents]
 
 
@@ -984,9 +1132,21 @@ def _incident_to_dict(inc: Incident) -> dict:
 
 @app.get("/analysis/runs")
 @app.get("/runs")
-def list_analysis_runs(db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
-    """List recent analysis runs."""
-    runs = db.query(AnalysisRun).filter(AnalysisRun.tenant_id == current_user.tenant_id).order_by(AnalysisRun.created_at.desc()).all()
+def list_analysis_runs(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"])),
+    limit: int = Query(200, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+):
+    """List recent analysis runs (paginated)."""
+    runs = (
+        db.query(AnalysisRun)
+        .filter(AnalysisRun.tenant_id == current_user.tenant_id)
+        .order_by(AnalysisRun.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+        .all()
+    )
     return [_run_to_dict(r, db) for r in runs]
 
 
@@ -1054,7 +1214,7 @@ def delete_run(run_id: str, db: Session = Depends(get_db), current_user: User = 
     return {"status": "deleted", "id": run_id}
 
 
-def _run_to_dict(run: AnalysisRun, db: Session = None) -> dict:
+def _run_to_dict(run: AnalysisRun, db: Session | None = None) -> dict:
     data = {
         "id": run.id,
         "source": run.source,
@@ -1203,14 +1363,21 @@ def trigger_alert(alert: AlertPayload, db: Session = Depends(get_db), current_us
     if alert.priority == "P0":
         from denoiser.automation.engine import process_incident
 
-        # Check if an incident already exists for this run or create one
-        incident = db.query(Incident).filter(Incident.analysis_run_id == alert.run_id).first()
+        # Check if an incident already exists for this run or create one.
+        # Column is `run_id`, not `analysis_run_id` — the old name did not exist
+        # on the model and raised AttributeError before any P0 alert could land.
+        incident = db.query(Incident).filter(
+            Incident.run_id == alert.run_id,
+            Incident.tenant_id == current_user.tenant_id,
+        ).first()
         if not incident:
             incident = Incident(
+                tenant_id=current_user.tenant_id,
                 title=f"[P0] {alert.cluster_summary}",
                 severity="P0",
+                impact_score=1.0,
                 status="OPEN",
-                analysis_run_id=alert.run_id,
+                run_id=alert.run_id,
                 summary=alert.intelligence.get("incident_summary", alert.cluster_summary) if alert.intelligence else alert.cluster_summary,
             )
             db.add(incident)

@@ -33,6 +33,20 @@ from denoiser.storage.vector_store import VectorStore
 
 logger = get_logger(__name__)
 
+# Priority ordering, most severe first. Used to pick an incident's overall
+# severity from its clusters.
+_PRIORITY_RANK = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
+
+
+def _worst_priority(clusters: list[dict]) -> str:
+    """The most severe priority among clusters (P0 worst … P3 least)."""
+    return min(
+        (c.get("priority", "P3") for c in clusters),
+        key=lambda p: _PRIORITY_RANK.get(p, 3),
+        default="P3",
+    )
+
+
 # Initialize Celery using local Redis if URL not provided
 redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 is_testing = "PYTEST_CURRENT_TEST" in os.environ
@@ -318,6 +332,7 @@ def run_analysis_task(self, request_dict: dict):
                 tenant_id=tenant_id,
                 title=llm_payload.get("failure_domain", "Unknown Failure"),
                 domain=llm_payload.get("failure_domain", "System"),
+                severity=_worst_priority(formatted_clusters),
                 impact_score=min(1.0, len(clusters) / 10.0) if len(clusters) > 1 else 0.3,
                 summary=llm_payload.get("incident_summary", ""),
                 remediation_hints=llm_payload.get("root_cause_hints", []),
@@ -330,17 +345,14 @@ def run_analysis_task(self, request_dict: dict):
 
             # Dispatch alerts via AlertRouter
             try:
-                # Find the most severe priority among clusters
-                max_priority = "P3"
+                # Find the most severe priority among clusters. A rank-based min
+                # correctly surfaces P2 as the worst when no P0/P1 is present —
+                # the previous loop only ever promoted to P0/P1, so a top-severity
+                # of P2 stayed P3 and never alerted despite the P2 gate below.
+                max_priority = _worst_priority(formatted_clusters)
                 anomaly_score = 0.0
                 representative_log = "No log available"
                 keyword_flag = False
-
-                for c in formatted_clusters:
-                    if c.get("priority") in ("P0", "P1") and max_priority not in ("P0", "P1"):
-                        max_priority = c.get("priority", "P3")
-                    if max_priority == "P0":
-                        break
 
                 if formatted_clusters:
                     anomaly_score = formatted_clusters[0].get("anomaly_score", 0.0)
@@ -427,34 +439,24 @@ def evaluate_slos():
     logger.info("Evaluating active Service Level Objectives (SLOs)...")
     db = SessionLocal()
     try:
-        import random
-
-        from denoiser.storage.clickhouse_store import ClickHouseStore
+        from denoiser.slo.engine import calculate_slo_status
         from denoiser.storage.db import ServiceLevelObjective, SLODataPoint
 
         slos = db.query(ServiceLevelObjective).all()
-        ch_store = ClickHouseStore()
 
         for slo in slos:
-            # Simplistic Evaluation
-            # Let's query ClickHouse to see the volume of logs for this service
             try:
-                res = ch_store.query_logs(f"service:{slo.service}", limit=1000, tenant_id=slo.tenant_id)
-                total_events = len(res)
+                # Real SLI from ingested logs — no fabricated data. When the
+                # service produced no traffic in the window, total_events is 0
+                # and we record nothing rather than inventing a data point.
+                status = calculate_slo_status(db, slo)
+                total_events = status.get("total_events", 0)
+                good_events = status.get("good_events", 0)
+                value = status.get("current_value", 100.0)
 
-                # Mock good events based on target percentage to keep it looking somewhat realistic
-                target = slo.target_percentage / 100.0
-                if total_events > 0:
-                    # Randomize slightly around the target
-                    actual_ratio = target + random.uniform(-0.02, 0.005)
-                    good_events = int(total_events * actual_ratio)
-                else:
-                    # Synthetic data if no real logs
-                    total_events = random.randint(100, 1000)
-                    actual_ratio = target + random.uniform(-0.02, 0.005)
-                    good_events = int(total_events * actual_ratio)
-
-                value = (good_events / total_events) * 100.0 if total_events > 0 else 100.0
+                if total_events <= 0:
+                    # No real events to measure; skip this SLO this cycle.
+                    continue
 
                 dp = SLODataPoint(
                     slo_id=slo.id,
@@ -492,6 +494,7 @@ def evaluate_slos():
                             tenant_id=slo.tenant_id,
                             title=f"SLO Breach: {slo.name}",
                             domain=slo.service,
+                            severity="P1",
                             impact_score=1.0,
                             summary=f"SLO '{slo.name}' breached for service '{slo.service}'. Target: {slo.target_percentage}%, Actual: {value:.2f}%",
                             remediation_hints=["Check recent deployments", "Scale up service replicas"],
@@ -550,6 +553,7 @@ def evaluate_slos():
                                         tenant_id=slo.tenant_id,
                                         title=f"Predictive Warning: {slo.name} will breach soon",
                                         domain=slo.service,
+                                        severity="P2",
                                         impact_score=0.8,
                                         summary=f"Predictive AI (Holt-Winters) foresees SLO '{slo.name}' for service '{slo.service}' will breach its target of {slo.target_percentage}% in approx {int(minutes_to_depletion)} minutes.",
                                         remediation_hints=["Investigate current trend", "Rollback recent deployment"],
@@ -588,29 +592,33 @@ def extract_metrics():
     logger.info("Extracting metrics from logs...")
     db = SessionLocal()
     try:
-        import random
-
         from denoiser.storage.clickhouse_store import ClickHouseStore
         from denoiser.storage.db import ExtractedMetric, MetricRule
 
         rules = db.query(MetricRule).filter(MetricRule.enabled).all()
         ch_store = ClickHouseStore()
 
+        now = datetime.now(UTC)
         for rule in rules:
             try:
-                # In a real system, you'd aggregate logs over window_seconds.
-                # Here we just run a basic count to simulate extraction
-                res = ch_store.query_logs(rule.query, limit=100)
-                count = len(res)
+                # Aggregate the rule's real matches over its own window_seconds,
+                # in ClickHouse — no synthetic multipliers.
+                window_ms = int((rule.window_seconds or 60) * 1000)
+                to_ms = int(now.timestamp() * 1000)
+                from_ms = to_ms - window_ms
 
-                if rule.aggregation == "count":
-                    value = count
-                else:
-                    value = count * random.uniform(1.0, 5.0) # mock
+                value = ch_store.aggregate_metric(
+                    rule.query,
+                    aggregation=rule.aggregation or "count",
+                    tenant_id=rule.tenant_id,
+                    from_ts=from_ms,
+                    to_ts=to_ms,
+                )
 
                 dp = ExtractedMetric(
                     rule_id=rule.id,
-                    timestamp=datetime.now(UTC),
+                    tenant_id=rule.tenant_id,
+                    timestamp=now,
                     value=value
                 )
                 db.add(dp)

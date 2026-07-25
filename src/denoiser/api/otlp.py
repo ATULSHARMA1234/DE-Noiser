@@ -1,5 +1,4 @@
 import json
-import time
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -14,43 +13,22 @@ router = APIRouter(prefix="/v1", tags=["OTLP"])
 @router.post("/logs")
 async def ingest_otlp_logs(request: Request, tenant_id: str = Depends(verify_ingest_auth)):
     """
-    Accepts OpenTelemetry standard JSON logs payload (resourceLogs) and ingestion.
+    OTLP logs ingestion. Accepts the OTLP/HTTP **protobuf** encoding (the OTel
+    default) as well as JSON, decoding both to the standard log record shape and
+    writing them through the same path as every other source.
     """
+    raw = await request.body()
+    content_type = request.headers.get("content-type", "").lower()
+
+    from denoiser.api.otlp_logs import decode_logs_json, decode_logs_request
+
     try:
-        body = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON payload")
-
-    resource_logs = body.get("resourceLogs", [])
-    extracted_logs = []
-
-    for r_log in resource_logs:
-        resource_attrs = {attr["key"]: attr["value"].get("stringValue", str(attr["value"])) 
-                          for attr in r_log.get("resource", {}).get("attributes", [])}
-        service_name = resource_attrs.get("service.name", "unknown_service")
-
-        for scope_log in r_log.get("scopeLogs", []):
-            for record in scope_log.get("logRecords", []):
-                # OTLP timestamps can be nano-seconds string or milliseconds float
-                time_nano = record.get("timeUnixNano")
-                if time_nano:
-                    ts = float(time_nano) / 1e9
-                else:
-                    ts = time.time()
-
-                body_val = record.get("body", {})
-                message = body_val.get("stringValue") or body_val.get("intValue") or json.dumps(body_val)
-
-                log_entry = {
-                    "timestamp": ts,
-                    "service": service_name,
-                    "level": record.get("severityText", "INFO").upper(),
-                    "message": message,
-                    "source": "otlp",
-                    "attributes": {attr["key"]: attr["value"].get("stringValue", str(attr["value"])) 
-                                   for attr in record.get("attributes", [])}
-                }
-                extracted_logs.append(log_entry)
+        if "protobuf" in content_type or (raw[:1] not in (b"{", b"[") if raw else False):
+            extracted_logs = decode_logs_request(raw)
+        else:
+            extracted_logs = decode_logs_json(json.loads(raw))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid OTLP logs payload: {e}")
 
     if not extracted_logs:
         return {"status": "success", "ingested": 0}

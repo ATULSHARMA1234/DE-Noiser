@@ -112,7 +112,15 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if request.url.path != "/ingest":
             return await call_next(request)
 
-        client_ip = request.client.host if request.client else "unknown"
+        # Prefer the proxy-set X-Forwarded-For client hop. Behind Caddy/nginx
+        # request.client.host is the proxy, so without this every client shares
+        # a single bucket and one abuser rate-limits everyone. (Trusts the first
+        # XFF hop; correct behind exactly one trusted proxy.)
+        xff = request.headers.get("x-forwarded-for", "")
+        if xff:
+            client_ip = xff.split(",")[0].strip()
+        else:
+            client_ip = request.client.host if request.client else "unknown"
         now = time.time()
         cutoff = now - self.window_seconds
 
@@ -148,6 +156,15 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             use_fallback = True
 
         if use_fallback:
+            # Bound memory: drop IPs whose entire window has expired. Without
+            # this, every IP ever seen while Redis was down lingers forever.
+            if len(self._requests) > 10_000:
+                self._requests = {
+                    ip: hits
+                    for ip, ts in self._requests.items()
+                    if (hits := [t for t in ts if t > cutoff])
+                }
+
             # Clean old entries and count recent ones locally
             if client_ip not in self._requests:
                 self._requests[client_ip] = []

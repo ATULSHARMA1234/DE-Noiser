@@ -2,6 +2,8 @@ import asyncio
 import json
 import os
 import time
+from datetime import UTC, datetime
+from pathlib import Path
 
 from aiokafka import AIOKafkaConsumer
 
@@ -11,6 +13,28 @@ from denoiser.storage.db import SessionLocal
 from denoiser.tracing.otlp_collector import process_otlp_traces
 
 logger = get_logger(__name__)
+
+# Dead-letter sink. Messages we cannot parse, and batches we cannot write after
+# repeated retries, are appended here (one JSON record per line) so they are
+# quarantined for inspection instead of being silently dropped or wedging the
+# partition forever.
+DLQ_PATH = Path(os.getenv("SEMANTICOS_DLQ_PATH", "data/dlq/ingestion_dlq.jsonl"))
+
+
+def dead_letter(topic: str, reason: str, payload) -> None:
+    """Append a failed record to the dead-letter queue. Never raises."""
+    try:
+        DLQ_PATH.parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            "dead_lettered_at": datetime.now(UTC).isoformat(),
+            "topic": topic,
+            "reason": reason,
+            "payload": payload if isinstance(payload, (dict, list, str, int, float, bool, type(None))) else str(payload),
+        }
+        with open(DLQ_PATH, "a") as f:
+            f.write(json.dumps(record, default=str) + "\n")
+    except Exception as e:
+        logger.error(f"Failed to write to DLQ ({topic}): {e}")
 
 async def run_ingestion_worker():
     logger.info("Starting Hyperscale Ingestion Worker (Kafka Consumer)...")
@@ -49,6 +73,7 @@ async def run_ingestion_worker():
         BATCH_SIZE = 1000
         LINGER_SECONDS = 2.0
         MAX_BATCH = BATCH_SIZE * 10  # backpressure ceiling while retrying
+        MAX_FLUSH_RETRIES = 10       # after this, dead-letter the batch so the partition can advance
 
         # topic -> {"batch": [...], "offsets": {TopicPartition: last_offset}, "last": monotonic, "fails": int}
         state = {
@@ -70,9 +95,11 @@ async def run_ingestion_worker():
                         tenant_id = payload.pop("_tenant_id", "default_tenant")
                         st["batch"].append((payload, tenant_id))
                     except Exception as e:
-                        # A malformed message must not stall the partition; skip it
-                        # but still acknowledge it so we don't spin on it forever.
-                        logger.error(f"Skipping unparseable message from {tp.topic}: {e}")
+                        # A malformed message must not stall the partition; quarantine
+                        # it in the DLQ and acknowledge it so we don't spin forever.
+                        logger.error(f"Dead-lettering unparseable message from {tp.topic}: {e}")
+                        raw = msg.value.decode("utf-8", errors="replace") if msg.value else None
+                        dead_letter(tp.topic, f"unparseable: {e}", raw)
                     # Track the highest offset we've taken responsibility for.
                     st["offsets"][tp] = max(st["offsets"].get(tp, -1), msg.offset)
 
@@ -90,6 +117,25 @@ async def run_ingestion_worker():
                         await consumer.commit(
                             {tp: off + 1 for tp, off in st["offsets"].items()}
                         )
+                    st["batch"] = []
+                    st["offsets"] = {}
+                    st["fails"] = 0
+                elif st["fails"] + 1 >= MAX_FLUSH_RETRIES:
+                    # Exhausted retries: quarantine the batch to the DLQ and commit
+                    # its offsets so the partition can advance instead of wedging
+                    # indefinitely on a batch ClickHouse will never accept.
+                    logger.error(
+                        f"{topic}: flush failed {MAX_FLUSH_RETRIES}x — dead-lettering "
+                        f"{len(st['batch'])} records and advancing"
+                    )
+                    for payload, t_id in st["batch"]:
+                        dead_letter(topic, f"flush failed {MAX_FLUSH_RETRIES}x", {"tenant_id": t_id, "record": payload})
+                    if st["offsets"]:
+                        await consumer.commit({tp: off + 1 for tp, off in st["offsets"].items()})
+                    # Resume anything we paused for this topic; its backlog is cleared.
+                    paused = [tp for tp in consumer.paused() if tp.topic == topic]
+                    if paused:
+                        consumer.resume(*paused)
                     st["batch"] = []
                     st["offsets"] = {}
                     st["fails"] = 0

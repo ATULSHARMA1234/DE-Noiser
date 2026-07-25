@@ -1,18 +1,44 @@
-replicaCount: 1
-
+# ── Images ───────────────────────────────────────────────────────────────────
 image:
   apiRepository: ghcr.io/atulsharma1234/de-noiser/semanticos-api
   webRepository: ghcr.io/atulsharma1234/de-noiser/semanticos-web
+  # Pin to an immutable tag or digest in production, not "latest".
   tag: "latest"
   pullPolicy: IfNotPresent
+imagePullSecrets: []
 
+nameOverride: ""
+fullnameOverride: ""
+
+# ── Component replicas ───────────────────────────────────────────────────────
+# NOTE: the API writes some local state (settings.json, live_stream.log) to its
+# data volume, so running >1 API replica needs a ReadWriteMany volume. Scale the
+# stateless workers freely.
+api:
+  replicaCount: 1
+worker:
+  replicaCount: 1
+ingestion:
+  replicaCount: 1
+web:
+  replicaCount: 1
+
+# ── Syslog connector ─────────────────────────────────────────────────────────
+syslog:
+  enabled: true
+  replicaCount: 1
+  serviceType: LoadBalancer   # ClusterIP if you front it with an external LB
+  port: 514
+  containerPort: 5514         # unprivileged; the Service maps 514 -> 5514
+
+# ── Service / ingress ────────────────────────────────────────────────────────
 service:
   type: ClusterIP
   apiPort: 8000
   webPort: 3000
 
 ingress:
-  enabled: true
+  enabled: false
   className: "nginx"
   hosts:
     - host: semanticos.local
@@ -20,21 +46,100 @@ ingress:
         - path: /
           pathType: Prefix
           backend: web
-        - path: /api/
-          pathType: Prefix
-          backend: api
   tls: []
 
+# ── Datastores (external / managed recommended in production) ────────────────
 postgres:
-  host: "postgres-db"
+  host: "postgres"
   user: "postgres"
   db: "semanticos"
-  # Never commit a real password here. Provide it at install time via
-  #   helm install ... --set postgres.password=$PGPASS
-  # or, preferably, set existingSecret to the name of a Secret (with key
-  # `database-url`) managed by your secrets store (Vault / Sealed Secrets / ESO).
-  password: ""
-  existingSecret: ""
+  password: ""          # provide via --set or use secrets.existingSecret
+  url: ""               # full DSN overrides host/user/db/password if set
 
 redis:
   url: "redis://redis-master:6379/0"
+
+clickhouse:
+  host: "clickhouse"
+  port: 8123
+  user: "default"
+  password: ""
+
+kafka:
+  broker: "redpanda:9092"
+
+# ── Secrets ──────────────────────────────────────────────────────────────────
+# In production, set secrets.existingSecret to a Secret managed by your secrets
+# store (Vault / Sealed Secrets / External Secrets Operator). When empty, the
+# chart creates a Secret from the values below (fine for dev, not for prod).
+secrets:
+  existingSecret: ""
+  jwtSecretKey: ""        # REQUIRED (>=32 chars). helm install will fail without it.
+  adminPassword: ""
+  ingestApiKey: ""
+  scimBearerToken: ""
+
+# ── App configuration ────────────────────────────────────────────────────────
+config:
+  environment: "production"       # enables the strict startup safety checks
+  autoMigrate: "0"                # migrations run via the pre-install/upgrade Job
+  schedulerEnabled: "1"
+  corsAllowedOrigins: "https://semanticos.local"
+
+# ── ServiceAccount + RBAC (for the in-cluster Kubernetes log connector) ──────
+serviceAccount:
+  create: true
+  name: ""
+rbac:
+  # Grants get/list/watch on pods and pods/log so the K8s connector can read
+  # logs. Namespaced by default; set clusterWide to watch all namespaces.
+  create: true
+  clusterWide: false
+
+# ── Persistence (API data volume) ────────────────────────────────────────────
+persistence:
+  enabled: true
+  accessMode: ReadWriteOnce
+  size: 10Gi
+  storageClass: ""
+
+# ── Migration Job ────────────────────────────────────────────────────────────
+migrations:
+  enabled: true
+
+# ── Pod hardening (applied to all app pods) ──────────────────────────────────
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  runAsGroup: 1001
+  fsGroup: 1001
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false   # app writes to /app/data (mounted)
+  capabilities:
+    drop: ["ALL"]
+
+# ── Resource requests/limits ─────────────────────────────────────────────────
+resources:
+  api:
+    requests: { cpu: "250m", memory: "512Mi" }
+    limits:   { cpu: "1",    memory: "1Gi" }
+  worker:
+    # The analysis worker loads an embedding model + clusters in memory.
+    requests: { cpu: "500m", memory: "1Gi" }
+    limits:   { cpu: "2",    memory: "3Gi" }
+  ingestion:
+    requests: { cpu: "100m", memory: "256Mi" }
+    limits:   { cpu: "500m", memory: "512Mi" }
+  syslog:
+    requests: { cpu: "50m",  memory: "128Mi" }
+    limits:   { cpu: "250m", memory: "256Mi" }
+  web:
+    requests: { cpu: "100m", memory: "256Mi" }
+    limits:   { cpu: "500m", memory: "512Mi" }
+
+# ── Probes (API uses the real readiness/liveness endpoints) ──────────────────
+probes:
+  enabled: true

@@ -50,8 +50,8 @@ class TestFreshDatabase:
 
         tables = set(inspect(fresh_engine).get_table_names())
         assert "alembic_version" in tables
-        # 20 model tables + alembic_version
-        assert len(tables) == 21
+        # 22 model tables + alembic_version
+        assert len(tables) == 23
 
     def test_includes_columns_that_predate_the_migrations(self, fresh_engine):
         """These only ever existed via ad-hoc ALTERs; the baseline must carry them."""

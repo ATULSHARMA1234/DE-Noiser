@@ -1,0 +1,61 @@
+{{- if .Values.serviceAccount.create }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "semanticos.serviceAccountName" . }}
+  labels:
+    {{- include "semanticos.labels" . | nindent 4 }}
+{{- end }}
+{{- if .Values.rbac.create }}
+---
+{{- $rules := list (dict "apiGroups" (list "") "resources" (list "pods" "pods/log") "verbs" (list "get" "list" "watch")) }}
+{{- if .Values.rbac.clusterWide }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "semanticos.fullname" . }}-log-reader
+  labels:
+    {{- include "semanticos.labels" . | nindent 4 }}
+rules:
+  {{- toYaml $rules | nindent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "semanticos.fullname" . }}-log-reader
+  labels:
+    {{- include "semanticos.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "semanticos.fullname" . }}-log-reader
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "semanticos.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- else }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "semanticos.fullname" . }}-log-reader
+  labels:
+    {{- include "semanticos.labels" . | nindent 4 }}
+rules:
+  {{- toYaml $rules | nindent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "semanticos.fullname" . }}-log-reader
+  labels:
+    {{- include "semanticos.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "semanticos.fullname" . }}-log-reader
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "semanticos.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- end }}

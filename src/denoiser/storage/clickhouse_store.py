@@ -268,17 +268,25 @@ class ClickHouseStore:
         if not self.client:
             return
         try:
+            # tenant_id is bound as a parameter (never string-interpolated) so a
+            # crafted tenant id cannot break out of the WHERE clause. days is a
+            # numeric interval, which ClickHouse won't accept as a bound value,
+            # so it is hard-cast to int instead.
+            days = int(days_to_keep)
+            params = {"tenant_id": str(tenant_id)}
             # Delete old logs
-            self.client.command(f"""
-                ALTER TABLE semantic_logs
-                DELETE WHERE tenant_id = '{tenant_id}' AND timestamp < now() - INTERVAL {days_to_keep} DAY
-            """)
+            self.client.command(
+                "ALTER TABLE semantic_logs DELETE WHERE tenant_id = {tenant_id:String} "
+                f"AND timestamp < now() - INTERVAL {days} DAY",
+                parameters=params,
+            )
             # Delete old traces
-            self.client.command(f"""
-                ALTER TABLE semantic_traces
-                DELETE WHERE tenant_id = '{tenant_id}' AND start_time < now() - INTERVAL {days_to_keep} DAY
-            """)
-            logger.info(f"Cleaned up data older than {days_to_keep} days for tenant {tenant_id}")
+            self.client.command(
+                "ALTER TABLE semantic_traces DELETE WHERE tenant_id = {tenant_id:String} "
+                f"AND start_time < now() - INTERVAL {days} DAY",
+                parameters=params,
+            )
+            logger.info(f"Cleaned up data older than {days} days for tenant {tenant_id}")
         except Exception as e:
             logger.error(f"Failed to cleanup old data for tenant {tenant_id}: {e}")
 
@@ -377,6 +385,60 @@ class ClickHouseStore:
         except Exception as e:
             logger.error(f"Failed to query ClickHouse: {e}")
             return []
+
+    def aggregate_metric(
+        self,
+        query_string: str = "",
+        aggregation: str = "count",
+        tenant_id: str = "",
+        from_ts: int | None = None,
+        to_ts: int | None = None,
+    ) -> float:
+        """Compute a real metric value over the ingested logs for a MetricRule.
+
+        ``count`` is the well-defined default. For sum/avg/max/min there is no
+        rule-level target field, so we aggregate a numeric value pulled from the
+        common latency/value keys, falling back to a count when none is present.
+        The LQL where-clause and all bounds are parameterized.
+        """
+        if not self.client:
+            return 0.0
+
+        from denoiser.query.parser import compile_to_sql, parse_query
+
+        ast = parse_query(query_string)
+        params: dict[str, Any] = {}
+        sql_where = compile_to_sql(ast, params)
+
+        if tenant_id:
+            sql_where = f"tenant_id = {{tenant_id:String}} AND ({sql_where})"
+            params["tenant_id"] = str(tenant_id)
+        if from_ts is not None:
+            sql_where += " AND timestamp >= toDateTime64({from_ts:Float64}, 3, 'UTC')"
+            params["from_ts"] = from_ts / 1000.0
+        if to_ts is not None:
+            sql_where += " AND timestamp <= toDateTime64({to_ts:Float64}, 3, 'UTC')"
+            params["to_ts"] = to_ts / 1000.0
+
+        agg = (aggregation or "count").lower()
+        if agg in ("sum", "avg", "max", "min"):
+            numeric = (
+                "coalesce("
+                "nullIf(JSONExtractFloat(raw_json, 'duration_ms'), 0),"
+                "nullIf(JSONExtractFloat(raw_json, 'latency'), 0),"
+                "nullIf(JSONExtractFloat(raw_json, 'value'), 0), 0)"
+            )
+            sql = f"SELECT {agg}({numeric}) FROM semantic_logs WHERE {sql_where}"
+        else:
+            sql = f"SELECT count() FROM semantic_logs WHERE {sql_where}"
+
+        try:
+            result = self.client.query(sql, parameters=params)
+            value = result.result_rows[0][0] if result.result_rows else 0
+            return float(value or 0)
+        except Exception as e:
+            logger.error(f"Failed to aggregate metric: {e}")
+            return 0.0
 
     def get_facets(self, tenant_id: str = "", from_ts: int | None = None, to_ts: int | None = None):
         """Get facet counts for log explorer sidebar"""

@@ -51,23 +51,76 @@ def _is_safe_redirect(uri: str) -> bool:
     return origin in _allowed_redirect_origins()
 
 
+def _provision_sso_user(db: Session, fields: dict, default_environments: list[str] | None = None) -> User:
+    """Just-in-time provision/update an SSO user from mapped IdP claims.
+
+    Matches on the IdP subject (``external_id``) first, then email, so a user
+    whose email changes at the IdP is still recognised. Role and team membership
+    are refreshed on every login, so IdP group changes take effect immediately.
+    """
+    from denoiser.api.auth import get_password_hash
+
+    default_tenant = db.query(Tenant).order_by(Tenant.id).first()
+    tenant_id = default_tenant.id if default_tenant else None
+
+    user = None
+    if fields.get("external_id"):
+        user = db.query(User).filter(User.external_id == fields["external_id"]).first()
+    if user is None:
+        user = db.query(User).filter(User.email == fields["email"]).first()
+
+    if user is None:
+        import uuid
+        user = User(
+            email=fields["email"],
+            hashed_password=get_password_hash(str(uuid.uuid4())),  # SSO users have no local password
+            role=fields.get("role", "VIEWER"),
+            tenant_id=tenant_id,
+            is_active=True,
+            department=fields.get("department", "Engineering"),
+            environment_access=default_environments or ["dev"],
+            external_id=fields.get("external_id"),
+            teams=fields.get("teams", []),
+        )
+        db.add(user)
+    else:
+        # Refresh federated attributes on each login.
+        user.role = fields.get("role", user.role)
+        user.teams = fields.get("teams", user.teams)
+        if fields.get("external_id"):
+            user.external_id = fields["external_id"]
+        user.is_active = True
+
+    db.commit()
+    db.refresh(user)
+    return user
+
+
 @router.get("/login")
 def sso_login(provider: str = "okta", redirect_uri: str | None = None):
     """
-    Initiate SSO redirection. In production, this redirects to the configured
-    Okta/SAML IdP. For local development/sandbox, we redirect to our mock callback.
+    Initiate SSO redirection. When OIDC is configured, build the real provider
+    authorization URL; otherwise fall back to the mock IdP (dev/sandbox only).
     """
-    if not _mock_sso_enabled():
-        # Production path: a real OIDC/SAML authorization URL must be built and the
-        # returned assertion cryptographically verified before any token is issued.
-        raise HTTPException(
-            status_code=501,
-            detail="SSO is not configured. Set up an OIDC/SAML IdP (mock SSO is disabled).",
-        )
+    from denoiser.api.oidc import OIDCError, build_authorization_url
+    from denoiser.settings import get_settings
 
     target_uri = redirect_uri or "/auth/sso/callback"
     if not _is_safe_redirect(target_uri):
         raise HTTPException(status_code=400, detail="Invalid redirect_uri")
+
+    if get_settings().oidc_enabled:
+        try:
+            return RedirectResponse(url=build_authorization_url(target_uri))
+        except OIDCError as e:
+            raise HTTPException(status_code=502, detail=f"OIDC provider error: {e}")
+
+    if not _mock_sso_enabled():
+        raise HTTPException(
+            status_code=501,
+            detail="SSO is not configured. Set OIDC_ISSUER/OIDC_CLIENT_ID/OIDC_CLIENT_SECRET (mock SSO is disabled).",
+        )
+
     mock_idp_url = f"{target_uri}?code=mock_okta_code_abc123&provider={provider}"
     return RedirectResponse(url=mock_idp_url)
 
@@ -76,66 +129,61 @@ def sso_login(provider: str = "okta", redirect_uri: str | None = None):
 def sso_callback(
     code: str = Query(..., description="SSO authorization code or SAML assertion token"),
     provider: str = "okta",
+    state: str | None = Query(None, description="OIDC CSRF state"),
     db: Session = Depends(get_db)
 ):
     """
-    Assertion Consumer Service (ACS) / OAuth Callback.
-    Verifies the SSO assertion, resolves the user attributes (email, department, roles),
-    provisions the user if not exists, and issues a standard platform JWT.
+    OAuth/OIDC callback. Exchanges the code, cryptographically validates the ID
+    token, maps its claims to a role + teams, provisions/updates the user, and
+    issues a platform JWT. Falls back to the mock IdP only when OIDC is unset.
     """
+    from denoiser.settings import get_settings
+
+    if get_settings().oidc_enabled:
+        from denoiser.api.oidc import OIDCError, exchange_code, map_claims, validate_id_token
+
+        try:
+            # Validate CSRF state when present (the mock flow doesn't send one).
+            if state:
+                from denoiser.api.oidc import verify_state
+                verify_state(state)
+            tokens = exchange_code(code, redirect_uri="/auth/sso/callback")
+            id_token = tokens.get("id_token")
+            if not id_token:
+                raise OIDCError("Provider response had no id_token")
+            claims = validate_id_token(id_token)
+            fields = map_claims(claims)
+        except OIDCError as e:
+            raise HTTPException(status_code=401, detail=f"SSO authentication failed: {e}")
+
+        user = _provision_sso_user(db, fields)
+        if not user.is_active:
+            raise HTTPException(status_code=401, detail="User account is deactivated")
+        return {"access_token": create_access_token(data={"sub": user.email}), "token_type": "bearer", "user": user}
+
+    # ── Mock IdP fallback (dev/sandbox only) ─────────────────────────────
     if not _mock_sso_enabled():
-        # No real IdP integration is wired up yet. Refuse rather than mint a token
-        # off an unverified assertion — issuing one here is a full auth bypass.
         raise HTTPException(
             status_code=501,
-            detail="SSO is not configured. A real OIDC/SAML assertion verifier must be wired up.",
+            detail="SSO is not configured. Set OIDC_ISSUER/OIDC_CLIENT_ID/OIDC_CLIENT_SECRET.",
         )
-
     if "mock_okta_code" not in code:
         raise HTTPException(status_code=400, detail="Invalid or expired SSO token")
 
-    # In production, we exchange 'code' for Okta ID token or decode the SAML assertion XML.
-    # We simulate resolving user attributes from Okta/SAML:
-    sso_email = "okta-operator@semanticos.io"
-    sso_department = "Operations"
-    sso_environments = ["prod", "staging", "dev"]
-    sso_role = "ANALYST"
-
-    # Auto-provision user if not exists
-    default_tenant = db.query(Tenant).filter(Tenant.name == "Default Workspace").first()
-    tenant_id = default_tenant.id if default_tenant else None
-
-    user = db.query(User).filter(User.email == sso_email).first()
-    if not user:
-        # Create user
-        # SSO users don't use local password, we set a strong random one
-        import uuid
-
-        from denoiser.api.auth import get_password_hash
-        dummy_pwd = get_password_hash(str(uuid.uuid4()))
-        user = User(
-            email=sso_email,
-            hashed_password=dummy_pwd,
-            role=sso_role,
-            tenant_id=tenant_id,
-            is_active=True,
-            department=sso_department,
-            environment_access=sso_environments
-        )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-
+    user = _provision_sso_user(
+        db,
+        {
+            "external_id": "mock-okta|okta-operator",
+            "email": "okta-operator@semanticos.io",
+            "role": "ANALYST",
+            "department": "Operations",
+            "teams": ["operations"],
+        },
+        default_environments=["prod", "staging", "dev"],
+    )
     if not user.is_active:
         raise HTTPException(status_code=401, detail="User account is deactivated")
-
-    # Issue JWT
-    access_token = create_access_token(data={"sub": user.email})
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "user": user
-    }
+    return {"access_token": create_access_token(data={"sub": user.email}), "token_type": "bearer", "user": user}
 
 
 @router.post("/saml/acs", response_model=TokenResponse)

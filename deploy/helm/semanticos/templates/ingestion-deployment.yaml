@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "semanticos.fullname" . }}-ingestion
+  labels:
+    {{- include "semanticos.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ingestion
+spec:
+  replicas: {{ .Values.ingestion.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "semanticos.name" . }}-ingestion
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "semanticos.name" . }}-ingestion
+        app.kubernetes.io/component: ingestion
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: ingestion
+          image: "{{ .Values.image.apiRepository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          command: ["python", "-m", "denoiser.workers.ingestion_worker"]
+          env:
+            {{- include "semanticos.env" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources.ingestion | nindent 12 }}

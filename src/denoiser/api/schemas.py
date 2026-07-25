@@ -149,6 +149,7 @@ class UserResponse(BaseModel):
     is_active: bool = True
     department: str = "Engineering"
     environment_access: list[str] = Field(default_factory=list)
+    teams: list[str] = Field(default_factory=list)
 
     class Config:
         from_attributes = True

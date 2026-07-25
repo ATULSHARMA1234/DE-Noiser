@@ -8,13 +8,16 @@ SemanticOS is a privacy-first, hyperscale, on-premise log analysis and observabi
 Modern enterprise observability tools (like Datadog, Splunk, or New Relic) are expensive and require you to send sensitive PII and infrastructure data to third-party clouds. SemanticOS provides the same advanced AIOps features for free, running entirely on your own hardware.
 
 ### Key Features
-- **Semantic Clustering:** Automatically groups millions of similar log lines into unique pattern templates using an agglomerative HDBSCAN pipeline.
-- **Predictive AI & SLOs:** Defines error budgets and uses forecasting models to predict when an SLO will breach.
-- **Distributed Tracing (eBPF):** High-performance kernel-level tracing without instrumenting application code.
-- **Hyperscale Ingestion:** Powered by Redpanda and ClickHouse to ingest and store millions of events per second with multi-tenant data tiering.
-- **Local LLM Incident Narratives:** Generates human-readable root cause analyses using local models (e.g. Llama 3 via Ollama).
-- **Log Query Language:** A custom query DSL to search structured and unstructured logs efficiently.
-- **Automated Runbooks:** Triggers automated workflows and multi-channel alerts (Slack, PagerDuty) on anomalies.
+- **Semantic Clustering:** Automatically groups similar log lines into unique pattern templates using a hybrid Agglomerative/HDBSCAN pipeline over local sentence embeddings.
+- **Causal Root-Cause Analysis:** Correlates clustered events across services within a sliding time window to surface directed, cross-service causal links.
+- **Predictive AI & SLOs:** Computes availability/latency SLIs from real ingested logs, tracks error budgets, and uses Holt-Winters forecasting to predict when an SLO will breach.
+- **Distributed Tracing (OTLP):** Ingests and stores OpenTelemetry spans in ClickHouse. A separate optional **eBPF agent** captures kernel-level process-execution telemetry on Linux (via bcc/libbpf) — this is host telemetry, not span-level distributed tracing.
+- **Streaming Ingestion:** A Redpanda/Kafka → worker → ClickHouse pipeline with at-least-once delivery and multi-tenant retention tiering. (Throughput depends on your hardware and broker sizing; no specific rate is guaranteed out of the box.)
+- **Local LLM Incident Narratives:** Generates human-readable root-cause summaries using a local, OpenAI-compatible model (e.g. Llama 3 via Ollama). Falls back to a heuristic summary when no model is configured.
+- **Log Query Language:** A custom query DSL compiled to parameterized ClickHouse SQL.
+- **Automated Runbooks:** Triggers automated workflows and multi-channel alerts (Slack, PagerDuty, Teams, generic webhooks) on anomalies.
+
+> **Sandbox mode.** Several integrations degrade gracefully when their backend isn't present: the Kubernetes, AWS CloudWatch, and Docker log connectors return clearly-labeled `"simulated"` sample data when no cluster/credentials/socket are detected, and the built-in **mock SSO IdP** is disabled in production (real OIDC/SAML must be configured). These paths are marked as such in every API response.
 
 ## Architecture
 
@@ -34,8 +37,8 @@ graph TD
 
 ### Prerequisites
 - Docker & Docker Compose
-- Node.js v18+
-- Python 3.11+
+- Node.js v20+ (required by Next.js 16 / React 19)
+- Python 3.12+
 - `uv` package manager
 
 ### 1. Start Infrastructure
@@ -62,8 +65,12 @@ The Command Center will be available at [http://localhost:3000/app](http://local
 
 ## Documentation
 - [Contributing Guidelines](CONTRIBUTING.md)
-- [API Reference](docs/api.md) *(coming soon)*
-- [Architecture Details](docs/architecture.md) *(coming soon)*
+- [API Reference](docs/api.md)
+- [Architecture Details](docs/architecture.md)
+- [Operations Runbook (deploy, backup/restore, checklist)](docs/operations.md)
+- [Helm chart](deploy/helm/semanticos)
+- [Changelog](CHANGELOG.md)
+- Load testing: `python scripts/loadtest.py --help`
 
 ## License
 SemanticOS is licensed under the [MIT License](LICENSE).

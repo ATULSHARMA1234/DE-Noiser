@@ -2,6 +2,7 @@ import os
 
 # Secret key and algorithm for JWT
 import sys
+import uuid
 from datetime import UTC, datetime, timedelta
 
 import bcrypt
@@ -43,9 +44,33 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
     to_encode = data.copy()
     expire = datetime.now(UTC) + expires_delta if expires_delta else datetime.now(UTC) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
 
-    to_encode.update({"exp": expire})
+    # Every token carries a unique jti so it can be individually revoked.
+    to_encode.update({"exp": expire, "jti": uuid.uuid4().hex})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
+
+
+def revoke_token(token: str, db: Session) -> bool:
+    """Invalidate a token by recording its jti until it would expire.
+
+    Returns True if the token was valid and is now revoked (or already was).
+    """
+    from denoiser.storage.db import RevokedToken
+
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    except JWTError:
+        return False
+
+    jti = payload.get("jti")
+    exp = payload.get("exp")
+    if not jti or not exp:
+        return False
+
+    if not db.query(RevokedToken).filter(RevokedToken.jti == jti).first():
+        db.add(RevokedToken(jti=jti, expires_at=datetime.fromtimestamp(exp, UTC)))
+        db.commit()
+    return True
 
 
 def get_current_user(
@@ -71,6 +96,13 @@ def get_current_user(
             raise credentials_exception
     except JWTError:
         raise credentials_exception
+
+    # Reject tokens that have been explicitly revoked (logout / forced sign-out).
+    jti = payload.get("jti")
+    if jti:
+        from denoiser.storage.db import RevokedToken
+        if db.query(RevokedToken).filter(RevokedToken.jti == jti).first():
+            raise credentials_exception
 
     user = db.query(User).filter(User.email == email).first()
     if user is None:

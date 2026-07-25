@@ -46,6 +46,9 @@ class Incident(Base):
     status = Column(String, default="OPEN")
     title = Column(String)
     domain = Column(String)
+    # Priority label (P0..P3). Runbook matching and the automation engine read
+    # this; every writer must set it. Nullable so create_all-era rows adopt.
+    severity = Column(String, nullable=True)
     impact_score = Column(Float)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     resolved_at = Column(DateTime, nullable=True)
@@ -63,6 +66,32 @@ class Incident(Base):
     # Predictive AI
     is_predictive = Column(Boolean, default=False)
     forecasted_depletion_time = Column(DateTime, nullable=True)
+
+
+class Team(Base):
+    """A team / group within a tenant, provisioned via SCIM Groups or created
+    locally. Team membership is mirrored onto ``User.teams`` for fast checks."""
+    __tablename__ = "teams"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, index=True, nullable=True)
+    name = Column(String, nullable=False)
+    # SCIM group id / IdP group id, so the provisioner can match on update.
+    external_id = Column(String, nullable=True, index=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+class RevokedToken(Base):
+    """A JWT that has been explicitly invalidated (logout / forced sign-out).
+
+    Keyed by the token's ``jti`` claim. Rows are pruned once ``expires_at`` has
+    passed — a revoked token is only interesting until it would expire anyway.
+    """
+    __tablename__ = "revoked_tokens"
+
+    jti = Column(String, primary_key=True, index=True)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    revoked_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 
 class AnalysisRun(Base):
@@ -91,6 +120,11 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     department = Column(String, default="Engineering", nullable=False)
     environment_access = Column(JSON, default=list)
+    # Identity federation: the stable subject/id from the IdP (OIDC `sub` or SCIM
+    # user id). Lets SSO/SCIM match an existing user even if their email changes.
+    external_id = Column(String, nullable=True, index=True)
+    # Team names the user belongs to (populated from SCIM Groups / IdP claims).
+    teams = Column(JSON, default=list)
 
 
 class AuditLog(Base):

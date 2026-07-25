@@ -76,6 +76,27 @@ class InfraSettings(BaseSettings):
     )
     sso_allow_mock: bool = Field(default=False, validation_alias="SSO_ALLOW_MOCK")
 
+    # ── Enterprise identity: OIDC SSO ────────────────────────────────────
+    # When issuer + client id/secret are set, the real OIDC Authorization Code
+    # flow is used instead of the mock IdP.
+    oidc_issuer: str | None = Field(default=None, validation_alias="OIDC_ISSUER")
+    oidc_client_id: str | None = Field(default=None, validation_alias="OIDC_CLIENT_ID")
+    oidc_client_secret: str | None = Field(default=None, validation_alias="OIDC_CLIENT_SECRET")
+    oidc_redirect_uri: str | None = Field(default=None, validation_alias="OIDC_REDIRECT_URI")
+    oidc_scopes: str = Field(default="openid email profile groups", validation_alias="OIDC_SCOPES")
+    # Group (from the IdP `groups` claim / SCIM) that grants the ADMIN role.
+    oidc_admin_group: str = Field(default="semanticos-admins", validation_alias="OIDC_ADMIN_GROUP")
+    oidc_analyst_group: str = Field(default="semanticos-analysts", validation_alias="OIDC_ANALYST_GROUP")
+
+    # ── Enterprise identity: SCIM 2.0 provisioning ───────────────────────
+    # Bearer token the IdP presents to the SCIM endpoints for automated
+    # user/group provisioning and de-provisioning.
+    scim_bearer_token: str | None = Field(default=None, validation_alias="SCIM_BEARER_TOKEN")
+
+    @property
+    def oidc_enabled(self) -> bool:
+        return bool(self.oidc_issuer and self.oidc_client_id and self.oidc_client_secret)
+
     # ── Behaviour switches ───────────────────────────────────────────────
     auto_migrate: bool = Field(default=True, validation_alias="SEMANTICOS_AUTO_MIGRATE")
     scheduler_enabled: bool = Field(default=True, validation_alias="SEMANTICOS_SCHEDULER_ENABLED")

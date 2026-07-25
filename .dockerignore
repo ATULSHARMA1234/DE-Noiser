@@ -1,0 +1,38 @@
+# Keep the build context small and free of secrets/state.
+.git
+.github
+.venv
+venv
+**/__pycache__
+**/*.py[cod]
+.pytest_cache
+.ruff_cache
+.mypy_cache
+
+# Node / frontend build artifacts (the web image builds from ./web separately)
+web/node_modules
+web/.next
+web/playwright-report
+web/test-results
+web/tsconfig.tsbuildinfo
+
+# Local state, data, and databases — never bake these into an image
+data/
+*.db
+*.sqlite
+*.log
+
+# Secrets and local env
+.env
+.env.*
+!.env.example
+
+# Tests and docs are not needed in the runtime image
+tests
+docs
+assets
+*.ipynb
+
+# OS cruft
+.DS_Store
+Thumbs.db

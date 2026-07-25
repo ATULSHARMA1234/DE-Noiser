@@ -8,9 +8,18 @@ from denoiser.storage.db import ServiceLevelObjective
 
 logger = get_logger(__name__)
 
+# Levels that count against an availability SLO.
+_BAD_LEVELS = "('error', 'fatal', 'critical')"
+
+
 def calculate_slo_status(db: Session, slo: ServiceLevelObjective):
     """
     Calculate the current SLO status by querying real event data from ClickHouse.
+
+    All queries are parameterized: ``slo.service`` is operator-supplied and this
+    function now runs on a schedule, so it must not be string-interpolated into
+    SQL. Timestamps use the same ``toDateTime64({p:Float64}, 3, 'UTC')`` binding
+    the log query path already uses.
     """
     end_time = datetime.utcnow()
     start_time = end_time - timedelta(days=slo.window_days)
@@ -21,42 +30,34 @@ def calculate_slo_status(db: Session, slo: ServiceLevelObjective):
     total_events = 0
     good_events = 0
 
+    # Bound query: source + time window, bound as parameters.
+    params = {"service": slo.service, "start": start_time.timestamp()}
+    window = "source = {service:String} AND timestamp >= toDateTime64({start:Float64}, 3, 'UTC')"
+
     if client:
         try:
-            # Format datetime for ClickHouse
-            start_str = start_time.strftime('%Y-%m-%d %H:%M:%S')
-
-            # Count total events
-            total_query = f"""
-                SELECT count() FROM semantic_logs
-                WHERE source = '{slo.service}'
-                AND timestamp >= '{start_str}'
-            """
-            total_result = client.query(total_query)
+            total_result = client.query(
+                f"SELECT count() FROM semantic_logs WHERE {window}",
+                parameters=params,
+            )
             total_events = total_result.result_rows[0][0] if total_result.result_rows else 0
 
             if total_events > 0:
                 if slo.sli_type == 'availability':
-                    good_query = f"""
-                        SELECT count() FROM semantic_logs
-                        WHERE source = '{slo.service}'
-                        AND timestamp >= '{start_str}'
-                        AND lower(level) NOT IN ('error', 'fatal', 'critical')
-                    """
-                    good_result = client.query(good_query)
+                    good_result = client.query(
+                        f"SELECT count() FROM semantic_logs WHERE {window} AND lower(level) NOT IN {_BAD_LEVELS}",
+                        parameters=params,
+                    )
                     good_events = good_result.result_rows[0][0] if good_result.result_rows else 0
                 elif slo.sli_type == 'latency':
-                    good_query = f"""
-                        SELECT count() FROM semantic_logs
-                        WHERE source = '{slo.service}'
-                        AND timestamp >= '{start_str}'
-                        AND (
+                    good_result = client.query(
+                        f"""SELECT count() FROM semantic_logs WHERE {window} AND (
                             JSONExtractFloat(raw_json, 'duration_ms') < 500
                             OR JSONExtractFloat(raw_json, 'latency') < 500
                             OR JSONHas(raw_json, 'duration_ms') = 0
-                        )
-                    """
-                    good_result = client.query(good_query)
+                        )""",
+                        parameters=params,
+                    )
                     good_events = good_result.result_rows[0][0] if good_result.result_rows else 0
                 else:
                     good_events = total_events
@@ -105,7 +106,7 @@ def calculate_slo_status(db: Session, slo: ServiceLevelObjective):
                                 OR JSONHas(raw_json, 'duration_ms') = 0
                             ) as good
                         FROM semantic_logs
-                        WHERE source = '{slo.service}' AND timestamp >= '{start_str}'
+                        WHERE {window}
                         GROUP BY day
                         ORDER BY day ASC
                     """
@@ -114,14 +115,14 @@ def calculate_slo_status(db: Session, slo: ServiceLevelObjective):
                         SELECT
                             toStartOfDay(timestamp) as day,
                             count() as total,
-                            countIf(lower(level) NOT IN ('error', 'fatal', 'critical')) as good
+                            countIf(lower(level) NOT IN {_BAD_LEVELS}) as good
                         FROM semantic_logs
-                        WHERE source = '{slo.service}' AND timestamp >= '{start_str}'
+                        WHERE {window}
                         GROUP BY day
                         ORDER BY day ASC
                     """
 
-                ts_result = client.query(interval_sql)
+                ts_result = client.query(interval_sql, parameters=params)
                 for row in ts_result.result_rows:
                     day, day_total, day_good = row[0], row[1], row[2]
                     day_val = (day_good / day_total * 100) if day_total > 0 else 100.0
@@ -135,6 +136,10 @@ def calculate_slo_status(db: Session, slo: ServiceLevelObjective):
     return {
         "slo_id": slo.id,
         "current_value": current_value,
+        # Raw event counts so schedulers can persist a real SLI data point rather
+        # than re-deriving them from the budget.
+        "total_events": total_events,
+        "good_events": good_events,
         "error_budget_total": error_budget_total,
         "error_budget_remaining": error_budget_remaining,
         "burn_rate": burn_rate,

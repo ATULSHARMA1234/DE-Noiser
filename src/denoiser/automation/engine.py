@@ -183,7 +183,7 @@ def process_incident(db: Session, incident: Incident):
             exec_logs = list(execution.logs)
             try:
                 for step in rb.steps:
-                    execute_runbook_step(step, exec_logs)
+                    execute_runbook_step(step, incident, exec_logs)
 
                 execution.status = "SUCCESS"
             except Exception as e:
