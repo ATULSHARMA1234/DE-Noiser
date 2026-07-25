@@ -41,6 +41,7 @@ from denoiser.api.auth import get_current_user, issue_token_pair, oauth2_scheme,
 from denoiser.api.middleware import (
     CorrelationIDMiddleware,
     RateLimitMiddleware,
+    TenantQuotaMiddleware,
     register_exception_handlers,
 )
 from denoiser.api.scheduler import start_scheduler, stop_scheduler
@@ -96,6 +97,10 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "X-API-Key", "Bypass-Tunnel-Reminder"],
 )
 app.add_middleware(RateLimitMiddleware, max_requests=100, window_seconds=60)
+# Per-tenant ceiling across every route. The /ingest IP limiter above does not
+# bound a workspace (many pods, many IPs, one tenant), so without this a single
+# tenant can still saturate the platform for everyone else.
+app.add_middleware(TenantQuotaMiddleware)
 app.add_middleware(CorrelationIDMiddleware)
 
 from denoiser.api.alerts import router as alerts_router
