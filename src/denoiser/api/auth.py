@@ -6,7 +6,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import bcrypt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
@@ -21,7 +21,11 @@ if not SECRET_KEY:
     else:
         raise ValueError("JWT_SECRET_KEY environment variable is mandatory in non-test mode.")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 1440  # 24 hours
+# Short-lived access tokens limit the blast radius of a leaked token; a
+# longer-lived, single-use refresh token (rotated on every use) keeps sessions
+# alive without a 24h bearer floating around. Both are env-tunable.
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+REFRESH_TOKEN_EXPIRE_MINUTES = int(os.getenv("REFRESH_TOKEN_EXPIRE_MINUTES", str(60 * 24 * 7)))  # 7 days
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
 
@@ -40,14 +44,71 @@ def get_password_hash(password: str) -> str:
 
 
 def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
-    """Generate a JWT access token containing claims and an expiration timestamp."""
+    """Generate a short-lived JWT access token with an expiration timestamp."""
     to_encode = data.copy()
-    expire = datetime.now(UTC) + expires_delta if expires_delta else datetime.now(UTC) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    expire = datetime.now(UTC) + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
 
-    # Every token carries a unique jti so it can be individually revoked.
-    to_encode.update({"exp": expire, "jti": uuid.uuid4().hex})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
+    # Every token carries a unique jti so it can be individually revoked, and a
+    # type so a refresh token can never be presented as an access token.
+    to_encode.update({"exp": expire, "jti": uuid.uuid4().hex, "type": "access"})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def create_refresh_token(data: dict, expires_delta: timedelta | None = None) -> str:
+    """Generate a longer-lived, single-use refresh token (rotated on each use)."""
+    to_encode = data.copy()
+    expire = datetime.now(UTC) + (expires_delta or timedelta(minutes=REFRESH_TOKEN_EXPIRE_MINUTES))
+    to_encode.update({"exp": expire, "jti": uuid.uuid4().hex, "type": "refresh"})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def issue_token_pair(sub: str) -> dict:
+    """The standard login/refresh payload: a fresh access + refresh token."""
+    return {
+        "access_token": create_access_token(data={"sub": sub}),
+        "refresh_token": create_refresh_token(data={"sub": sub}),
+        "token_type": "bearer",
+    }
+
+
+def rotate_refresh_token(refresh_token: str, db: Session) -> tuple[dict, User]:
+    """Validate a refresh token, revoke it (single-use), and mint a new pair.
+
+    Returns ``(token_pair, user)``. Raises HTTPException(401) on any
+    invalid/expired/revoked/reused token or a deactivated user. Rotation means a
+    stolen refresh token is usable at most once before the legitimate client's
+    next refresh invalidates it.
+    """
+    from denoiser.storage.db import RevokedToken
+
+    invalid = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid or expired refresh token",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(refresh_token, SECRET_KEY, algorithms=[ALGORITHM])
+    except JWTError:
+        raise invalid
+
+    if payload.get("type") != "refresh":
+        raise invalid
+    jti, sub, exp = payload.get("jti"), payload.get("sub"), payload.get("exp")
+    if not jti or not sub or not exp:
+        raise invalid
+
+    # Single-use: a refresh token already spent (or explicitly revoked) is dead.
+    if db.query(RevokedToken).filter(RevokedToken.jti == jti).first():
+        raise invalid
+
+    user = db.query(User).filter(User.email == sub).first()
+    if user is None or not getattr(user, "is_active", True):
+        raise invalid
+
+    # Revoke the presented refresh token before issuing the next one.
+    db.add(RevokedToken(jti=jti, expires_at=datetime.fromtimestamp(exp, UTC)))
+    db.commit()
+    return issue_token_pair(sub), user
 
 
 def revoke_token(token: str, db: Session) -> bool:
@@ -74,6 +135,7 @@ def revoke_token(token: str, db: Session) -> bool:
 
 
 def get_current_user(
+    request: Request = None,  # type: ignore[assignment]
     token: str | None = Depends(oauth2_scheme),
     db: Session = Depends(get_db)
 ) -> User:
@@ -94,6 +156,9 @@ def get_current_user(
         email: str = payload.get("sub")
         if email is None:
             raise credentials_exception
+        # A refresh token must never be accepted as an API access credential.
+        if payload.get("type") == "refresh":
+            raise credentials_exception
     except JWTError:
         raise credentials_exception
 
@@ -113,6 +178,11 @@ def get_current_user(
             detail="User account is deactivated",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    # Stamp the resolved identity onto the request so the audit middleware can
+    # attribute the action without re-decoding the JWT or re-querying the user.
+    if request is not None:
+        request.state.audit_user_id = user.id
+        request.state.audit_user_email = user.email
     return user
 
 

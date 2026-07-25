@@ -15,65 +15,41 @@ router = APIRouter(prefix="/audit", tags=["Audit"])
 
 class AuditMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        # Process the request
         response: Response = await call_next(request)
 
-        # Only log mutating actions
-        if request.method in ["POST", "PUT", "DELETE"]:
-            # We don't have easy access to `current_user` in Starlette middleware
-            # without parsing the JWT again. We'll try to extract the JWT token directly.
-            user_id = None
-            try:
-                auth_header = request.headers.get("Authorization")
-                if auth_header and auth_header.startswith("Bearer "):
-                    token = auth_header.split(" ")[1]
-                    from jose import jwt
+        # Only mutating actions are audited.
+        if request.method not in ("POST", "PUT", "DELETE"):
+            return response
 
-                    from denoiser.api.auth import ALGORITHM, SECRET_KEY
+        # Identity is resolved once by the get_current_user dependency, which
+        # stamps request.state during handling — no JWT re-decode, no extra user
+        # lookup, and it honours revocation/deactivation (a rejected request
+        # never sets state and falls back to the system-audit actor).
+        user_id = getattr(request.state, "audit_user_id", None)
+        ip_address = request.client.host if request.client else None
 
-                    payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-                    email = payload.get("sub")
-                    if email:
-                        db = SessionLocal()
-                        try:
-                            user = db.query(User).filter(User.email == email).first()
-                            if user:
-                                # Attribute the action to the actual authenticated
-                                # actor — required for non-repudiation / SOC2.
-                                user_id = user.id
-                        finally:
-                            db.close()
-            except Exception:
-                pass  # If decoding fails, user_id remains None (system-audit fallback)
-
+        db = SessionLocal()
+        try:
             if user_id is None:
-                try:
-                    db = SessionLocal()
-                    sys_user = db.query(User).filter(User.email == "system-audit@semanticos.io").first()
-                    if sys_user:
-                        user_id = sys_user.id
-                    db.close()
-                except Exception:
-                    pass
+                sys_user = db.query(User).filter(
+                    User.email == "system-audit@semanticos.io"
+                ).first()
+                user_id = sys_user.id if sys_user else None
 
-            ip_address = request.client.host if request.client else None
-
-            try:
-                db = SessionLocal()
-                audit_log = AuditLog(
-                    user_id=user_id,
-                    action=request.method,
-                    resource_type=request.url.path,
-                    resource_id=None,
-                    details={"status_code": response.status_code},
-                    ip_address=ip_address,
-                    timestamp=datetime.now(UTC)
-                )
-                db.add(audit_log)
-                db.commit()
-                db.close()
-            except Exception as e:
-                logger.error(f"Failed to write audit log: {e}")
+            db.add(AuditLog(
+                user_id=user_id,
+                action=request.method,
+                resource_type=request.url.path,
+                resource_id=None,
+                details={"status_code": response.status_code},
+                ip_address=ip_address,
+                timestamp=datetime.now(UTC),
+            ))
+            db.commit()
+        except Exception as e:
+            logger.error(f"Failed to write audit log: {e}")
+        finally:
+            db.close()
 
         return response
 

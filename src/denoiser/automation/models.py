@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class RunbookCreateSchema(BaseModel):
@@ -18,8 +18,7 @@ class RunbookSchema(BaseModel):
     enabled: bool
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class RunbookExecutionSchema(BaseModel):
     id: int
@@ -29,5 +28,4 @@ class RunbookExecutionSchema(BaseModel):
     logs: list[str]
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

@@ -1,7 +1,7 @@
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
 from denoiser.api.auth import User, require_role
@@ -31,8 +31,7 @@ class RunbookResponseSchema(BaseModel):
     steps: list[dict[str, Any]]
     enabled: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class RunbookExecutionResponseSchema(BaseModel):
     id: int
@@ -42,8 +41,7 @@ class RunbookExecutionResponseSchema(BaseModel):
     logs: list[str]
     created_at: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 @router.get("", response_model=list[RunbookResponseSchema])

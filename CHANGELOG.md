@@ -29,6 +29,18 @@ based on [Keep a Changelog](https://keepachangelog.com/).
 - Raised test coverage on enterprise-critical edges (audit M4): SCIM
   de-provisioning actually cutting token access, plus syslog TLS handshake and
   TCP framing edge cases.
+- **Short-lived access tokens + rotating refresh tokens** (audit L1). Access
+  tokens now default to 30 min (`ACCESS_TOKEN_EXPIRE_MINUTES`) instead of 24 h;
+  login and SSO return a `refresh_token`, and `POST /auth/refresh` exchanges it
+  for a new pair. Refresh tokens are single-use (revoked on rotation, so a
+  stolen token works at most once) and are rejected as API access credentials.
+- **Audit middleware no longer re-decodes the JWT** (audit L2). The authenticated
+  identity is stamped on `request.state` by the auth dependency and read by the
+  middleware, removing a per-request token decode and user lookup; a rejected
+  request correctly falls back to the system-audit actor.
+- **Migrated all Pydantic models from class-based `Config` to `ConfigDict`** and
+  dropped the deprecated `Field(env=...)` kwarg (audit L3) — eliminates every
+  Pydantic-v2 deprecation warning (27 → 0) ahead of the v3 removal.
 
 ## [0.1.0] - 2026-07-25
 

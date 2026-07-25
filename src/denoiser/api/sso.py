@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
-from denoiser.api.auth import create_access_token
+from denoiser.api.auth import issue_token_pair
 from denoiser.api.schemas import TokenResponse
 from denoiser.storage.db import Tenant, User, get_db
 
@@ -159,7 +159,7 @@ def sso_callback(
         user = _provision_sso_user(db, fields)
         if not user.is_active:
             raise HTTPException(status_code=401, detail="User account is deactivated")
-        return {"access_token": create_access_token(data={"sub": user.email}), "token_type": "bearer", "user": user}
+        return {**issue_token_pair(user.email), "user": user}
 
     # ── Mock IdP fallback (dev/sandbox only) ─────────────────────────────
     if not _mock_sso_enabled():
@@ -183,7 +183,7 @@ def sso_callback(
     )
     if not user.is_active:
         raise HTTPException(status_code=401, detail="User account is deactivated")
-    return {"access_token": create_access_token(data={"sub": user.email}), "token_type": "bearer", "user": user}
+    return {**issue_token_pair(user.email), "user": user}
 
 
 @router.post("/saml/acs", response_model=TokenResponse)

@@ -37,7 +37,7 @@ from sqlalchemy.orm import Session
 
 from denoiser.analysis.drift import ClusterSnapshot, DriftDetector
 from denoiser.api.abac import require_abac
-from denoiser.api.auth import create_access_token, get_current_user, oauth2_scheme, require_role, revoke_token, verify_ingest_auth, verify_password
+from denoiser.api.auth import get_current_user, issue_token_pair, oauth2_scheme, require_role, revoke_token, rotate_refresh_token, verify_ingest_auth, verify_password
 from denoiser.api.middleware import (
     CorrelationIDMiddleware,
     RateLimitMiddleware,
@@ -47,6 +47,7 @@ from denoiser.api.scheduler import start_scheduler, stop_scheduler
 from denoiser.api.schemas import (
     AnalysisRequest,
     IngestPayload,
+    RefreshRequest,
     ResolveRequest,
     SettingsUpdate,
     TokenResponse,
@@ -309,12 +310,18 @@ async def login(payload: UserLogin, request: Request, db: Session = Depends(get_
     if not getattr(user, "is_active", True):
         raise HTTPException(status_code=401, detail="User account is deactivated")
 
-    access_token = create_access_token(data={"sub": user.email})
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "user": user
-    }
+    return {**issue_token_pair(user.email), "user": user}
+
+
+@app.post("/auth/refresh", response_model=TokenResponse)
+def refresh(payload: RefreshRequest, db: Session = Depends(get_db)):
+    """Exchange a valid refresh token for a new access+refresh pair (rotation).
+
+    The presented refresh token is single-use: it is revoked as part of this
+    call, so a stolen token works at most once.
+    """
+    tokens, user = rotate_refresh_token(payload.refresh_token, db)
+    return {**tokens, "user": user}
 
 
 @app.get("/auth/me", response_model=UserResponse)
