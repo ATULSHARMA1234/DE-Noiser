@@ -9,6 +9,7 @@ from denoiser.api.auth import User, require_role
 from denoiser.dashboards.models import DashboardCreateSchema, DashboardSchema, DashboardUpdateSchema
 from denoiser.storage.db import AnalysisRun, Incident, ServiceLevelObjective, get_db
 from denoiser.storage.db import Dashboard as DBDashboard
+from denoiser.utils.time import utcnow
 
 router = APIRouter(prefix="/dashboards", tags=["dashboards"])
 
@@ -139,7 +140,7 @@ def get_widget_data(
             # Clamp before building the timedelta: a huge magnitude (999999999d)
             # otherwise overflows datetime and 500s on user-controllable input.
             seconds = min(int(raw[:-1]) * _UNITS[raw[-1].lower()], _MAX_WINDOW)
-            since = datetime.datetime.utcnow() - datetime.timedelta(seconds=seconds)
+            since = utcnow() - datetime.timedelta(seconds=seconds)
         else:
             with contextlib.suppress(ValueError, OverflowError):
                 since = datetime.datetime.fromisoformat(raw.replace("Z", "+00:00")).replace(tzinfo=None)
@@ -191,7 +192,7 @@ def get_widget_data(
         # Incidents opened per day. Honour the dashboard time picker when it sent
         # one (`since`); otherwise default to the last 14 days. Day count is
         # clamped so a 15m window still renders a sane single-bucket series.
-        now = datetime.datetime.utcnow()
+        now = utcnow()
         start = since if since is not None else now - datetime.timedelta(days=14)
         days = max(1, min(90, (now.date() - start.date()).days + 1))
         buckets = {(now.date() - datetime.timedelta(days=days - 1 - i)).isoformat(): 0 for i in range(days)}
@@ -236,7 +237,7 @@ def get_widget_data(
         except (TypeError, ValueError):
             raise HTTPException(status_code=400, detail="heatmap 'days' must be an integer")
         days = max(1, min(days, 90))
-        cutoff = since if since is not None else datetime.datetime.utcnow() - datetime.timedelta(days=days)
+        cutoff = since if since is not None else utcnow() - datetime.timedelta(days=days)
         rows = (
             db.query(
                 func.extract("dow", Incident.created_at).label("dow"),

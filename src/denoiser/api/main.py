@@ -1092,8 +1092,8 @@ def resolve_incident(incident_id: int, body: ResolveRequest, db: Session = Depen
         raise HTTPException(status_code=404, detail="Incident not found")
     inc.status = "RESOLVED" if body.resolved else "OPEN"
     if body.resolved:
-        import datetime
-        inc.resolved_at = datetime.datetime.utcnow()
+        from denoiser.utils.time import utcnow
+        inc.resolved_at = utcnow()
     else:
         inc.resolved_at = None
     db.commit()

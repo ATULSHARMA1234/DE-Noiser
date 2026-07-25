@@ -93,7 +93,9 @@ async def cleanup_database_records():
     logger.info("Running Database Retention Scheduler Job...")
     retention_days = int(get_retention_days())
     import datetime
-    cutoff_time = datetime.datetime.utcnow() - datetime.timedelta(days=retention_days)
+
+    from denoiser.utils.time import utcnow
+    cutoff_time = utcnow() - datetime.timedelta(days=retention_days)
 
     try:
         from denoiser.storage.db import AnalysisRun, AuditLog, SessionLocal

@@ -1,5 +1,4 @@
 import os
-from datetime import datetime
 
 from sqlalchemy import (
     Column,
@@ -13,6 +12,8 @@ from sqlalchemy import (
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, sessionmaker
 
+from denoiser.utils.time import utcnow
+
 # Using SQLite for local persistence (easy to upgrade to PostgreSQL/ClickHouse later)
 DB_PATH = os.path.expanduser("~/Desktop/semantic-log-denoiser/data/semantic_os.db")
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
@@ -22,7 +23,7 @@ Base = declarative_base()
 class AnalysisRecord(Base):
     __tablename__ = 'analyses'
     id = Column(Integer, primary_key=True)
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime, default=utcnow)
     source = Column(String)
     total_logs = Column(Integer)
     incident_summary = Column(Text)

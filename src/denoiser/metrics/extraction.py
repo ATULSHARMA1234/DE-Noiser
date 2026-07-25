@@ -1,10 +1,9 @@
-from datetime import datetime
-
 from sqlalchemy.orm import Session
 
 from denoiser.logging import get_logger
 from denoiser.query.parser import evaluate_in_memory, parse_query
 from denoiser.storage.db import ExtractedMetric, MetricRule
+from denoiser.utils.time import utcnow
 
 logger = get_logger(__name__)
 
@@ -19,7 +18,7 @@ def extract_metrics_from_logs(db: Session, logs: list):
 
     # In a real system, you'd batch these up over a window_seconds period.
     # For simplicity, we just aggregate over the current batch of logs and save a data point.
-    now = datetime.utcnow()
+    now = utcnow()
 
     for rule in rules:
         try:

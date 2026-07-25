@@ -1,10 +1,11 @@
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from sqlalchemy.orm import Session
 
 from denoiser.logging import get_logger
 from denoiser.storage.clickhouse_store import ClickHouseStore
 from denoiser.storage.db import ServiceLevelObjective
+from denoiser.utils.time import utcnow
 
 logger = get_logger(__name__)
 
@@ -21,7 +22,7 @@ def calculate_slo_status(db: Session, slo: ServiceLevelObjective):
     SQL. Timestamps use the same ``toDateTime64({p:Float64}, 3, 'UTC')`` binding
     the log query path already uses.
     """
-    end_time = datetime.utcnow()
+    end_time = utcnow()
     start_time = end_time - timedelta(days=slo.window_days)
 
     ch_store = ClickHouseStore()

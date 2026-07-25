@@ -7,13 +7,14 @@ The DATABASE_URL is read from environment variables / .env file.
 
 from __future__ import annotations
 
-import datetime
 import os
 
 from sqlalchemy import JSON, Boolean, Column, DateTime, Float, Integer, String, create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
+
+from denoiser.utils.time import utcnow
 
 # ── Task 5: Dual-database support ───────────────────────────────────────────
 # Default to SQLite for zero-config local development.
@@ -50,7 +51,7 @@ class Incident(Base):
     # this; every writer must set it. Nullable so create_all-era rows adopt.
     severity = Column(String, nullable=True)
     impact_score = Column(Float)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
     resolved_at = Column(DateTime, nullable=True)
 
     # Intelligence
@@ -78,7 +79,7 @@ class Team(Base):
     name = Column(String, nullable=False)
     # SCIM group id / IdP group id, so the provisioner can match on update.
     external_id = Column(String, nullable=True, index=True)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
 
 class RevokedToken(Base):
@@ -91,7 +92,7 @@ class RevokedToken(Base):
 
     jti = Column(String, primary_key=True, index=True)
     expires_at = Column(DateTime, nullable=False, index=True)
-    revoked_at = Column(DateTime, default=datetime.datetime.utcnow)
+    revoked_at = Column(DateTime, default=utcnow)
 
 
 class AnalysisRun(Base):
@@ -105,7 +106,7 @@ class AnalysisRun(Base):
     cluster_count = Column(Integer)
     reduction_ratio = Column(Float)
     duration_sec = Column(Float)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
     clusters_snapshot = Column(JSON, nullable=True)
 
 
@@ -137,7 +138,7 @@ class AuditLog(Base):
     resource_id = Column(String, nullable=True)
     details = Column(JSON, nullable=True)
     ip_address = Column(String, nullable=True)
-    timestamp = Column(DateTime, default=datetime.datetime.utcnow, index=True)
+    timestamp = Column(DateTime, default=utcnow, index=True)
 
 class AlertLog(Base):
     __tablename__ = "alert_logs"
@@ -150,7 +151,7 @@ class AlertLog(Base):
     http_status = Column(Integer, nullable=True)
     latency_ms = Column(Float, nullable=True)
     error = Column(String, nullable=True)
-    timestamp = Column(String, default=lambda: datetime.datetime.utcnow().isoformat(), index=True)
+    timestamp = Column(String, default=lambda: utcnow().isoformat(), index=True)
 
 # ── Wave 2 Models ────────────────────────────────────────────────────────────
 
@@ -178,8 +179,8 @@ class SavedQuery(Base):
     name = Column(String, nullable=False)
     query_text = Column(String, nullable=False)
     user_id = Column(Integer, nullable=True)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    last_used = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
+    last_used = Column(DateTime, default=utcnow)
 
 class ServiceLevelObjective(Base):
     __tablename__ = "slos"
@@ -191,14 +192,14 @@ class ServiceLevelObjective(Base):
     sli_type = Column(String, nullable=False)  # availability, latency
     target_percentage = Column(Float, nullable=False)
     window_days = Column(Integer, default=30)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
 class SLODataPoint(Base):
     __tablename__ = "slo_data_points"
 
     id = Column(Integer, primary_key=True, index=True)
     slo_id = Column(Integer, index=True, nullable=False)
-    timestamp = Column(DateTime, default=datetime.datetime.utcnow, index=True)
+    timestamp = Column(DateTime, default=utcnow, index=True)
     good_events = Column(Integer, default=0)
     total_events = Column(Integer, default=0)
     value = Column(Float, nullable=False)
@@ -217,7 +218,7 @@ class Dashboard(Base):
     is_shared = Column(Boolean, default=False)
     default_time_range = Column(String, default="1h")
     template_variables = Column(JSON, default=list)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
 class MetricRule(Base):
     __tablename__ = "metric_rules"
@@ -229,7 +230,7 @@ class MetricRule(Base):
     aggregation = Column(String, default="count")  # count, sum, avg, max, min
     window_seconds = Column(Integer, default=60)
     enabled = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
 class ExtractedMetric(Base):
     __tablename__ = "extracted_metrics"
@@ -237,7 +238,7 @@ class ExtractedMetric(Base):
     id = Column(Integer, primary_key=True, index=True)
     tenant_id = Column(Integer, index=True, nullable=True)
     rule_id = Column(Integer, index=True, nullable=False)
-    timestamp = Column(DateTime, default=datetime.datetime.utcnow, index=True)
+    timestamp = Column(DateTime, default=utcnow, index=True)
     value = Column(Float, nullable=False)
 
 class Runbook(Base):
@@ -249,7 +250,7 @@ class Runbook(Base):
     trigger_condition = Column(JSON, default=dict)
     steps = Column(JSON, default=list)
     enabled = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
 class RunbookExecution(Base):
     __tablename__ = "runbook_executions"
@@ -259,7 +260,7 @@ class RunbookExecution(Base):
     incident_id = Column(Integer, index=True, nullable=False)
     status = Column(String, default="PENDING")  # PENDING, SUCCESS, FAILED
     logs = Column(JSON, default=list)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
 class Monitor(Base):
     __tablename__ = "monitors"
@@ -275,7 +276,7 @@ class Monitor(Base):
     threshold_warning = Column(Float, nullable=True)
     enabled = Column(Boolean, default=True)
     muted_until = Column(DateTime, nullable=True)  # snooze: suppress alerts until this time
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
 
 class Notebook(Base):
@@ -285,8 +286,8 @@ class Notebook(Base):
     tenant_id = Column(Integer, index=True, nullable=True)
     title = Column(String, nullable=False, default="Untitled Notebook")
     cells = Column(JSON, default=list)  # [{type, content, result?}]
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
 
 # ── Wave 4 Models ────────────────────────────────────────────────────────────
@@ -298,7 +299,7 @@ class Tenant(Base):
     name = Column(String, nullable=False, unique=True)
     api_key = Column(String, nullable=True, unique=True)
     tier = Column(String, default="free")  # free, pro, enterprise
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
 class BillingMeter(Base):
     __tablename__ = "billing_meters"
@@ -309,7 +310,7 @@ class BillingMeter(Base):
     total_logs_ingested = Column(Integer, default=0)
     total_bytes_ingested = Column(Integer, default=0)
     total_traces_ingested = Column(Integer, default=0)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
 class Integration(Base):
     __tablename__ = "integrations"
@@ -320,7 +321,7 @@ class Integration(Base):
     name = Column(String, nullable=False)
     config = Column(JSON, default=dict)
     enabled = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
 class DeploymentMarker(Base):
     __tablename__ = "deployment_markers"
@@ -331,7 +332,7 @@ class DeploymentMarker(Base):
     version = Column(String, nullable=False)
     environment = Column(String, nullable=False)
     description = Column(String, nullable=True)
-    timestamp = Column(DateTime, default=datetime.datetime.utcnow, index=True)
+    timestamp = Column(DateTime, default=utcnow, index=True)
 
 
 # ── Session helpers ──────────────────────────────────────────────────────────

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from denoiser.api.auth import User, require_role
 from denoiser.storage.db import Monitor, get_db
+from denoiser.utils.time import utcnow
 
 router = APIRouter(prefix="/monitors", tags=["monitors"])
 
@@ -36,7 +37,7 @@ def list_monitors(db: Session = Depends(get_db), current_user: User = Depends(re
     if current_user.tenant_id:
         query = query.filter(Monitor.tenant_id == current_user.tenant_id)
     monitors = query.all()
-    now = datetime.datetime.utcnow()
+    now = utcnow()
     return [
         {
             "id": m.id,
@@ -140,7 +141,7 @@ def mute_monitor(
     if payload.duration_minutes <= 0:
         m.muted_until = None
     else:
-        m.muted_until = datetime.datetime.utcnow() + datetime.timedelta(minutes=payload.duration_minutes)
+        m.muted_until = utcnow() + datetime.timedelta(minutes=payload.duration_minutes)
 
     db.commit()
     return {

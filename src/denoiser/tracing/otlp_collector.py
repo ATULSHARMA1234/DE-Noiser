@@ -1,7 +1,8 @@
 import json
-from datetime import datetime
 
 from sqlalchemy.orm import Session
+
+from denoiser.utils.time import utcfromtimestamp, utcnow
 
 
 def process_otlp_traces(db: Session, payload: dict, tenant_id: str = "default_tenant"):
@@ -35,8 +36,8 @@ def process_otlp_traces(db: Session, payload: dict, tenant_id: str = "default_te
                 start_time_unix_nano = int(span.get("startTimeUnixNano", 0))
                 end_time_unix_nano = int(span.get("endTimeUnixNano", 0))
 
-                start_time = datetime.utcfromtimestamp(start_time_unix_nano / 1e9) if start_time_unix_nano else datetime.utcnow()
-                end_time = datetime.utcfromtimestamp(end_time_unix_nano / 1e9) if end_time_unix_nano else datetime.utcnow()
+                start_time = utcfromtimestamp(start_time_unix_nano / 1e9) if start_time_unix_nano else utcnow()
+                end_time = utcfromtimestamp(end_time_unix_nano / 1e9) if end_time_unix_nano else utcnow()
 
                 duration_ms = max(0, (end_time - start_time).total_seconds() * 1000.0)
 
@@ -63,7 +64,7 @@ def process_otlp_traces(db: Session, payload: dict, tenant_id: str = "default_te
                 events = []
                 for ev in span.get("events", []):
                     ev_time_nano = int(ev.get("timeUnixNano", 0))
-                    ev_time = datetime.utcfromtimestamp(ev_time_nano / 1e9).isoformat() if ev_time_nano else datetime.utcnow().isoformat()
+                    ev_time = utcfromtimestamp(ev_time_nano / 1e9).isoformat() if ev_time_nano else utcnow().isoformat()
 
                     ev_attrs = {}
                     for attr in ev.get("attributes", []):

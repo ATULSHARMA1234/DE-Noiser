@@ -5,6 +5,8 @@ based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-07-25
+
 ### Added
 - **Packaging & operability**:
   - **Hardened Docker image** — runs as a non-root user (uid 1001), adds a
@@ -91,3 +93,6 @@ based on [Keep a Changelog](https://keepachangelog.com/).
 - Rate limiter keyed all proxied traffic to one bucket; now reads `X-Forwarded-For`.
 - SQL injection surface in `cleanup_old_data` and the SLO engine — parameterized.
 - Removed stray debug scripts from the repository root.
+- Replaced deprecated `datetime.utcnow()`/`utcfromtimestamp()` (removed in a
+  future Python) with a naive-UTC helper (`denoiser.utils.time`), preserving the
+  exact previous timestamp semantics.

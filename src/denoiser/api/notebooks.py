@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from denoiser.api.auth import User, require_role
 from denoiser.storage.db import Notebook as DBNotebook
 from denoiser.storage.db import get_db
+from denoiser.utils.time import utcnow
 
 router = APIRouter(prefix="/notebooks", tags=["notebooks"])
 
@@ -97,7 +98,7 @@ def update_notebook(
         nb.title = payload.title
     if payload.cells is not None:
         nb.cells = payload.cells
-    nb.updated_at = datetime.datetime.utcnow()
+    nb.updated_at = utcnow()
 
     db.commit()
     db.refresh(nb)

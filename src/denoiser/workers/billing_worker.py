@@ -1,4 +1,3 @@
-import datetime
 import os
 
 from celery import Celery
@@ -6,6 +5,7 @@ from celery import Celery
 from denoiser.logging import get_logger
 from denoiser.storage.clickhouse_store import ClickHouseStore
 from denoiser.storage.db import BillingMeter, SessionLocal, Tenant
+from denoiser.utils.time import utcnow
 
 logger = get_logger(__name__)
 
@@ -21,7 +21,7 @@ def aggregate_daily_billing():
     ch_store = ClickHouseStore()
     try:
         tenants = db.query(Tenant).all()
-        today = datetime.datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        today = utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
 
         for tenant in tenants:
             try:

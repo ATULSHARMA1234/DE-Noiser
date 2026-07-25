@@ -8,6 +8,7 @@ from denoiser.api.auth import User, require_role
 from denoiser.slo.engine import calculate_slo_status
 from denoiser.slo.models import SLOCreateSchema, SLOSchema, SLOStatusSchema
 from denoiser.storage.db import AlertLog, ServiceLevelObjective, get_db
+from denoiser.utils.time import utcnow
 
 router = APIRouter(prefix="/slos", tags=["slo"])
 
@@ -52,7 +53,7 @@ def get_slo_status(slo_id: int, db: Session = Depends(get_db), current_user: Use
     if status.status == "BREACHED":
         fingerprint = f"slo_breach_{slo.id}"
         # Only create if no recent alert for this SLO (within 1 hour)
-        one_hour_ago = (datetime.datetime.utcnow() - datetime.timedelta(hours=1)).isoformat()
+        one_hour_ago = (utcnow() - datetime.timedelta(hours=1)).isoformat()
         existing = db.query(AlertLog).filter(
             AlertLog.alert_fingerprint == fingerprint,
             AlertLog.timestamp > one_hour_ago
