@@ -1,13 +1,16 @@
 import os
 import sys
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Response
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from denoiser.api.auth import issue_token_pair
 from denoiser.api.schemas import TokenResponse
+from denoiser.logging import get_logger
 from denoiser.storage.db import Tenant, User, get_db
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/auth/sso", tags=["SSO"])
 
@@ -186,20 +189,77 @@ def sso_callback(
     return {**issue_token_pair(user.email), "user": user}
 
 
+@router.get("/saml/login")
+def saml_login(relay_state: str | None = None):
+    """Start an SP-initiated SAML login by redirecting to the IdP."""
+    from denoiser.api.saml import SAMLError, build_authn_request, saml_enabled
+
+    if not saml_enabled():
+        raise HTTPException(
+            status_code=501,
+            detail=(
+                "SAML SSO is not configured. Set SAML_IDP_ENTITY_ID, SAML_IDP_SSO_URL, "
+                "SAML_IDP_X509_CERT, SAML_SP_ENTITY_ID and SAML_SP_ACS_URL."
+            ),
+        )
+    if relay_state and not _is_safe_redirect(relay_state):
+        raise HTTPException(status_code=400, detail="Invalid relay_state")
+    try:
+        url, _request_id = build_authn_request(relay_state)
+    except SAMLError as e:
+        raise HTTPException(status_code=500, detail=f"Cannot build SAML request: {e}")
+    return RedirectResponse(url=url)
+
+
+@router.get("/saml/metadata")
+def saml_metadata():
+    """SP metadata XML for the IdP administrator to register this service."""
+    from denoiser.api.saml import SAMLError, build_sp_metadata
+
+    try:
+        return Response(content=build_sp_metadata(), media_type="application/samlmetadata+xml")
+    except SAMLError as e:
+        raise HTTPException(status_code=501, detail=str(e))
+
+
 @router.post("/saml/acs", response_model=TokenResponse)
-def saml_acs(db: Session = Depends(get_db)):
+def saml_acs(
+    SAMLResponse: str | None = Form(default=None),
+    RelayState: str | None = Form(default=None),
+    db: Session = Depends(get_db),
+):
     """SAML Assertion Consumer Service.
 
-    Real SAML is NOT implemented — this endpoint does not parse or verify signed
-    XML assertions. It must therefore never mint a session from posted input in
-    production; enterprises should use the (real, signature-validated) OIDC flow.
-    It is fail-closed: outside the mock/sandbox mode it returns 501, and only the
-    dev mock operator session is issued when the mock IdP is explicitly enabled.
+    Verifies the posted assertion's XML signature against the configured IdP
+    certificate — plus audience, issuer, recipient, validity window and replay —
+    and only then provisions the user and issues a platform token. Every
+    rejection path returns 401 without minting anything.
+
+    When SAML is not configured this is fail-closed: 501, except under the
+    explicitly enabled dev mock IdP, which issues the sandbox operator session.
     """
+    from denoiser.api.saml import SAMLError, parse_and_verify_response, saml_enabled
+
+    if saml_enabled():
+        if not SAMLResponse:
+            raise HTTPException(status_code=400, detail="Missing SAMLResponse")
+        try:
+            fields = parse_and_verify_response(SAMLResponse)
+        except SAMLError as e:
+            # The reason is logged in full; the client gets a generic failure so
+            # a probing attacker learns nothing about which check tripped.
+            logger.warning("SAML assertion rejected: %s", e)
+            raise HTTPException(status_code=401, detail="SAML authentication failed")
+
+        user = _provision_sso_user(db, fields)
+        if not user.is_active:
+            raise HTTPException(status_code=401, detail="User account is deactivated")
+        return {**issue_token_pair(user.email), "user": user}
+
     if not _mock_sso_enabled():
         raise HTTPException(
             status_code=501,
-            detail="SAML SSO is not implemented; configure OIDC SSO instead.",
+            detail="SAML SSO is not configured; set SAML_IDP_* or use OIDC SSO instead.",
         )
     # Dev/sandbox only: mock SAML operator session (no assertion verification).
     return sso_callback(code="mock_okta_code_saml", provider="saml", db=db)

@@ -15,6 +15,26 @@ Most endpoints require a Bearer JWT. Obtain one from `/auth/login`, send it as
 | POST | `/auth/logout` | any | Revoke the caller's token (cannot be reused before expiry). |
 | GET | `/auth/sso/login` | — | SSO redirect. Uses the real OIDC provider when `OIDC_ISSUER`/`OIDC_CLIENT_ID`/`OIDC_CLIENT_SECRET` are set; otherwise the gated mock IdP. |
 | GET | `/auth/sso/callback` | — | OIDC callback: validates the ID token (JWKS), maps groups → role/teams, provisions the user, issues a JWT. |
+| GET | `/auth/sso/saml/login` | — | SP-initiated SAML: redirects to the IdP with a deflated `AuthnRequest`. `501` until SAML is configured. |
+| POST | `/auth/sso/saml/acs` | — | SAML ACS: verifies the assertion signature, audience, recipient, validity window and replay, then issues a JWT. `401` on any failure. |
+| GET | `/auth/sso/saml/metadata` | — | SP metadata XML to register with the IdP. |
+| GET | `/admin/signing-keys` | ADMIN | Active and retired JWT key ids, for confirming a key rotation landed. |
+
+#### SAML 2.0 configuration
+
+| Variable | Meaning |
+|----------|---------|
+| `SAML_IDP_ENTITY_ID` | IdP entity id; must match the assertion issuer. |
+| `SAML_IDP_SSO_URL` | IdP HTTP-Redirect SSO endpoint. |
+| `SAML_IDP_X509_CERT` | IdP signing certificate (PEM). `_FILE` variant supported. |
+| `SAML_SP_ENTITY_ID` | This service's entity id; must appear in the assertion audience. |
+| `SAML_SP_ACS_URL` | Public URL of `/auth/sso/saml/acs`. |
+| `SAML_CLOCK_SKEW_SECONDS` | Tolerance on assertion validity windows (default 60). |
+
+Assertions must be **signed** (response-level or assertion-level) and
+**unencrypted** — `EncryptedAssertion` is rejected rather than skipped. All five
+variables are required; with any missing, the SAML routes stay `501` instead of
+falling back to anything weaker.
 
 ### SCIM 2.0 provisioning
 
