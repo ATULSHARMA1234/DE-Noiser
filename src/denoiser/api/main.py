@@ -285,6 +285,15 @@ async def _record_login_failure(key: str) -> None:
 @app.post("/auth/login", response_model=TokenResponse)
 async def login(payload: UserLogin, request: Request, db: Session = Depends(get_db)):
     """Authenticate an operator and return an access token."""
+    if not get_infra_settings().local_login_enabled:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Local password login is disabled; sign in through your "
+                "organization's SSO. (MFA is enforced by the identity provider.)"
+            ),
+        )
+
     throttle_key = f"{_client_ip(request)}:{payload.email.lower()}"
     if await _login_locked_out(throttle_key):
         raise HTTPException(

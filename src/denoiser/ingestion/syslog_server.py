@@ -315,6 +315,21 @@ def _drain_tcp_buffer(ingestor: SyslogIngestor, buffer: bytes) -> bytes:
     return buffer
 
 
+def _build_ssl_context(tls_cert: str | None, tls_key: str | None) -> ssl.SSLContext | None:
+    """Server-side TLS context for syslog-over-TLS, or None when unconfigured.
+
+    Both a certificate and key are required; supplying only one is a
+    misconfiguration and raises rather than silently listening in the clear.
+    """
+    if not tls_cert and not tls_key:
+        return None
+    if not (tls_cert and tls_key):
+        raise ValueError("syslog TLS requires both SYSLOG_TLS_CERT and SYSLOG_TLS_KEY")
+    ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ssl_ctx.load_cert_chain(tls_cert, tls_key)
+    return ssl_ctx
+
+
 async def run_syslog_server(
     ingestor: SyslogIngestor,
     udp_port: int = 514,
@@ -331,10 +346,7 @@ async def run_syslog_server(
     )
     logger.info(f"Syslog UDP listener on {host}:{udp_port}")
 
-    ssl_ctx = None
-    if tls_cert and tls_key:
-        ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        ssl_ctx.load_cert_chain(tls_cert, tls_key)
+    ssl_ctx = _build_ssl_context(tls_cert, tls_key)
 
     tcp_server = await asyncio.start_server(
         lambda r, w: _handle_tcp(ingestor, r, w), host, tcp_port, ssl=ssl_ctx

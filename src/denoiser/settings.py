@@ -75,6 +75,14 @@ class InfraSettings(BaseSettings):
         validation_alias="CORS_ALLOWED_ORIGINS",
     )
     sso_allow_mock: bool = Field(default=False, validation_alias="SSO_ALLOW_MOCK")
+    # Local email+password login. Tri-state: an explicit true/false always wins;
+    # left unset it is ON in development and OFF in production. Rationale: MFA is
+    # enforced by the enterprise IdP through SSO, and a local password bypasses
+    # it. Production operators who need a break-glass admin can re-enable it
+    # explicitly with SEMANTICOS_ALLOW_LOCAL_LOGIN=true.
+    allow_local_login: bool | None = Field(
+        default=None, validation_alias="SEMANTICOS_ALLOW_LOCAL_LOGIN"
+    )
 
     # ── Enterprise identity: OIDC SSO ────────────────────────────────────
     # When issuer + client id/secret are set, the real OIDC Authorization Code
@@ -104,6 +112,17 @@ class InfraSettings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.environment.lower() in ("production", "prod")
+
+    @property
+    def local_login_enabled(self) -> bool:
+        """Whether local email+password login is accepted.
+
+        Explicit override wins; otherwise on in dev, off in production (SSO +
+        IdP-enforced MFA only).
+        """
+        if self.allow_local_login is not None:
+            return self.allow_local_login
+        return not self.is_production
 
     @property
     def cors_origin_list(self) -> list[str]:

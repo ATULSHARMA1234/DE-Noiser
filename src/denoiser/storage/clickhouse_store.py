@@ -7,6 +7,25 @@ from denoiser.logging import get_logger
 
 logger = get_logger(__name__)
 
+
+def _require_tenant(tenant_id: Any) -> str:
+    """Fail-closed tenant guard.
+
+    Every read/write against tenant-partitioned tables must be scoped to a
+    concrete tenant. A falsy tenant id (``""``, ``None``, ``0``) previously made
+    the ``WHERE tenant_id = ...`` predicate *conditional*, so an empty value
+    silently ran the query across every tenant — a cross-tenant data leak. We
+    now reject it instead of degrading to unscoped access.
+    """
+    coerced = str(tenant_id).strip() if tenant_id not in (None, "", 0, "0") else ""
+    if not coerced:
+        raise ValueError(
+            "tenant_id is required for tenant-scoped ClickHouse access; "
+            "refusing to run an unscoped (cross-tenant) query"
+        )
+    return coerced
+
+
 # Where a log's originating service can be found, in priority order.
 #
 # Nothing in the wild sends a bare "source" key. Fluent Bit's Kubernetes filter
@@ -273,7 +292,7 @@ class ClickHouseStore:
             # numeric interval, which ClickHouse won't accept as a bound value,
             # so it is hard-cast to int instead.
             days = int(days_to_keep)
-            params = {"tenant_id": str(tenant_id)}
+            params = {"tenant_id": _require_tenant(tenant_id)}
             # Delete old logs
             self.client.command(
                 "ALTER TABLE semantic_logs DELETE WHERE tenant_id = {tenant_id:String} "
@@ -297,8 +316,9 @@ class ClickHouseStore:
 
         try:
             # tenant_id is a String column in ClickHouse; callers may pass an int
-            # tenant id (e.g. Tenant.id). Coerce so the binary insert doesn't crash.
-            tenant_id = str(tenant_id)
+            # tenant id (e.g. Tenant.id). Fail-closed on an empty tenant so rows
+            # are never written under an unscoped / unreachable partition.
+            tenant_id = _require_tenant(tenant_id)
             # Flatten log dicts to tuples matching schema
             data = []
             for log in logs:
@@ -326,7 +346,7 @@ class ClickHouseStore:
 
         try:
             # tenant_id is a String column; callers may pass an int Tenant.id.
-            tenant_id = str(tenant_id)
+            tenant_id = _require_tenant(tenant_id)
             # Insert tenant_id to the beginning of each tuple
             traces_data_with_tenant = [(tenant_id, *row) for row in traces_data]
 
@@ -351,9 +371,8 @@ class ClickHouseStore:
         params = {}
         sql_where = compile_to_sql(ast, params)
 
-        if tenant_id:
-            sql_where = f"tenant_id = {{tenant_id:String}} AND ({sql_where})"
-            params['tenant_id'] = str(tenant_id)
+        params['tenant_id'] = _require_tenant(tenant_id)
+        sql_where = f"tenant_id = {{tenant_id:String}} AND ({sql_where})"
 
         if from_ts is not None:
             sql_where += " AND timestamp >= toDateTime64({from_ts:Float64}, 3, 'UTC')"
@@ -410,9 +429,8 @@ class ClickHouseStore:
         params: dict[str, Any] = {}
         sql_where = compile_to_sql(ast, params)
 
-        if tenant_id:
-            sql_where = f"tenant_id = {{tenant_id:String}} AND ({sql_where})"
-            params["tenant_id"] = str(tenant_id)
+        params["tenant_id"] = _require_tenant(tenant_id)
+        sql_where = f"tenant_id = {{tenant_id:String}} AND ({sql_where})"
         if from_ts is not None:
             sql_where += " AND timestamp >= toDateTime64({from_ts:Float64}, 3, 'UTC')"
             params["from_ts"] = from_ts / 1000.0
@@ -446,10 +464,8 @@ class ClickHouseStore:
             return {"source": [], "level": []}
             
         params = {}
-        sql_where = "1=1"
-        if tenant_id:
-            sql_where += " AND tenant_id = {tenant_id:String}"
-            params['tenant_id'] = str(tenant_id)
+        params['tenant_id'] = _require_tenant(tenant_id)
+        sql_where = "tenant_id = {tenant_id:String}"
 
         if from_ts is not None:
             sql_where += " AND timestamp >= toDateTime64({from_ts:Float64}, 3, 'UTC')"
@@ -486,9 +502,8 @@ class ClickHouseStore:
         params = {}
         sql_where = compile_to_sql(ast, params)
 
-        if tenant_id:
-            sql_where = f"tenant_id = {{tenant_id:String}} AND ({sql_where})"
-            params['tenant_id'] = str(tenant_id)
+        params['tenant_id'] = _require_tenant(tenant_id)
+        sql_where = f"tenant_id = {{tenant_id:String}} AND ({sql_where})"
 
         if from_ts is not None:
             sql_where += " AND timestamp >= toDateTime64({from_ts:Float64}, 3, 'UTC')"

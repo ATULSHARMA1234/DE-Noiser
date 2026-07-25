@@ -2,10 +2,15 @@
 proof that parsed records flow through the same pipeline resolvers as /ingest."""
 
 import asyncio
+import ssl
+
+import pytest
 
 from denoiser.ingestion.syslog_server import (
     SyslogIngestor,
+    _build_ssl_context,
     _drain_tcp_buffer,
+    _handle_tcp,
     _SyslogUDPProtocol,
     parse_syslog,
 )
@@ -146,6 +151,124 @@ def test_udp_end_to_end():
     assert len(received) == 1
     assert received[0]["source"] == "su"
     assert received[0]["message"] == "via udp"
+
+
+class TestTCPFramingEdges:
+    def test_octet_frame_split_across_feeds(self):
+        """An octet-counted frame arriving in two TCP chunks is only emitted once
+        the whole body has been received."""
+        got: list[dict] = []
+        ing = SyslogIngestor(sink=lambda recs, t: got.extend(recs), batch_size=1)
+        msg = b"<34>1 2003-10-11T22:14:15Z host app - - - split"
+        frame = str(len(msg)).encode() + b" " + msg
+
+        # First half: length prefix + partial body -> nothing emitted, all retained.
+        remainder = _drain_tcp_buffer(ing, frame[:20])
+        assert got == []
+        # Second half completes the frame.
+        remainder = _drain_tcp_buffer(ing, remainder + frame[20:])
+        assert remainder == b""
+        assert got[0]["message"] == "split"
+
+    def test_invalid_length_prefix_falls_back_to_newline(self):
+        """A digit-led but non-numeric prefix isn't a valid octet count; the line
+        is still consumed via newline framing rather than wedging the buffer."""
+        got: list[dict] = []
+        ing = SyslogIngestor(sink=lambda recs, t: got.extend(recs), batch_size=1)
+        data = b"12x <13>Oct 11 22:14:15 host a: weird\n"
+        assert _drain_tcp_buffer(ing, data) == b""
+        assert got and got[0]["message"].endswith("weird")
+
+    def test_octet_then_newline_in_one_buffer(self):
+        got: list[dict] = []
+        ing = SyslogIngestor(sink=lambda recs, t: got.extend(recs), batch_size=1)
+        m1 = b"<34>1 2003-10-11T22:14:15Z host app - - - first"
+        buf = str(len(m1)).encode() + b" " + m1 + b"<13>Oct 11 22:14:16 host a: second\n"
+        assert _drain_tcp_buffer(ing, buf) == b""
+        assert [g["message"] for g in got] == ["first", "second"]
+
+
+class TestSyslogTLS:
+    def test_build_ssl_context_none_when_unset(self):
+        assert _build_ssl_context(None, None) is None
+
+    def test_build_ssl_context_requires_both(self):
+        with pytest.raises(ValueError):
+            _build_ssl_context("cert.pem", None)
+        with pytest.raises(ValueError):
+            _build_ssl_context(None, "key.pem")
+
+    def test_tls_end_to_end(self, tmp_path):
+        """Real TLS handshake over a TCP socket: an encrypted octet-counted frame
+        is decrypted, parsed, and delivered to the sink."""
+        cert_path, key_path = _self_signed_cert(tmp_path)
+
+        async def scenario():
+            received: list[dict] = []
+            ing = SyslogIngestor(sink=lambda recs, t: received.extend(recs), batch_size=1)
+
+            server_ctx = _build_ssl_context(str(cert_path), str(key_path))
+            assert isinstance(server_ctx, ssl.SSLContext)
+
+            server = await asyncio.start_server(
+                lambda r, w: _handle_tcp(ing, r, w), "127.0.0.1", 0, ssl=server_ctx
+            )
+            port = server.sockets[0].getsockname()[1]
+
+            client_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            client_ctx.check_hostname = False
+            client_ctx.verify_mode = ssl.CERT_NONE
+
+            _reader, writer = await asyncio.open_connection(
+                "127.0.0.1", port, ssl=client_ctx
+            )
+            msg = b"<34>1 2003-10-11T22:14:15Z host app - - - over tls"
+            writer.write(str(len(msg)).encode() + b" " + msg)
+            await writer.drain()
+            writer.close()
+            await asyncio.sleep(0.1)
+            server.close()
+            await server.wait_closed()
+            return received
+
+        received = asyncio.run(scenario())
+        assert len(received) == 1
+        assert received[0]["message"] == "over tls"
+
+
+def _self_signed_cert(tmp_path):
+    """Write a throwaway self-signed cert+key to tmp_path; return their paths."""
+    import datetime
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "localhost")])
+    now = datetime.datetime.now(datetime.UTC)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - datetime.timedelta(minutes=1))
+        .not_valid_after(now + datetime.timedelta(days=1))
+        .sign(key, hashes.SHA256())
+    )
+    cert_path = tmp_path / "cert.pem"
+    key_path = tmp_path / "key.pem"
+    cert_path.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+    key_path.write_bytes(
+        key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.TraditionalOpenSSL,
+            serialization.NoEncryption(),
+        )
+    )
+    return cert_path, key_path
 
 
 if __name__ == "__main__":

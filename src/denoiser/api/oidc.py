@@ -28,10 +28,13 @@ from denoiser.settings import get_settings
 logger = get_logger(__name__)
 
 _STATE_TTL_SECONDS = 600
-# Cache of issuer -> discovery document, and issuer -> jwks. Providers rotate
-# keys rarely; a short process cache avoids a network round-trip per login.
+# How long a cached JWKS is trusted before we re-fetch. Providers rotate signing
+# keys periodically; without an expiry the process would serve stale keys until
+# restart and reject every freshly-signed token (a self-inflicted auth outage).
+_JWKS_TTL_SECONDS = 600
+# Cache of issuer -> discovery document, and jwks_uri -> (keys, fetched_at).
 _discovery_cache: dict[str, dict[str, Any]] = {}
-_jwks_cache: dict[str, dict[str, Any]] = {}
+_jwks_cache: dict[str, tuple[dict[str, Any], float]] = {}
 
 
 class OIDCError(Exception):
@@ -55,14 +58,20 @@ def discover(issuer: str) -> dict[str, Any]:
     return doc
 
 
-def _jwks(jwks_uri: str) -> dict[str, Any]:
-    if jwks_uri in _jwks_cache:
-        return _jwks_cache[jwks_uri]
+def _jwks(jwks_uri: str, *, force: bool = False) -> dict[str, Any]:
+    """Fetch (and cache with a TTL) the provider JWKS.
+
+    ``force=True`` bypasses the cache — used when a token's ``kid`` is missing
+    from the cached set, which is the signal that the provider has rotated keys.
+    """
+    cached = _jwks_cache.get(jwks_uri)
+    if not force and cached is not None and (time.time() - cached[1]) < _JWKS_TTL_SECONDS:
+        return cached[0]
     with _http() as client:
         resp = client.get(jwks_uri)
         resp.raise_for_status()
         keys = resp.json()
-    _jwks_cache[jwks_uri] = keys
+    _jwks_cache[jwks_uri] = (keys, time.time())
     return keys
 
 
@@ -133,11 +142,25 @@ def validate_id_token(id_token: str) -> dict[str, Any]:
         raise OIDCError(f"Malformed ID token: {e}")
 
     kid = header.get("kid")
-    key = next((k for k in jwks.get("keys", []) if k.get("kid") == kid), None)
-    if key is None and jwks.get("keys"):
-        key = jwks["keys"][0]
+
+    def _find_key(jwks_doc: dict[str, Any]) -> dict[str, Any] | None:
+        keys = jwks_doc.get("keys", [])
+        # Match the token's kid exactly. Only fall back to a sole key when the
+        # token omits kid entirely (some providers issue single-key JWKS without
+        # a kid). Never pick an arbitrary key when a specific kid was requested.
+        match = next((k for k in keys if k.get("kid") == kid), None)
+        if match is None and kid is None and len(keys) == 1:
+            return keys[0]
+        return match
+
+    key = _find_key(jwks)
     if key is None:
-        raise OIDCError("No signing key found in provider JWKS")
+        # kid not in the cached set → provider likely rotated keys. Force one
+        # refresh and retry before giving up, so rotation doesn't lock users out.
+        jwks = _jwks(doc["jwks_uri"], force=True)
+        key = _find_key(jwks)
+    if key is None:
+        raise OIDCError("No matching signing key in provider JWKS for token kid")
 
     try:
         claims = jwt.decode(

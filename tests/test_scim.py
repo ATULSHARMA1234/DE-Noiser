@@ -91,6 +91,74 @@ class TestScimUserLifecycle:
         assert client.post("/scim/v2/Users", headers=_h(), json=payload).status_code == 409
 
 
+class TestScimDeprovisionCutsAccess:
+    """The compliance control: once the IdP de-provisions a user, an existing
+    session token must stop working immediately."""
+
+    def _make_active_user(self, email):
+        from denoiser.storage.db import SessionLocal, User
+        db = SessionLocal()
+        db.query(User).filter(User.email == email).delete()
+        db.commit()
+        db.close()
+        return email
+
+    def test_deactivated_user_token_is_rejected(self, client):
+        from denoiser.api.auth import create_access_token
+        email = self._make_active_user("leaver@bigcorp.com")
+
+        uid = client.post("/scim/v2/Users", headers=_h(), json={
+            "userName": email, "active": True,
+            "emails": [{"value": email, "primary": True}],
+        }).json()["id"]
+
+        # A live session token for that user works while active.
+        token = create_access_token(data={"sub": email})
+        auth = {"Authorization": f"Bearer {token}"}
+        assert client.get("/auth/me", headers=auth).status_code == 200
+
+        # IdP de-provisions (DELETE = soft deactivate).
+        assert client.delete(f"/scim/v2/Users/{uid}", headers=_h()).status_code == 204
+
+        # The same token is now rejected — access is cut without waiting for exp.
+        assert client.get("/auth/me", headers=auth).status_code == 401
+
+    def test_patch_nested_active_value(self, client):
+        email = self._make_active_user("nested-patch@bigcorp.com")
+        uid = client.post("/scim/v2/Users", headers=_h(), json={
+            "userName": email, "active": True,
+            "emails": [{"value": email, "primary": True}],
+        }).json()["id"]
+
+        # Azure AD sends `value` as an object rather than a scalar.
+        res = client.patch(f"/scim/v2/Users/{uid}", headers=_h(), json={
+            "Operations": [{"op": "replace", "value": {"active": False}}],
+        })
+        assert res.status_code == 200
+        assert res.json()["active"] is False
+
+    def test_put_replace_user(self, client):
+        email = self._make_active_user("put-replace@bigcorp.com")
+        uid = client.post("/scim/v2/Users", headers=_h(), json={
+            "userName": email, "active": True,
+            "emails": [{"value": email, "primary": True}],
+        }).json()["id"]
+
+        res = client.put(f"/scim/v2/Users/{uid}", headers=_h(), json={
+            "userName": email, "externalId": "idp|new-ext", "active": False,
+        })
+        assert res.status_code == 200
+        body = res.json()
+        assert body["active"] is False
+        assert body["externalId"] == "idp|new-ext"
+
+    def test_operations_on_missing_user_404(self, client):
+        assert client.get("/scim/v2/Users/999999", headers=_h()).status_code == 404
+        assert client.put("/scim/v2/Users/999999", headers=_h(), json={}).status_code == 404
+        assert client.patch("/scim/v2/Users/999999", headers=_h(), json={"Operations": []}).status_code == 404
+        assert client.delete("/scim/v2/Users/999999", headers=_h()).status_code == 404
+
+
 class TestScimGroups:
     def test_group_membership_updates_user_teams(self, client):
         from denoiser.storage.db import SessionLocal, Team, User

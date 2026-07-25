@@ -5,6 +5,31 @@ based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Security
+- **Tenant isolation is now fail-closed** (audit H1). The ClickHouse store
+  rejected an empty/falsy `tenant_id` instead of silently running an unscoped,
+  cross-tenant query; every read/write is now scoped or refused. Regression
+  tests cover the guard and the injected predicate.
+- **Local password login is gated in production** (audit M2). It is off by
+  default in production (MFA is enforced by the IdP through SSO) and on in
+  development, with an explicit `SEMANTICOS_ALLOW_LOCAL_LOGIN` break-glass
+  override.
+
+### Fixed
+- **OIDC JWKS rotation** (audit M1): the JWKS cache now has a TTL and force-
+  refreshes when a token's `kid` is missing, so a provider key rotation no
+  longer locks every user out until restart. Removed the arbitrary
+  "pick the first key" fallback.
+
+### Changed
+- **Analysis input is capped** (audit M3) at `SEMANTICOS_MAX_ANALYSIS_LINES`
+  (default 500k, per-request override) so a huge source can't OOM a worker; the
+  run result reports `truncated`. Added a capacity/load-test procedure to the
+  operations runbook.
+- Raised test coverage on enterprise-critical edges (audit M4): SCIM
+  de-provisioning actually cutting token access, plus syslog TLS handshake and
+  TCP framing edge cases.
+
 ## [0.1.0] - 2026-07-25
 
 ### Added

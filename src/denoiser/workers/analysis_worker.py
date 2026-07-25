@@ -38,6 +38,18 @@ logger = get_logger(__name__)
 _PRIORITY_RANK = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
 
 
+_DEFAULT_MAX_ANALYSIS_LINES = 500_000
+
+
+def _resolve_max_lines(request_dict: dict) -> int:
+    """Effective per-run line cap: request `max_lines` wins, else the
+    SEMANTICOS_MAX_ANALYSIS_LINES env var, else the built-in default."""
+    return int(
+        request_dict.get("max_lines")
+        or os.getenv("SEMANTICOS_MAX_ANALYSIS_LINES", str(_DEFAULT_MAX_ANALYSIS_LINES))
+    )
+
+
 def _worst_priority(clusters: list[dict]) -> str:
     """The most severe priority among clusters (P0 worst … P3 least)."""
     return min(
@@ -84,12 +96,22 @@ def run_analysis_task(self, request_dict: dict):
     intelligence = request_dict.get("intelligence", False)
     top_n = request_dict.get("top_n", 3)
 
+    # Bound how many raw lines a single analysis run pulls into memory. Without a
+    # cap, a multi-million-line source loads entirely into a list → polars frame
+    # → per-row objects, which can OOM the worker. The most recent lines matter
+    # most for denoising, but LogReader is forward-only, so we cap from the front
+    # and flag truncation. Configurable per-request or via env.
+    max_lines = _resolve_max_lines(request_dict)
+
     # 1. Ingestion
     timestamp_extractor = TimestampExtractor()
     records_data = []
     reader = LogReader()
+    truncated = False
 
     for src in sources:
+        if truncated:
+            break
         source_label = Path(src).stem
         try:
             for record in reader.read(src):
@@ -109,6 +131,15 @@ def run_analysis_task(self, request_dict: dict):
                     "timestamp_ms": epoch_ms or 0,
                     "metadata": json.dumps(record.metadata)
                 })
+
+                if len(records_data) >= max_lines:
+                    truncated = True
+                    logger.warning(
+                        f"Analysis input capped at max_lines={max_lines}; "
+                        f"remaining lines in {src} (and any later sources) were "
+                        f"skipped for this run."
+                    )
+                    break
         except Exception as e:
             logger.warning(f"Failed to read source {src}: {e}")
 
@@ -426,6 +457,8 @@ def run_analysis_task(self, request_dict: dict):
         "metrics_context": metrics_context,
         "total_logs": deduper.total_count,
         "total_logs_analyzed": deduper.total_count,
+        "truncated": truncated,
+        "max_lines": max_lines,
         "duration_sec": duration,
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
     }

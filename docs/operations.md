@@ -55,6 +55,50 @@ Migrations run automatically via the Job; deployments set
 | API | Writes local state (`settings.json`, `live_stream.log`) to its data volume; running >1 replica needs a ReadWriteMany volume. |
 | Web | Stateless. |
 
+### Analysis input cap
+
+A single analysis run bounds how many raw log lines it pulls into memory, so a
+multi-million-line source cannot OOM a worker. The cap defaults to **500,000
+lines** and is configurable:
+
+- per request: `max_lines` in the analysis request body;
+- globally: `SEMANTICOS_MAX_ANALYSIS_LINES` (worker env).
+
+When a run hits the cap it still completes, and the result carries
+`"truncated": true` with the effective `max_lines`. Raise the cap only after
+confirming worker memory headroom (rough guide: ~1 KB resident per line through
+the polars/dedup stage, so 500k lines ≈ a few hundred MB peak).
+
+## Capacity & load testing
+
+Throughput depends entirely on your hardware and broker/ClickHouse sizing — no
+fixed rate is guaranteed. **Do not quote a throughput number to a customer that
+you have not measured on representative hardware.** Measure it before every
+capacity commitment:
+
+```bash
+# Authenticated /ingest load test (API key or JWT).
+python scripts/loadtest.py --url https://api.your-host \
+    --api-key "$INGEST_API_KEY" \
+    --concurrency 16 --duration 60 --batch 200
+```
+
+Record results against the environment so the numbers are reproducible:
+
+| Field | Example | Notes |
+|-------|---------|-------|
+| API replicas / CPU·mem | 3 × (2 vCPU, 2 GiB) | from Helm `values.yaml` |
+| Broker | Redpanda 3-node | partitions per topic |
+| ClickHouse | 3 shards × 2 replicas | disk type matters |
+| concurrency / batch | 16 / 200 | loadtest flags |
+| **Ingest throughput** | _measure_ | logs/sec sustained |
+| **p50 / p95 / p99 latency** | _measure_ | from loadtest output |
+| Error rate | _measure_ | should be ~0 at steady state |
+
+Scale the API and ingestion/analysis workers horizontally (all stateless) until
+ingest latency and consumer lag are steady, then record the sustained rate as
+your supported ceiling for that configuration.
+
 ## Backup & restore
 
 **What holds state:** PostgreSQL (users, tenants, runs, incidents, SLOs,
