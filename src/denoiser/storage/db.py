@@ -277,6 +277,15 @@ class Monitor(Base):
     enabled = Column(Boolean, default=True)
     muted_until = Column(DateTime, nullable=True)  # snooze: suppress alerts until this time
     created_at = Column(DateTime, default=utcnow)
+    # Evaluation state, written by the monitor evaluator. Without it a monitor
+    # was a stored query nothing ever ran: the UI could only report whether it
+    # was enabled, never whether it was firing.
+    window_seconds = Column(Integer, default=300)
+    status = Column(String, default="PENDING")  # PENDING, OK, WARNING, CRITICAL, NO_DATA, ERROR
+    last_value = Column(Float, nullable=True)
+    last_evaluated_at = Column(DateTime, nullable=True)
+    last_triggered_at = Column(DateTime, nullable=True)
+    last_error = Column(String, nullable=True)
 
 
 class Notebook(Base):

@@ -35,6 +35,49 @@ export default function TracesPage() {
  // eslint-disable-next-line react-hooks/exhaustive-deps
  }, [timeRange]);
 
+ // Exported trace files sitting in the data directory. Without OTLP wired up to
+ // a live service, this is the only way to get spans into the tab.
+ const [traceFiles, setTraceFiles] = useState<string[]>([]);
+ const [importFile, setImportFile] = useState('');
+ const [importing, setImporting] = useState(false);
+
+ useEffect(() => {
+ apiFetch('/sources')
+ .then((files: any[]) => {
+ const candidates = (files || [])
+ .map(f => f.name as string)
+ .filter(name => /\.json$/i.test(name) && /trace/i.test(name));
+ setTraceFiles(candidates);
+ if (candidates.length > 0) setImportFile(candidates[0]);
+ })
+ .catch(() => setTraceFiles([]));
+ }, []);
+
+ const importTraces = async () => {
+ if (!importFile) return;
+ setImporting(true);
+ try {
+ const res = await apiFetch('/traces/import', {
+ method: 'POST',
+ body: JSON.stringify({ filename: importFile }),
+ });
+ // Exported files keep their original timestamps, so say when the spans are
+ // from — otherwise a successful import looks like nothing happened.
+ const when = res.earliest
+ ? ` recorded ${new Date(res.earliest).toLocaleDateString()} — widen the time range to see them`
+ : '';
+ toast({
+ title: `Imported ${res.spans ?? ''} spans`.trim(),
+ description: `${res.traces ?? ''} traces from ${res.file}${when}`.trim(),
+ });
+ fetchTraces();
+ } catch (e: any) {
+ toast({ title: 'Import failed', description: e.message, type: 'error' });
+ } finally {
+ setImporting(false);
+ }
+ };
+
 
  const loadTraceDetail = async (traceId: string) => {
  setSelectedTraceId(traceId);
@@ -274,7 +317,32 @@ export default function TracesPage() {
  <tr>
  <td colSpan={7} className="px-6 py-12 text-center">
  <Activity className="mx-auto mb-3 text-[var(--text-secondary)] opacity-50" size={32} />
- <p className="text-[var(--text-primary)] font-medium">No traces match your search</p>
+ <p className="text-[var(--text-primary)] font-medium">
+ {traces.length === 0 ? 'No traces in this time range' : 'No traces match your search'}
+ </p>
+ {traces.length === 0 && (
+ <div className="mt-3 text-sm text-[var(--text-secondary)] max-w-lg mx-auto space-y-3">
+ <p>Send spans to <code className="font-mono text-xs">POST /traces/v1/traces</code> from an OTLP exporter, or import an exported trace file.</p>
+ {traceFiles.length > 0 && (
+ <div className="flex items-center justify-center gap-2">
+ <select
+ value={importFile}
+ onChange={e => setImportFile(e.target.value)}
+ className="bg-[var(--bg-input)] border border-[var(--border)] rounded px-2 py-1.5 text-xs text-[var(--text-primary)]"
+ >
+ {traceFiles.map(f => <option key={f} value={f}>{f}</option>)}
+ </select>
+ <button
+ onClick={importTraces}
+ disabled={importing || !importFile}
+ className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white px-3 py-1.5 rounded text-xs font-medium transition-colors"
+ >
+ {importing ? 'Importing…' : 'Import traces'}
+ </button>
+ </div>
+ )}
+ </div>
+ )}
  </td>
  </tr>
  ) : (

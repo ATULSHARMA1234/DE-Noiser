@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -119,6 +120,42 @@ _LEVEL_ALIASES: dict[str, str] = {
 }
 
 
+# Severity written into the log line itself, which is how every plain-text
+# logger does it: "[ERROR]", "ERROR:", or a bare uppercase token. Bracketed and
+# colon-suffixed forms are matched case-insensitively (docker's "[info]"), while
+# a bare token must be uppercase — otherwise prose like "no errors found" would
+# be filed as an ERROR.
+_MESSAGE_LEVEL_PATTERN = re.compile(
+    r"\[\s*(DEBUG|TRACE|INFO|NOTICE|WARN|WARNING|ERR|ERROR|CRIT|CRITICAL|FATAL|ALERT|EMERG|EMERGENCY|PANIC)\s*\]"
+    r"|\b(DEBUG|TRACE|INFO|NOTICE|WARN|WARNING|ERR|ERROR|CRIT|CRITICAL|FATAL|ALERT|EMERG|EMERGENCY|PANIC)\s*:"
+    r"|\b(DEBUG|TRACE|INFO|NOTICE|WARN|WARNING|ERR|ERROR|CRIT|CRITICAL|FATAL|ALERT|EMERG|EMERGENCY|PANIC)\b",
+    re.IGNORECASE,
+)
+
+
+def _level_from_message(log: dict[str, Any]) -> str | None:
+    """Severity parsed out of the log line, when no field carries one.
+
+    A file of plain-text lines has no ``level`` key, so every line was indexed
+    as INFO — ``level:ERROR`` in Explore then matched nothing in a file where
+    every line said ERROR.
+    """
+    message = log.get("message") or log.get("raw_text")
+    if not isinstance(message, str) or not message:
+        return None
+
+    for match in _MESSAGE_LEVEL_PATTERN.finditer(message[:500]):
+        bracketed, colon_suffixed, bare = match.group(1), match.group(2), match.group(3)
+        token = bracketed or colon_suffixed
+        if token is None:
+            # A bare token is only trusted when the logger wrote it uppercase.
+            if bare is None or bare != bare.upper():
+                continue
+            token = bare
+        return _LEVEL_ALIASES.get(token.upper(), token.upper())
+    return None
+
+
 def resolve_level(log: dict[str, Any]) -> str:
     """The canonical severity of a log, or ``INFO`` when nothing specifies one."""
     for key in LEVEL_KEYS:
@@ -129,7 +166,7 @@ def resolve_level(log: dict[str, Any]) -> str:
         if not raw:
             continue
         return _LEVEL_ALIASES.get(raw.upper(), raw.upper())
-    return DEFAULT_LEVEL
+    return _level_from_message(log) or DEFAULT_LEVEL
 
 
 # Where a log's event time can be found, in priority order. Same "only one key

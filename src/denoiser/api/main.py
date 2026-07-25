@@ -989,7 +989,9 @@ async def websocket_endpoint(websocket: WebSocket, token: str | None = None, db:
         return
 
     try:
-        user = get_current_user(token, db)
+        # Keyword arguments — positionally, `token` binds to the `request`
+        # parameter and every websocket handshake is rejected as invalid.
+        user = get_current_user(request=None, token=token, db=db)
     except Exception:
         await websocket.close(code=4001, reason="Invalid token")
         return

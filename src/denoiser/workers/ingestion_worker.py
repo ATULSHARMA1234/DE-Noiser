@@ -185,6 +185,16 @@ def _flush_logs(ch_store, batch_logs) -> bool:
 
     ok = True
     for t_id, logs in by_tenant.items():
+        # A record with no tenant can never be written — the store refuses
+        # unscoped rows on purpose. Retrying it just wedges the batch: the
+        # valid records beside it are re-flushed (and duplicated) on every
+        # attempt, and eventually the whole batch, good rows included, is
+        # dead-lettered. Quarantine only the unscoped records instead.
+        if t_id is None or str(t_id).strip() == "":
+            logger.error(f"Dead-lettering {len(logs)} unscoped log(s) with no tenant_id")
+            for log in logs:
+                dead_letter("logs_topic", "missing tenant_id", log)
+            continue
         try:
             # insert_logs returns False (rather than raising) when the client is
             # unavailable or the insert fails -- treat that as a failure too.

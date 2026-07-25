@@ -276,7 +276,11 @@ def verify_ingest_auth(
 
     if token:
         try:
-            user = get_current_user(token, db)
+            # Keyword arguments: get_current_user takes (request, token, db), so
+            # a positional (token, db) call bound the token to `request` and the
+            # session to `token` — every JWT-authenticated ingest failed with
+            # "Invalid API Key or JWT token", leaving X-API-Key the only way in.
+            user = get_current_user(request=None, token=token, db=db)
             return user.tenant_id
         except Exception:
             pass

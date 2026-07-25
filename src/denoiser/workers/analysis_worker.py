@@ -40,6 +40,67 @@ _PRIORITY_RANK = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
 
 _DEFAULT_MAX_ANALYSIS_LINES = 500_000
 
+# Rows per ClickHouse insert when indexing an analysed source.
+_INDEX_BATCH_SIZE = 5_000
+
+
+def index_records_for_search(records: list[dict], tenant_id, run_id: str) -> int:
+    """Write the analysed records to the searchable log store.
+
+    Analysis read log files straight off disk and never indexed them, so a
+    source you had just analysed returned nothing in Explore, produced no
+    extracted metrics, and could not be monitored — every one of those features
+    queries ClickHouse, and only the live /ingest path ever wrote to it.
+
+    Returns the number of rows indexed (0 when the store is unavailable, which
+    is not fatal: the analysis result itself does not depend on it).
+    """
+    if not tenant_id or not records:
+        return 0
+
+    try:
+        from denoiser.storage.clickhouse_store import ClickHouseStore
+
+        store = ClickHouseStore()
+        if not store.client:
+            logger.warning("ClickHouse unavailable; analysed logs were not indexed for search")
+            return 0
+
+        indexed = 0
+        for start in range(0, len(records), _INDEX_BATCH_SIZE):
+            batch = []
+            for record in records[start:start + _INDEX_BATCH_SIZE]:
+                metadata = {}
+                if record.get("metadata"):
+                    try:
+                        metadata = json.loads(record["metadata"])
+                    except (TypeError, ValueError):
+                        metadata = {}
+
+                entry = {
+                    "message": record["raw_text"],
+                    # resolve_source/resolve_level read these keys, so a log that
+                    # names its own service or level keeps it; the file it came
+                    # from is the fallback identity.
+                    "service": metadata.get("service") or record.get("source_label"),
+                    "source": record.get("source_label"),
+                    "run_id": run_id,
+                    **{k: v for k, v in metadata.items() if k not in ("service",)},
+                }
+                if record.get("timestamp") is not None:
+                    entry["timestamp"] = record["timestamp"].isoformat()
+                batch.append(entry)
+
+            if store.insert_logs(batch, tenant_id=str(tenant_id)):
+                indexed += len(batch)
+
+        if indexed:
+            logger.info("Indexed %d analysed log lines for search (run %s)", indexed, run_id)
+        return indexed
+    except Exception as e:
+        logger.warning(f"Failed to index analysed logs for search: {e}")
+        return 0
+
 
 def _resolve_max_lines(request_dict: dict) -> int:
     """Effective per-run line cap: request `max_lines` wins, else the
@@ -349,6 +410,9 @@ def run_analysis_task(self, request_dict: dict):
     source_name = ", ".join(sources)
     try:
         tenant_id = request_dict.get("tenant_id")
+        # Make the analysed lines searchable (Explore), extractable (Metrics)
+        # and monitorable — all three read the ClickHouse store.
+        index_records_for_search(records_data, tenant_id, run_id)
         db_run = AnalysisRun(
             id=run_id,
             tenant_id=tenant_id,
@@ -669,9 +733,31 @@ def extract_metrics():
     finally:
         db.close()
 
+@celery_app.task
+def evaluate_monitors():
+    """Periodic task: run every enabled monitor's query and fire on breach."""
+    from denoiser.monitors.evaluator import evaluate_all
+
+    db = SessionLocal()
+    try:
+        results = evaluate_all(db)
+        breaching = [r for r in results if r.is_breaching]
+        logger.info(
+            "Evaluated %d monitors (%d breaching)", len(results), len(breaching)
+        )
+        return {"evaluated": len(results), "breaching": len(breaching)}
+    except Exception as e:
+        logger.error(f"Monitor evaluation failed: {e}")
+        db.rollback()
+        return {"evaluated": 0, "error": str(e)}
+    finally:
+        db.close()
+
+
 # Setup periodic tasks
 @celery_app.on_after_configure.connect
 def setup_periodic_tasks(sender, **kwargs):
     # Execute every minute
     sender.add_periodic_task(60.0, evaluate_slos.s(), name='evaluate_slos_every_minute')
     sender.add_periodic_task(60.0, extract_metrics.s(), name='extract_metrics_every_minute')
+    sender.add_periodic_task(60.0, evaluate_monitors.s(), name='evaluate_monitors_every_minute')

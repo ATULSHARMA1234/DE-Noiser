@@ -12,11 +12,12 @@ from denoiser.storage.clickhouse_store import ClickHouseStore
 from denoiser.storage.db import get_db
 from denoiser.tracing.models import SpanSchema, TraceSchema
 from denoiser.tracing.otlp_collector import process_otlp_traces
+from denoiser.utils.time import iso_utc
 
 router = APIRouter(prefix="/traces", tags=["tracing"])
 
 import contextlib
-from datetime import UTC
+from datetime import UTC, datetime, timedelta
 
 from fastapi import Header
 
@@ -53,6 +54,109 @@ async def ingest_traces(
         return {"status": "success"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/import", summary="Import traces from a stored trace file")
+def import_traces_from_file(
+    filename: str = Body(..., embed=True),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["ANALYST", "ADMIN"])),
+):
+    """Load spans from a JSON trace file in the data directory.
+
+    Traces could only arrive over OTLP from a live instrumented service, so the
+    Traces tab was permanently empty for anyone holding an exported trace file —
+    including the one this project ships. Accepts either the OTLP JSON envelope
+    (``resourceSpans``) or the flat ``[{trace_id, spans: [...]}]`` export shape.
+    """
+    # Resolve inside DATA_DIR only — a filename is not a path the caller gets to
+    # roam with.
+    candidate = (DATA_DIR / Path(filename).name).resolve()
+    if not str(candidate).startswith(str(DATA_DIR.resolve())) or not candidate.is_file():
+        raise HTTPException(status_code=404, detail=f"Trace file not found: {filename}")
+
+    try:
+        payload = json.loads(candidate.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=f"Could not read {filename}: {e}")
+
+    tenant_id = str(current_user.tenant_id)
+
+    if isinstance(payload, dict) and "resourceSpans" in payload:
+        try:
+            process_otlp_traces(db, payload, tenant_id=tenant_id)
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Failed to store spans: {e}")
+        return {"status": "imported", "format": "otlp", "file": candidate.name}
+
+    if not isinstance(payload, list):
+        raise HTTPException(
+            status_code=400,
+            detail="Unrecognised trace file: expected an OTLP object or a list of traces",
+        )
+
+    rows: list[tuple] = []
+    for trace in payload:
+        if not isinstance(trace, dict):
+            continue
+        for span in trace.get("spans", []):
+            start = _parse_span_time(span.get("start_time"))
+            end = _parse_span_time(span.get("end_time"))
+            if start is None:
+                continue
+            duration = span.get("duration_ms")
+            if duration is None:
+                duration = (end - start).total_seconds() * 1000.0 if end else 0.0
+            if end is None:
+                end = start + timedelta(milliseconds=float(duration))
+
+            rows.append((
+                span.get("trace_id") or trace.get("trace_id") or "",
+                span.get("span_id") or "",
+                span.get("parent_span_id") or "",
+                span.get("service_name") or trace.get("root_service") or "unknown_service",
+                span.get("operation_name") or trace.get("root_operation") or "",
+                start,
+                end,
+                float(duration),
+                (span.get("status_code") or "OK").upper(),
+                json.dumps(span.get("attributes") or {}),
+                json.dumps(span.get("events") or []),
+            ))
+
+    if not rows:
+        raise HTTPException(status_code=400, detail=f"No spans found in {candidate.name}")
+
+    if not _clickhouse_store.insert_traces(rows, tenant_id=tenant_id):
+        raise HTTPException(status_code=502, detail="Trace store rejected the spans")
+
+    # Report the span of what was imported: an exported file usually carries its
+    # original timestamps, so the traces can land outside the UI's current time
+    # range and look like the import silently did nothing.
+    starts = [r[5] for r in rows]
+    return {
+        "status": "imported",
+        "format": "export",
+        "file": candidate.name,
+        "traces": len({r[0] for r in rows}),
+        "spans": len(rows),
+        "earliest": iso_utc(min(starts)),
+        "latest": iso_utc(max(starts)),
+    }
+
+
+def _parse_span_time(value: Any):
+    """Span timestamps as naive UTC, accepting ISO strings or epoch ms/seconds."""
+    if value is None:
+        return None
+    if isinstance(value, int | float):
+        seconds = value / 1000.0 if value > 1e11 else float(value)
+        return datetime.fromtimestamp(seconds, UTC).replace(tzinfo=None)
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed.astimezone(UTC).replace(tzinfo=None) if parsed.tzinfo else parsed
+
 
 @router.get("", response_model=list[TraceSchema])
 def list_traces(from_ts: int | None = None, to_ts: int | None = None, limit: int = 50, db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):

@@ -147,6 +147,38 @@ def execute_runbook_step(step: dict, incident: Incident, execution_logs: list):
 
     execution_logs.append(f"[{utcnow().isoformat()}] Step completed successfully.")
 
+def run_runbook(db: Session, rb: Runbook, incident: Incident, reason: str = "Manual execution"):
+    """Execute every step of a runbook and record the attempt.
+
+    Shared by the incident trigger path and the API's manual "run now" — an
+    operator could previously only wait for an incident to match, with no way to
+    try a runbook they had just written.
+    """
+    execution = RunbookExecution(
+        runbook_id=rb.id,
+        incident_id=incident.id if incident else None,
+        status="RUNNING",
+        logs=[f"[{utcnow().isoformat()}] {reason}"],
+    )
+    db.add(execution)
+    db.commit()
+    db.refresh(execution)
+
+    exec_logs = list(execution.logs)
+    try:
+        for step in rb.steps:
+            execute_runbook_step(step, incident, exec_logs)
+        execution.status = "SUCCESS"
+    except Exception as e:
+        execution.status = "FAILED"
+        exec_logs.append(f"[{utcnow().isoformat()}] Execution failed: {e}")
+
+    execution.logs = exec_logs
+    db.commit()
+    db.refresh(execution)
+    return execution
+
+
 def process_incident(db: Session, incident: Incident):
     """
     Called when a new incident is created. Evaluates active runbooks and executes them.
@@ -168,28 +200,4 @@ def process_incident(db: Session, incident: Incident):
 
         if match:
             logger.info(f"Incident {incident.id} matches Runbook {rb.id} ({rb.name}). Executing...")
-
-            # Create execution record
-            execution = RunbookExecution(
-                runbook_id=rb.id,
-                incident_id=incident.id,
-                status="RUNNING",
-                logs=[f"[{utcnow().isoformat()}] Trigger matched: Incident {incident.id}"]
-            )
-            db.add(execution)
-            db.commit()
-            db.refresh(execution)
-
-            # Execute steps
-            exec_logs = list(execution.logs)
-            try:
-                for step in rb.steps:
-                    execute_runbook_step(step, incident, exec_logs)
-
-                execution.status = "SUCCESS"
-            except Exception as e:
-                execution.status = "FAILED"
-                exec_logs.append(f"[{utcnow().isoformat()}] Execution failed: {e}")
-
-            execution.logs = exec_logs
-            db.commit()
+            run_runbook(db, rb, incident, reason=f"Trigger matched: Incident {incident.id}")

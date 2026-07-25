@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from denoiser.api.auth import User, require_role
 from denoiser.storage.db import Runbook, RunbookExecution, get_db
+from denoiser.utils.time import iso_utc
 
 router = APIRouter(prefix="/runbooks", tags=["runbooks"])
 
@@ -63,6 +64,89 @@ def create_runbook(payload: RunbookCreateSchema, db: Session = Depends(get_db), 
     db.refresh(rb)
     return rb
 
+class RunbookUpdateSchema(BaseModel):
+    name: str | None = None
+    trigger_condition: dict[str, Any] | None = None
+    steps: list[dict[str, Any]] | None = None
+    enabled: bool | None = None
+
+
+class RunbookRunSchema(BaseModel):
+    # Runs against a real incident when given one, so steps that quote incident
+    # fields (webhook bodies, Slack messages) carry real content.
+    incident_id: int | None = None
+
+
+@router.put("/{runbook_id}", response_model=RunbookResponseSchema)
+def update_runbook(
+    runbook_id: int,
+    payload: RunbookUpdateSchema,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["ANALYST", "ADMIN"])),
+):
+    """Update a runbook — used by the UI's enable/disable toggle and editing."""
+    rb = db.query(Runbook).filter(Runbook.id == runbook_id, Runbook.tenant_id == current_user.tenant_id).first()
+    if not rb:
+        raise HTTPException(status_code=404, detail="Runbook not found")
+
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(rb, field, value)
+
+    db.commit()
+    db.refresh(rb)
+    return rb
+
+
+@router.post("/{runbook_id}/run", response_model=dict)
+def run_runbook_now(
+    runbook_id: int,
+    payload: RunbookRunSchema | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["ANALYST", "ADMIN"])),
+):
+    """Execute a runbook immediately, without waiting for a matching incident.
+
+    A runbook could only ever be fired by the incident trigger, so there was no
+    way to try one you had just written — you wrote steps, saved them, and hoped.
+    """
+    from denoiser.automation.engine import run_runbook
+    from denoiser.storage.db import Incident
+
+    rb = db.query(Runbook).filter(Runbook.id == runbook_id, Runbook.tenant_id == current_user.tenant_id).first()
+    if not rb:
+        raise HTTPException(status_code=404, detail="Runbook not found")
+
+    incident = None
+    if payload and payload.incident_id:
+        incident = db.query(Incident).filter(
+            Incident.id == payload.incident_id,
+            Incident.tenant_id == current_user.tenant_id,
+        ).first()
+        if not incident:
+            raise HTTPException(status_code=404, detail="Incident not found")
+    else:
+        # Most recent open incident gives the steps something real to report;
+        # with none at all the run still proceeds against an empty context.
+        incident = (
+            db.query(Incident)
+            .filter(Incident.tenant_id == current_user.tenant_id, Incident.status == "OPEN")
+            .order_by(Incident.created_at.desc())
+            .first()
+        )
+
+    execution = run_runbook(
+        db, rb, incident,
+        reason=f"Manual execution by {current_user.email}",
+    )
+    return {
+        "execution_id": execution.id,
+        "runbook_id": rb.id,
+        "incident_id": execution.incident_id,
+        "status": execution.status,
+        "logs": execution.logs,
+    }
+
+
 @router.delete("/{runbook_id}")
 def delete_runbook(runbook_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_role(["ADMIN"]))):
     rb = db.query(Runbook).filter(Runbook.id == runbook_id, Runbook.tenant_id == current_user.tenant_id).first()
@@ -91,6 +175,6 @@ def list_executions(db: Session = Depends(get_db), current_user: User = Depends(
             "incident_id": ex.incident_id,
             "status": ex.status,
             "logs": ex.logs,
-            "created_at": ex.created_at.isoformat()
+            "created_at": iso_utc(ex.created_at)
         } for ex in executions
     ]
