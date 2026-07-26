@@ -1,9 +1,10 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import ReactEcharts from 'echarts-for-react';
 import * as echarts from 'echarts';
-import { Database, TrendingUp, Zap, Loader2, AlertTriangle, RefreshCw, FileText, Cpu, MemoryStick, HardDrive, Wifi, Search } from 'lucide-react';
+import { Database, TrendingUp, Zap, Loader2, AlertTriangle, RefreshCw, FileText, Cpu, MemoryStick, HardDrive, Wifi, Search, ArrowRight } from 'lucide-react';
 import { LineChart, Line, ResponsiveContainer, YAxis } from 'recharts';
 import { apiFetch, runAnalysis as runAnalysisJob } from '@/lib/api';
 import { useTimeRange } from '@/context/TimeRangeContext';
@@ -44,6 +45,7 @@ function Sparkline({ data, dataKey, color }: { data: any[], dataKey: string, col
 }
 
 export default function CommandCenter() {
+ const router = useRouter();
  const { timeRange } = useTimeRange();
  const { tasks, executeTask, attachRemoteTask } = useTasks();
  const [data, setData] = useState<any>(null);
@@ -202,6 +204,28 @@ export default function CommandCenter() {
  const interval = setInterval(tick, 1000);
  return () => clearInterval(interval);
  }, [analysisStartedAt]);
+
+ // The run this panel links to. Both a fresh task result and the snapshot loaded
+ // on mount carry the id, so the link works after a reload as well.
+ const reportRunId: string | null = data?.run_id || null;
+ const clusterCount: number | null = data?.clusters?.length ?? null;
+
+ // One line of scale, so the card says something without reproducing the
+ // report. The failure domain is its own field above; repeating it here would
+ // just be the same sentence twice.
+ const reportHeadline = (() => {
+ if (!data) return '';
+ const parts: string[] = [];
+ if (data.total_logs) parts.push(`${data.total_logs.toLocaleString()} logs`);
+ if (clusterCount != null) parts.push(`${clusterCount.toLocaleString()} clusters`);
+ const outliers = (data.clusters || [])
+ .filter((c: any) => c.cluster_id === -1)
+ .reduce((acc: number, c: any) => acc + (c.size || 0), 0);
+ if (outliers > 0) parts.push(`${outliers.toLocaleString()} outliers`);
+ const hints = data.intelligence?.root_cause_hints?.length;
+ if (hints) parts.push(`${hints} remediation hint${hints === 1 ? '' : 's'}`);
+ return parts.length ? parts.join(' · ') : 'Analysis complete.';
+ })();
 
  const taskIdForSource = (name: string) => `analysis:${name}`;
 
@@ -622,64 +646,58 @@ export default function CommandCenter() {
  )}
  </div>
 
- <div className="mb-5">
- <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-2">Incident Summary</p>
- <ul className="space-y-3 text-xs text-[var(--text-input)]">
+ {/* The report itself is not rendered here. The full narrative summary,
+ every remediation hint and every cluster used to be dumped into this
+ panel, which buried the operational view. The Command Center states
+ that a report exists and what it found; reading it is one click. */}
+ <div className="flex-1 flex flex-col justify-center">
  {loading ? (
- <div className="space-y-2">
+ <div className="space-y-2.5 py-4">
  <div className="shimmer-bg h-4 w-full rounded" />
  <div className="shimmer-bg h-4 w-5/6 rounded" />
  <div className="shimmer-bg h-4 w-2/3 rounded" />
  </div>
  ) : error ? (
- <li className="flex items-start gap-2.5 text-red-400 bg-red-500/5 p-3 rounded-lg border border-red-500/10">
+ <div className="flex items-start gap-2.5 text-red-400 bg-red-500/5 p-3 rounded-lg border border-red-500/10 text-xs">
  <AlertTriangle size={14} className="shrink-0 mt-0.5" />
  {error}
- </li>
- ) : data?.intelligence?.incident_summary ? (
- Array.isArray(data.intelligence.incident_summary) ? data.intelligence.incident_summary.map((s:string, i:number) => (
- <li key={i} className="flex items-start gap-2.5">
- <span className="w-1.5 h-1.5 rounded-full bg-[var(--primary)] mt-1.5 shrink-0"></span>
- {s}
- </li>
- )) : (
- <li className="flex items-start gap-2.5">
- <span className="w-1.5 h-1.5 rounded-full bg-[var(--primary)] mt-1.5 shrink-0"></span>
- {typeof data.intelligence.incident_summary === 'object' ? (data.intelligence.incident_summary?.summary || data.intelligence.incident_summary?.representative_log || JSON.stringify(data.intelligence.incident_summary)) : data.intelligence.incident_summary}
- </li>
- )
+ </div>
+ ) : reportRunId ? (
+ <button
+ type="button"
+ onClick={() => router.push(`/app/runs/${reportRunId}`)}
+ className="group w-full text-left bg-[var(--bg-inset)] border border-[var(--border-subtle)] hover:border-[var(--primary)]/40 rounded-lg p-5 transition-colors cursor-pointer"
+ >
+ <div className="flex items-start gap-3">
+ <div className="w-9 h-9 rounded-lg bg-[var(--primary)]/10 border border-[var(--primary)]/20 flex items-center justify-center shrink-0">
+ <FileText size={16} className="text-[var(--primary)]" />
+ </div>
+ <div className="min-w-0">
+ <p className="text-sm font-semibold text-[var(--text-primary)]">Report generated</p>
+ <p className="text-[11px] text-[var(--text-muted)] mt-1 leading-relaxed">
+ {reportHeadline}
+ </p>
+ </div>
+ </div>
+ <span className="mt-4 inline-flex items-center gap-1.5 text-xs font-semibold text-[var(--primary)] group-hover:gap-2.5 transition-all">
+ View full analysis report <ArrowRight size={13} />
+ </span>
+ </button>
+ ) : data ? (
+ // A run finished but was never persisted (e.g. an older in-memory
+ // result); say so rather than offering a link that 404s.
+ <p className="text-xs text-[var(--text-muted)] py-4">
+ Analysis complete. This result was not persisted, so there is no report to open.
+ </p>
  ) : (
- <li className="flex items-start gap-2.5 text-[var(--text-muted)]">
- Select a source and run analysis to begin.
- </li>
+ <p className="text-xs text-[var(--text-muted)] py-4">
+ Select a source and run analysis to generate a report.
+ </p>
  )}
- </ul>
  </div>
 
- <div className="mt-auto bg-[var(--bg-inset)] border border-[var(--border-subtle)] rounded-lg p-5 shadow-inner">
- <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-3">Remediation Hints</p>
- <ul className="space-y-3 text-xs text-emerald-400 font-medium">
- {loading ? (
- <div className="space-y-2">
- <div className="shimmer-bg h-4 w-full rounded" />
- <div className="shimmer-bg h-4 w-4/5 rounded" />
- </div>
- ) : data?.intelligence?.root_cause_hints ? data.intelligence.root_cause_hints.map((hint:string, i:number) => (
- <li key={i} className="flex items-start gap-2">
- <Zap size={14} className="shrink-0 mt-0.5 text-emerald-500" />
- {hint}
- </li>
- )) : (
- <li className="flex items-start gap-2 text-[var(--text-muted)]">
- <Zap size={14} className="shrink-0 mt-0.5 text-[var(--text-dimmed)]" />
- Pending analysis...
- </li>
- )}
- </ul>
- </div>
- 
- <div className="mt-4 flex justify-between text-[10px] text-[var(--text-muted)]">
- <span>Confidence: {data?.intelligence ? '85%' : '—'}</span>
+ <div className="mt-5 pt-4 border-t border-[var(--border-subtle)] flex justify-between text-[10px] text-[var(--text-muted)]">
+ <span>{clusterCount != null ? `${clusterCount.toLocaleString()} clusters` : 'Confidence: —'}</span>
  <span>Model: {settings?.llm_model || 'Llama 3.3-70B Local'}</span>
  </div>
  </div>

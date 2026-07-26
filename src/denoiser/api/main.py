@@ -1463,7 +1463,10 @@ def _run_to_dict(run: AnalysisRun, db: Session | None = None) -> dict:
         "cluster_count": run.cluster_count,
         "reduction_ratio": run.reduction_ratio,
         "duration_sec": run.duration_sec,
-        "created_at": run.created_at.isoformat() if run.created_at else None,
+        # Stamped with an offset: run.created_at is naive UTC, and an ISO string
+        # without one is parsed as *local* time by the browser, which made a run
+        # from a minute ago render hours out.
+        "created_at": iso_utc(run.created_at),
         "clusters_snapshot": run.clusters_snapshot,
     }
     if db:
