@@ -108,3 +108,43 @@ def save_settings(settings: dict[str, Any], db=None) -> dict[str, Any]:
     finally:
         if owns_session:
             db.close()
+
+
+# ── Compliance switches ─────────────────────────────────────────────────────
+#
+# `redact_pii` and `store_raw_logs` were stored, exposed in the Settings API and
+# rendered in the UI with explicit promises attached — "Mask sensitive data",
+# "Keep a local copy of ingested raw logs" — but nothing read them. Toggling
+# either changed nothing, which is worse than not offering the control: a
+# compliance officer who switches redaction on has been told it is on.
+#
+# These helpers are the read side. Every write path that persists log content
+# consults them.
+
+def redaction_enabled() -> bool:
+    """Whether ingested log content must be redacted before it is stored."""
+    try:
+        return bool(load_settings().get("redact_pii", True))
+    except Exception:
+        # Fail closed: if the setting cannot be read, redact.
+        return True
+
+
+def raw_log_storage_enabled() -> bool:
+    """Whether raw ingested lines may be written to the local data directory."""
+    try:
+        return bool(load_settings().get("store_raw_logs", True))
+    except Exception:
+        # Fail closed: if the setting cannot be read, do not write to disk.
+        return False
+
+
+def build_redactor():
+    """A Redactor configured from current platform settings.
+
+    Constructed per call rather than cached, so an operator toggling redaction
+    takes effect on the next batch instead of at the next restart.
+    """
+    from denoiser.preprocessing.redaction import Redactor
+
+    return Redactor(enabled=redaction_enabled())

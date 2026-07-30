@@ -27,8 +27,15 @@ Focus on precision, identifying specific affected components, and potential casc
 class IncidentIntelligence:
     """Generates human-readable incident summaries with built-in reliability fallbacks."""
 
-    def __init__(self) -> None:
-        self.enabled = settings.llm_enabled
+    def __init__(self, enabled: bool | None = None) -> None:
+        """``enabled`` overrides the deployment default for this instance only.
+
+        A run that asks for intelligence used to turn it on by assigning
+        `settings.llm_enabled = True` — a process-wide singleton, mutated
+        per-request and never restored, so one analysis silently enabled the LLM
+        for every subsequent run in that worker.
+        """
+        self.enabled = settings.llm_enabled if enabled is None else enabled
         self.model = settings.llm_model
         self.client = None
 

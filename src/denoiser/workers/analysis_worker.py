@@ -1,44 +1,16 @@
-import asyncio
 import json
 import os
-import time
-import uuid
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 
-import polars as pl
 from celery import Celery
 
-from denoiser.cli.main import (
-    AnomalyScorer,
-    BaselineManager,
-    Deduplicator,
-    IncidentIntelligence,
-    LocalEmbeddingProvider,
-    LogClusterer,
-    LogReader,
-    Normalizer,
-    Redactor,
-)
-from denoiser.config import settings
-from denoiser.detection.causal_scorer import CausalScorer
-from denoiser.detection.metrics_correlator import MetricsCorrelator
-from denoiser.detection.severity import SeverityScorer
-from denoiser.integrations.alert_router import AlertPayload, alert_router
-from denoiser.integrations.email import email_notifier
+from denoiser.analysis import pipeline
 from denoiser.logging import get_logger
-from denoiser.preprocessing.timestamp import TimestampExtractor
-from denoiser.storage.db import AnalysisRun, Incident, SessionLocal
+from denoiser.storage.db import SessionLocal
 from denoiser.storage.vector_store import VectorStore
 
 logger = get_logger(__name__)
 
-# Priority ordering, most severe first. Used to pick an incident's overall
-# severity from its clusters.
-_PRIORITY_RANK = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
-
-
-_DEFAULT_MAX_ANALYSIS_LINES = 500_000
 
 # Rows per ClickHouse insert when indexing an analysed source.
 _INDEX_BATCH_SIZE = 5_000
@@ -59,13 +31,17 @@ def index_records_for_search(records: list[dict], tenant_id, run_id: str) -> int
         return 0
 
     try:
-        from denoiser.storage.clickhouse_store import ClickHouseStore
+        from denoiser import runtime
 
-        store = ClickHouseStore()
+        store = runtime.clickhouse_store()
         if not store.client:
             logger.warning("ClickHouse unavailable; analysed logs were not indexed for search")
             return 0
 
+        # `raw_text` arrives already redacted from the read loop, so the copy
+        # made searchable here carries no secrets. Indexing it verbatim was what
+        # made every password and card number in an analysed file queryable
+        # through /v1/logs/query.
         indexed = 0
         for start in range(0, len(records), _INDEX_BATCH_SIZE):
             batch = []
@@ -102,22 +78,10 @@ def index_records_for_search(records: list[dict], tenant_id, run_id: str) -> int
         return 0
 
 
-def _resolve_max_lines(request_dict: dict) -> int:
-    """Effective per-run line cap: request `max_lines` wins, else the
-    SEMANTICOS_MAX_ANALYSIS_LINES env var, else the built-in default."""
-    return int(
-        request_dict.get("max_lines")
-        or os.getenv("SEMANTICOS_MAX_ANALYSIS_LINES", str(_DEFAULT_MAX_ANALYSIS_LINES))
-    )
 
 
-def _worst_priority(clusters: list[dict]) -> str:
-    """The most severe priority among clusters (P0 worst … P3 least)."""
-    return min(
-        (c.get("priority", "P3") for c in clusters),
-        key=lambda p: _PRIORITY_RANK.get(p, 3),
-        default="P3",
-    )
+
+
 
 
 # Initialize Celery using local Redis if URL not provided
@@ -139,397 +103,42 @@ vector_store = VectorStore()
 
 @celery_app.task(bind=True)
 def run_analysis_task(self, request_dict: dict):
-    """
-    Background Celery task that performs heavy log ingestion, deduplication,
-    embedding, clustering, anomaly detection, LLM analysis, and DB persistence.
+    """Run one analysis and record it.
+
+    The 461-line body this replaced is now `denoiser.analysis.pipeline`, staged
+    over one explicit run state. What is left here is what is genuinely Celery's:
+    unpacking the message, reporting progress, and owning the database session.
     """
     logger.info(f"Starting async analysis task: {self.request.id}")
-    self.update_state(state='PROGRESS', meta={'progress': 10, 'status': 'Ingesting files'})
 
-    start_time = time.time()
-
-    # Unpack request
-    sources = request_dict.get("sources", [])
-    if not sources and "source" in request_dict:
-        sources = [request_dict.get("source")]
-
-    baseline = request_dict.get("baseline")
-    intelligence = request_dict.get("intelligence", False)
-    top_n = request_dict.get("top_n", 3)
-
-    # Bound how many raw lines a single analysis run pulls into memory. Without a
-    # cap, a multi-million-line source loads entirely into a list → polars frame
-    # → per-row objects, which can OOM the worker. The most recent lines matter
-    # most for denoising, but LogReader is forward-only, so we cap from the front
-    # and flag truncation. Configurable per-request or via env.
-    max_lines = _resolve_max_lines(request_dict)
-
-    # 1. Ingestion
-    timestamp_extractor = TimestampExtractor()
-    records_data = []
-    reader = LogReader()
-    truncated = False
-
-    for src in sources:
-        if truncated:
-            break
-        source_label = Path(src).stem
-        try:
-            for record in reader.read(src):
-                epoch_ms = timestamp_extractor.extract(record.raw_text)
-                dt = (
-                    datetime.fromtimestamp(epoch_ms / 1000.0, UTC)
-                    if epoch_ms is not None
-                    else None
-                )
-
-                records_data.append({
-                    "raw_text": record.raw_text,
-                    "source_path": record.source,
-                    "source_label": source_label,
-                    "line_number": record.line_number,
-                    "timestamp": dt,
-                    "timestamp_ms": epoch_ms or 0,
-                    "metadata": json.dumps(record.metadata)
-                })
-
-                if len(records_data) >= max_lines:
-                    truncated = True
-                    logger.warning(
-                        f"Analysis input capped at max_lines={max_lines}; "
-                        f"remaining lines in {src} (and any later sources) were "
-                        f"skipped for this run."
-                    )
-                    break
-        except Exception as e:
-            logger.warning(f"Failed to read source {src}: {e}")
-
-    if not records_data:
-        return {"status": "error", "message": "No logs found at source(s)"}
-
-    self.update_state(state='PROGRESS', meta={'progress': 30, 'status': 'Redacting and Normalizing'})
-    df = pl.DataFrame(records_data)
-
-    # 3. Apply Redaction and Normalization
-    redactor = Redactor(enabled=True)
-    normalizer = Normalizer()
-
-    raw_texts = df["raw_text"].to_list()
-    redacted_texts = [redactor.redact(t) for t in raw_texts]
-    normalized_texts = normalizer.normalize_batch(redacted_texts)
-    df = df.with_columns(pl.Series("normalized_text", normalized_texts))
-
-    # 4. Deduplication
-    deduper = Deduplicator()
-    from denoiser.ingestion.models import LogRecord
-    for row in df.iter_rows(named=True):
-        meta = json.loads(row["metadata"]) if row["metadata"] else {}
-        meta["source_label"] = row["source_label"]
-
-        rec = LogRecord(
-            raw_text=row["raw_text"],
-            source=row["source_path"],
-            line_number=row["line_number"],
-            timestamp=row["timestamp"],
-            metadata=meta,
-            normalized_text=row["normalized_text"]
-        )
-        deduper.add(rec)
-
-    unique_templates = deduper.get_unique_templates()
-    if not unique_templates:
-        return {"status": "error", "message": "No unique log templates found"}
-
-    # 5. Embeddings
-    self.update_state(state='PROGRESS', meta={'progress': 50, 'status': 'Generating Embeddings'})
-    embedder = LocalEmbeddingProvider()
-    vectors = embedder.embed(unique_templates)
-
-    # Persist vectors to LanceDB (Task 38)
-    try:
-        groups = deduper.get_all_groups()
-        source_list = []
-        ts_list = []
-        for template in unique_templates:
-            records = groups.get(template, [])
-            first = records[0] if records else None
-            source_list.append(
-                first.metadata.get("source_label", first.source if first else "unknown")
-                if first
-                else "unknown"
-            )
-            ts_list.append(
-                int(first.timestamp.timestamp() * 1000)
-                if first and first.timestamp
-                else int(time.time() * 1000)
-            )
-
-        vector_store.add_embeddings(
-            ids=[str(uuid.uuid4()) for _ in unique_templates],
-            vectors=vectors,
-            templates=unique_templates,
-            sources=source_list,
-            timestamps=ts_list
-        )
-    except Exception as e:
-        logger.error(f"Failed to persist to LanceDB: {e}")
-
-    # 6. Clustering
-    self.update_state(state='PROGRESS', meta={'progress': 60, 'status': 'Clustering Logs'})
-    clusterer = LogClusterer()
-    clusters = clusterer.fit_predict(
-        unique_templates, vectors, deduper.get_all_groups(), deduper.get_all_counts()
+    request = pipeline.RunRequest.from_dict(
+        request_dict, run_id=self.request.id or ""
     )
 
-    # 7. Anomaly Detection
-    anomalies = None
-    if baseline:
-        bm = BaselineManager(baseline)
-        scorer = AnomalyScorer(bm)
-        results = scorer.score_batch(unique_templates, vectors)
-        anomalies = {res.template: res for res in results}
-
-    # 8. Intelligence
-    llm_payload = None
-    if intelligence:
-        self.update_state(state='PROGRESS', meta={'progress': 80, 'status': 'Generating AI Summary'})
-        settings.llm_enabled = True
-        intel = IncidentIntelligence()
-        llm_payload = intel.generate_summary(clusters, anomalies, top_n=top_n)
-
-    # 9. Format Response
-    formatted_clusters = []
-    summaries = llm_payload.get("cluster_summaries", []) if llm_payload else []
-
-    for i, c in enumerate(clusters):
-        cluster_data = {
-            "id": c.cluster_id,
-            "cluster_id": c.cluster_id,
-            "size": c.size,
-            "summary": summaries[i] if i < len(summaries) else "Analyzing...",
-            "source": f"{c.representative_source}:{c.representative_line}",
-            "representative_log": c.representative_raw,
-            "representative_template": c.representative_template,
-            "representative_timestamp_ms": getattr(c, "representative_timestamp_ms", 0),
-            # The clusterer's UMAP coordinates (up to 50 points per cluster).
-            # Dropping them here meant the Neural Topology chart never received
-            # a real projection and silently fell back to a synthetic scatter.
-            "projection_2d": [list(point) for point in (getattr(c, "projection_2d", None) or [])],
-            "anomaly_label": "known",
-            "anomaly_score": 0.0
-        }
-        if anomalies and c.representative_template in anomalies:
-            res = anomalies[c.representative_template]
-            cluster_data["anomaly_label"] = res.label.value
-            cluster_data["anomaly_score"] = res.distance
-
-        formatted_clusters.append(cluster_data)
-
-    # 10. Cross-service causal links and severity labels
-    try:
-        causal_links = CausalScorer().analyze(clusters, deduper.get_all_groups())
-    except Exception as e:
-        logger.error(f"Causal scorer failed: {e}")
-        causal_links = []
-
-    narratives = {}
-    if intelligence and causal_links:
-        try:
-            narratives = IncidentIntelligence().narrate_causal_links(causal_links)
-        except Exception as e:
-            logger.error(f"Failed to generate causal narration: {e}")
-
-    formatted_links = []
-    for link in causal_links:
-        key = f"{link.source_service}->{link.target_service}"
-        narrative_val = narratives.get(key) or (
-            f"Anomalous pattern in {link.source_service} co-occurred with a warning in "
-            f"{link.target_service} after an average delay of {link.avg_delay_ms:.1f}ms "
-            f"(Confidence: {link.confidence * 100:.0f}%)."
-        )
-        formatted_links.append({
-            "source_cluster_id": link.source_cluster_id,
-            "target_cluster_id": link.target_cluster_id,
-            "source_service": link.source_service,
-            "target_service": link.target_service,
-            "source_template": link.source_template,
-            "target_template": link.target_template,
-            "confidence": link.confidence,
-            "avg_delay_ms": link.avg_delay_ms,
-            "occurrences": link.occurrences,
-            "direction": link.direction,
-            "narrative": narrative_val,
-        })
+    def progress(percent: int, status: str) -> None:
+        self.update_state(state="PROGRESS", meta={"progress": percent, "status": status})
 
     try:
-        severity_map = SeverityScorer().score_all(clusters, anomalies, causal_links)
-        for cluster_data in formatted_clusters:
-            sev = severity_map.get(cluster_data["cluster_id"])
-            cluster_data["priority"] = sev.priority if sev else "P3"
-            cluster_data["composite_severity_score"] = sev.composite_score if sev else 0.0
-            cluster_data["severity_breakdown"] = sev.breakdown if sev else {}
-            cluster_data["keyword_flag"] = sev.keyword_flag if sev else False
-    except Exception as e:
-        logger.error(f"Severity scorer failed: {e}")
+        state = pipeline.analyse(request, vector_store=vector_store, progress=progress)
+    except pipeline.RunAborted as e:
+        return {"status": "error", "message": str(e)}
 
-    metrics_context = {"status": "disabled", "clusters_correlated": 0, "clusters_total": 0}
-    try:
-        correlator = MetricsCorrelator()
-        clusters_total = 0
-        clusters_correlated = 0
-        for cluster_data in formatted_clusters:
-            if cluster_data.get("cluster_id") == -1:
-                cluster_data["metrics_context"] = {"status": "skipped_noise"}
-                continue
-            clusters_total += 1
-            if cluster_data.get("priority", "P3") not in ("P0", "P1", "P2"):
-                cluster_data["metrics_context"] = {"status": "skipped_non_incident"}
-                continue
-            ts_ms = int(cluster_data.get("representative_timestamp_ms") or 0)
-            if ts_ms <= 0:
-                cluster_data["metrics_context"] = {"status": "no_timestamp"}
-                continue
-            ctx = correlator.get_context_for_anomaly(ts_ms, window_ms=30000)
-            cluster_data["metrics_context"] = ctx
-            if ctx.get("status") == "correlated":
-                clusters_correlated += 1
-        metrics_context = {
-            "status": "correlated" if clusters_correlated > 0 else "no_data",
-            "clusters_correlated": clusters_correlated,
-            "clusters_total": clusters_total,
-        }
-    except Exception as e:
-        logger.error(f"Metrics correlator failed: {e}")
-        metrics_context = {"status": "error", "message": str(e)}
-
-    # 11. Database persistence
-    self.update_state(state='PROGRESS', meta={'progress': 95, 'status': 'Saving to Database'})
+    progress(95, "Saving to Database")
     db = SessionLocal()
-    duration = time.time() - start_time
-    run_id = self.request.id or f"run_{uuid.uuid4().hex[:8]}"
-    source_name = ", ".join(sources)
     try:
-        tenant_id = request_dict.get("tenant_id")
-        # Make the analysed lines searchable (Explore), extractable (Metrics)
-        # and monitorable — all three read the ClickHouse store.
-        index_records_for_search(records_data, tenant_id, run_id)
-        db_run = AnalysisRun(
-            id=run_id,
-            tenant_id=tenant_id,
-            source=source_name,
-            status="Completed",
-            raw_lines=deduper.total_count,
-            cluster_count=len(clusters),
-            reduction_ratio=1.0 - (len(clusters) / deduper.total_count) if deduper.total_count > 0 else 0,
-            duration_sec=duration,
-            clusters_snapshot=formatted_clusters
+        incident = pipeline.persist(state, db, index=index_records_for_search)
+        pipeline.announce(
+            state, db, alert=pipeline.pending_alert(state), incident=incident
         )
-        db.add(db_run)
-
-        if llm_payload:
-            new_incident = Incident(
-                tenant_id=tenant_id,
-                title=llm_payload.get("failure_domain", "Unknown Failure"),
-                domain=llm_payload.get("failure_domain", "System"),
-                severity=_worst_priority(formatted_clusters),
-                impact_score=min(1.0, len(clusters) / 10.0) if len(clusters) > 1 else 0.3,
-                summary=llm_payload.get("incident_summary", ""),
-                remediation_hints=llm_payload.get("root_cause_hints", []),
-                run_id=run_id,
-                source=source_name,
-                total_logs=deduper.total_count,
-                cluster_count=len(clusters),
-            )
-            db.add(new_incident)
-
-            # Dispatch alerts via AlertRouter
-            try:
-                # Find the most severe priority among clusters. A rank-based min
-                # correctly surfaces P2 as the worst when no P0/P1 is present —
-                # the previous loop only ever promoted to P0/P1, so a top-severity
-                # of P2 stayed P3 and never alerted despite the P2 gate below.
-                max_priority = _worst_priority(formatted_clusters)
-                anomaly_score = 0.0
-                representative_log = "No log available"
-                keyword_flag = False
-
-                if formatted_clusters:
-                    anomaly_score = formatted_clusters[0].get("anomaly_score", 0.0)
-                    representative_log = formatted_clusters[0].get("representative_log", "")
-                    keyword_flag = formatted_clusters[0].get("keyword_flag", False)
-
-                if max_priority in ("P0", "P1", "P2"):
-                    alert = AlertPayload(
-                        source=source_name,
-                        run_id=run_id,
-                        priority=max_priority,
-                        cluster_id=formatted_clusters[0].get("cluster_id", 0) if formatted_clusters else 0,
-                        cluster_summary=llm_payload.get("incident_summary", "Anomaly Detected"),
-                        representative_log=representative_log,
-                        anomaly_score=anomaly_score,
-                        causal_links=formatted_links,
-                        intelligence=llm_payload,
-                        keyword_flag=keyword_flag
-                    )
-
-                    # Fire email concurrently (using thread/synchronous send)
-                    # We send emails for P0 or P1
-                    if max_priority in ("P0", "P1"):
-                        try:
-                            email_notifier.send_alert(alert)
-                        except Exception as em_err:
-                            logger.error(f"EmailNotifier error: {em_err}")
-
-                    delivery_records = asyncio.run(alert_router.dispatch(alert))
-
-                    # Store delivery records in DB
-                    from denoiser.storage.db import AlertLog
-                    for rec in delivery_records:
-                        db_log = AlertLog(
-                            webhook_id=rec.webhook_id,
-                            alert_fingerprint=rec.alert_fingerprint,
-                            priority=rec.priority,
-                            status=rec.status.value,
-                            http_status=rec.http_status,
-                            latency_ms=rec.latency_ms,
-                            error=rec.error,
-                            timestamp=rec.timestamp
-                        )
-                        db.add(db_log)
-
-            except Exception as e:
-                logger.error(f"Failed to dispatch alerts: {e}")
-
-        db.commit()
-
-        # Post-commit triggers
-        if llm_payload:
-            try:
-                from denoiser.automation.engine import process_incident
-                process_incident(db, new_incident)
-            except Exception as auto_err:
-                logger.error(f"Failed to execute runbooks: {auto_err}")
-
     except Exception as e:
         logger.error(f"DB Error: {e}")
         db.rollback()
+        state.failed("persistence", e)
     finally:
         db.close()
 
-    return {
-        "status": "success",
-        "run_id": run_id,
-        "clusters": formatted_clusters,
-        "intelligence": llm_payload,
-        "causal_links": formatted_links,
-        "metrics_context": metrics_context,
-        "total_logs": deduper.total_count,
-        "total_logs_analyzed": deduper.total_count,
-        "truncated": truncated,
-        "max_lines": max_lines,
-        "duration_sec": duration,
-        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
-    }
+    return pipeline.result(state)
+
 
 @celery_app.task
 def evaluate_slos():
@@ -697,11 +306,12 @@ def extract_metrics():
     logger.info("Extracting metrics from logs...")
     db = SessionLocal()
     try:
-        from denoiser.storage.clickhouse_store import ClickHouseStore
+        from denoiser import runtime
         from denoiser.storage.db import ExtractedMetric, MetricRule
+        from denoiser.storage.errors import StoreUnavailable
 
         rules = db.query(MetricRule).filter(MetricRule.enabled).all()
-        ch_store = ClickHouseStore()
+        ch_store = runtime.clickhouse_store()
 
         now = datetime.now(UTC)
         for rule in rules:
@@ -727,6 +337,14 @@ def extract_metrics():
                     value=value
                 )
                 db.add(dp)
+            except StoreUnavailable as e:
+                # A gap in the series, not a zero in it. Recording the store's
+                # own absence as a measurement would put a permanent flat line
+                # through every outage, and nothing downstream could ever tell
+                # it apart from a genuinely quiet window.
+                logger.warning(
+                    "Skipped metric rule %s: %s", rule.id, e,
+                )
             except Exception as e:
                 logger.error(f"Failed to extract metric for rule {rule.id}: {e}")
 

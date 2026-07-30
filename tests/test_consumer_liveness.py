@@ -115,10 +115,11 @@ class TestReadinessIntegration:
         from fastapi.testclient import TestClient
 
         import denoiser.api.main as main
+        from denoiser import runtime
 
         with TestClient(main.app) as client:
-            # TestClient startup leaves kafka_producer None when no broker is up.
-            if main.kafka_producer is None:
+            # TestClient startup leaves the producer unset when no broker is up.
+            if runtime.kafka_producer() is None:
                 body = client.get("/health/ready").json()
                 assert body["checks"]["ingestion_consumer"].startswith("not_required")
 
@@ -126,13 +127,17 @@ class TestReadinessIntegration:
         from fastapi.testclient import TestClient
 
         import denoiser.api.main as main
+        from denoiser import runtime
 
         class StubProducer:
             async def stop(self):
                 pass
 
         with TestClient(main.app) as client:
-            monkeypatch.setattr(main, "kafka_producer", StubProducer())
+            # Published through the runtime seam rather than set on the module,
+            # so every reader sees it — there is now only one reader.
+            runtime.set_kafka_producer(StubProducer())
+            monkeypatch.setattr(runtime, "_kafka_producer", StubProducer())
 
             async def _no_heartbeat(_redis):
                 return None

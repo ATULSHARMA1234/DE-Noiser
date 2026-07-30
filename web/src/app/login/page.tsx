@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Cpu, Mail, Lock, ShieldAlert, Loader2 } from 'lucide-react';
-import { apiPost, apiFetch } from '@/lib/api';
+import { apiPost, apiFetch, setSessionToken } from '@/lib/api';
 
 export default function LoginPage() {
  const router = useRouter();
@@ -20,7 +20,10 @@ export default function LoginPage() {
  setError(null);
  apiFetch(`/auth/sso/callback?code=${encodeURIComponent(code)}`)
  .then((data) => {
- localStorage.setItem('token', data.access_token);
+ // The session itself is in httpOnly cookies set by the server; the token
+ // is held in memory only, as a fallback for split-origin dev where the
+ // browser will not send the cookie. Never persisted.
+ setSessionToken(data.access_token ?? null);
  localStorage.setItem('user', JSON.stringify(data.user));
  router.push('/app');
  })
@@ -41,8 +44,10 @@ export default function LoginPage() {
  try {
  const data = await apiPost('/auth/login', { email, password });
 
- // Store auth session
- localStorage.setItem('token', data.access_token);
+ // The server set httpOnly session cookies on this response. Only the
+ // non-sensitive user profile is persisted, so there is nothing in
+ // localStorage for an XSS to steal.
+ setSessionToken(data.access_token ?? null);
  localStorage.setItem('user', JSON.stringify(data.user));
 
  // Redirect to main command center

@@ -1,5 +1,4 @@
-from datetime import datetime
-from datetime import UTC
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -7,6 +6,8 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
 from denoiser.api.auth import User, require_role
+from denoiser.api.pagination import ResourceId
+from denoiser.api.scope import TenantScope, tenant_scope
 from denoiser.storage.db import Integration as DBIntegration
 from denoiser.storage.db import get_db
 
@@ -71,23 +72,22 @@ class IntegrationSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 @router.get("", response_model=list[IntegrationSchema])
-def list_integrations(db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
-    integrations = db.query(DBIntegration).filter(DBIntegration.tenant_id == current_user.tenant_id).order_by(DBIntegration.created_at.desc()).all()
+def list_integrations(db: Session = Depends(get_db), scope: TenantScope = Depends(tenant_scope), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
+    integrations = scope.query(DBIntegration).order_by(DBIntegration.created_at.desc()).all()
     # Expire so the masking below is never flushed back to the database.
     for integration in integrations:
         db.expunge(integration)
     return [_redact(i) for i in integrations]
 
 @router.post("", response_model=IntegrationSchema)
-def create_integration(payload: IntegrationCreateSchema, db: Session = Depends(get_db), current_user: User = Depends(require_role(["ADMIN"]))):
+def create_integration(payload: IntegrationCreateSchema, db: Session = Depends(get_db), scope: TenantScope = Depends(tenant_scope), current_user: User = Depends(require_role(["ADMIN"]))):
     integration = DBIntegration(
-        tenant_id=current_user.tenant_id,
         provider=payload.provider,
         name=payload.name,
         config=payload.config,
         enabled=True
     )
-    db.add(integration)
+    scope.add(integration)
     db.commit()
     db.refresh(integration)
     db.expunge(integration)
@@ -95,9 +95,10 @@ def create_integration(payload: IntegrationCreateSchema, db: Session = Depends(g
 
 @router.put("/{integration_id}", response_model=IntegrationSchema)
 def update_integration(
-    integration_id: int,
+    integration_id: ResourceId,
     payload: IntegrationUpdateSchema,
     db: Session = Depends(get_db),
+    scope: TenantScope = Depends(tenant_scope),
     current_user: User = Depends(require_role(["ADMIN"])),
 ):
     """Update a connected integration (the UI's "Configure" action).
@@ -107,7 +108,7 @@ def update_integration(
     """
     integration = db.query(DBIntegration).filter(
         DBIntegration.id == integration_id,
-        DBIntegration.tenant_id == current_user.tenant_id,
+        scope.predicate(DBIntegration),
     ).first()
 
     if not integration:
@@ -147,8 +148,9 @@ def _provider_for(integration: DBIntegration):
 
 @router.post("/{integration_id}/test", response_model=dict[str, Any])
 def test_integration(
-    integration_id: int,
+    integration_id: ResourceId,
     db: Session = Depends(get_db),
+    scope: TenantScope = Depends(tenant_scope),
     current_user: User = Depends(require_role(["ANALYST", "ADMIN"])),
 ):
     """Check that a stored integration's credentials actually work.
@@ -158,7 +160,7 @@ def test_integration(
     """
     integration = db.query(DBIntegration).filter(
         DBIntegration.id == integration_id,
-        DBIntegration.tenant_id == current_user.tenant_id,
+        scope.predicate(DBIntegration),
     ).first()
     if not integration:
         raise HTTPException(status_code=404, detail="Integration not found")
@@ -184,8 +186,9 @@ def test_integration(
 
 @router.post("/{integration_id}/sync", response_model=dict[str, Any])
 def sync_integration(
-    integration_id: int,
+    integration_id: ResourceId,
     db: Session = Depends(get_db),
+    scope: TenantScope = Depends(tenant_scope),
     current_user: User = Depends(require_role(["ANALYST", "ADMIN"])),
 ):
     """Pull deployment metadata from the provider into the deployment markers.
@@ -199,7 +202,7 @@ def sync_integration(
 
     integration = db.query(DBIntegration).filter(
         DBIntegration.id == integration_id,
-        DBIntegration.tenant_id == current_user.tenant_id,
+        scope.predicate(DBIntegration),
     ).first()
     if not integration:
         raise HTTPException(status_code=404, detail="Integration not found")
@@ -232,7 +235,7 @@ def sync_integration(
         environment = deployment.get("environment") or "production"
         service = service_by_environment.get(environment, default_service)
         existing = db.query(DeploymentMarker).filter(
-            DeploymentMarker.tenant_id == current_user.tenant_id,
+            scope.predicate(DeploymentMarker),
             DeploymentMarker.service == service,
             DeploymentMarker.version == version,
             DeploymentMarker.environment == environment,
@@ -241,7 +244,7 @@ def sync_integration(
             continue
 
         db.add(DeploymentMarker(
-            tenant_id=current_user.tenant_id,
+            tenant_id=scope.tenant_id,
             service=service,
             version=version,
             environment=environment,
@@ -285,10 +288,10 @@ def _parse_github_time(value: str | None):
 
 
 @router.delete("/{integration_id}")
-def delete_integration(integration_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_role(["ADMIN"]))):
+def delete_integration(integration_id: ResourceId, db: Session = Depends(get_db), scope: TenantScope = Depends(tenant_scope), current_user: User = Depends(require_role(["ADMIN"]))):
     integration = db.query(DBIntegration).filter(
         DBIntegration.id == integration_id,
-        DBIntegration.tenant_id == current_user.tenant_id
+        scope.predicate(DBIntegration)
     ).first()
 
     if not integration:

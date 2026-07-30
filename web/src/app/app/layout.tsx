@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { LayoutGrid, Terminal, ShieldAlert, History, Database, Settings, Search, Play, Cpu, X, FileText, Loader2, Network, Users, Bell, Sun, Moon, Menu, Activity, Zap, Plug, BookOpen } from 'lucide-react';
+import { LayoutGrid, Terminal, ShieldAlert, History, Database, Settings, Search, Play, Cpu, X, FileText, Loader2, Network, Users, Bell, Sun, Moon, Menu, Activity, Zap, Plug, BookOpen, Bug } from 'lucide-react';
 import { apiFetch, runAnalysis } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from 'next-themes';
@@ -53,6 +53,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
  {
  label: 'Analyze',
  items: [
+ { name: 'Issues', path: '/app/issues', icon: Bug },
  {
  name: 'Incidents', path: '/app/incidents', icon: ShieldAlert,
  children: [{ name: 'Analysis Runs', path: '/app/runs' }],

@@ -370,9 +370,9 @@ async def run_syslog_server(
 
 def _clickhouse_sink() -> Sink:
     """Default sink: dual-write to ClickHouse, like the /ingest fallback path."""
-    from denoiser.storage.clickhouse_store import ClickHouseStore
+    from denoiser import runtime
 
-    store = ClickHouseStore()
+    store = runtime.clickhouse_store()
 
     def sink(records: list[dict[str, Any]], tenant_id: str) -> None:
         store.insert_logs(records, tenant_id=tenant_id)

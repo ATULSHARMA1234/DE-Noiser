@@ -14,9 +14,10 @@ import { useParams, useRouter } from 'next/navigation';
 import ReactEcharts from 'echarts-for-react';
 import {
   ArrowLeft, Clock, Database, FileText, Layers, Loader2, ShieldAlert,
-  TrendingUp, Zap, AlertTriangle,
+  TrendingUp, Zap, AlertTriangle, Maximize2,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
+import { TopologyModal } from '@/components/TopologyModal';
 
 const cssVar = (name: string, fallback: string) => {
   if (typeof window === 'undefined') return fallback;
@@ -57,6 +58,7 @@ export default function AnalysisReport() {
   const [run, setRun] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [topologyExpanded, setTopologyExpanded] = useState(false);
 
   useEffect(() => {
     if (!runId) return;
@@ -101,7 +103,10 @@ export default function AnalysisReport() {
       tooltip: { show: false },
       legend: { bottom: 0, left: 10, textStyle: { color: cssVar('--text-muted', '#6a717a'), fontSize: 9 }, icon: 'circle' },
       grid: { top: 10, bottom: 30, left: 10, right: 10 },
-      xAxis: { show: false }, yAxis: { show: false },
+      // UMAP coordinates are not centred on zero, and a value axis includes the
+      // origin unless scaled — without this every cluster lands in one corner.
+      xAxis: { show: false, type: 'value', scale: true },
+      yAxis: { show: false, type: 'value', scale: true },
       series: groups.map((g, gi) => ({
         name: g,
         type: 'scatter',
@@ -325,9 +330,30 @@ export default function AnalysisReport() {
         </div>
 
         <div className="lg:col-span-1 bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-xl p-6">
-          <h2 className="text-sm font-semibold text-[var(--text-primary)] mb-1">Neural Topology</h2>
-          <p className="text-xs text-[var(--text-muted)] mb-6">HDBSCAN Projection</p>
-          <div className="h-[240px] bg-[var(--bg-inset)] rounded-lg border border-[var(--border-subtle)] relative">
+          <div className="flex items-start justify-between mb-6">
+            <div>
+              <h2 className="text-sm font-semibold text-[var(--text-primary)] mb-1">Neural Topology</h2>
+              <p className="text-xs text-[var(--text-muted)]">HDBSCAN Projection</p>
+            </div>
+            {projection && <Maximize2 size={14} className="text-[var(--text-muted)] mt-0.5" />}
+          </div>
+          <div
+            className={`h-[240px] bg-[var(--bg-inset)] rounded-lg border border-[var(--border-subtle)] relative transition-colors ${
+              projection ? 'cursor-pointer hover:border-[var(--primary)]' : ''
+            }`}
+            // The scatter is unreadable in a side panel; clicking opens the
+            // same option full screen.
+            onClick={() => projection && setTopologyExpanded(true)}
+            onKeyDown={(e) => {
+              if (projection && (e.key === 'Enter' || e.key === ' ')) {
+                e.preventDefault();
+                setTopologyExpanded(true);
+              }
+            }}
+            role={projection ? 'button' : undefined}
+            tabIndex={projection ? 0 : undefined}
+            aria-label={projection ? 'Expand neural topology projection' : undefined}
+          >
             {projection ? (
               <ReactEcharts option={projection} style={{ height: '100%', width: '100%' }} />
             ) : (
@@ -338,6 +364,12 @@ export default function AnalysisReport() {
           </div>
         </div>
       </div>
+
+      <TopologyModal
+        isOpen={topologyExpanded}
+        onClose={() => setTopologyExpanded(false)}
+        option={projection}
+      />
 
     </div>
   );

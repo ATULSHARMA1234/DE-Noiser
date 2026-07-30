@@ -28,6 +28,22 @@ os.environ.setdefault("SEMANTICOS_DATA_DIR", str(_TEST_DATA))
 # these exported. ClickHouse-backed tests already skip when the client is absent.
 os.environ.setdefault("SEMANTICOS_ENV", "test")
 
+# The SSRF guard resolves a webhook host before every delivery, so any test that
+# names a real vendor endpoint depends on live DNS returning a public address for
+# it. When the local resolver answers with a private address — a VPN, a captive
+# portal, a momentarily poisoned cache — the guard correctly refuses, and an
+# assertion about Slack payload serialization fails for a reason that has nothing
+# to do with the code under test.
+#
+# Exempting the hosts the suite talks to keeps those tests about what they are
+# testing. The guard's own behaviour is covered directly in
+# tests/test_enterprise_hardening.py::TestWebhookSSRF, which uses literal
+# addresses and needs no DNS at all.
+os.environ.setdefault(
+    "SEMANTICOS_WEBHOOK_ALLOWED_HOSTS",
+    "hooks.slack.com,events.pagerduty.com,api.github.com,github.com",
+)
+
 import pytest  # noqa: E402
 
 
@@ -51,3 +67,19 @@ def _report_isolation(request):
         "Something imported denoiser.storage.db before conftest ran."
     )
     yield
+
+
+@pytest.fixture(autouse=True)
+def _reset_runtime_handles():
+    """Put the process-wide handles back after every test.
+
+    `denoiser.runtime` caches one ClickHouse store, one Redis client and one
+    Kafka producer for the whole process. A test that substitutes a fake through
+    the seam would otherwise leave it installed for every test that ran after
+    it — which is the failure mode that made patch-by-module-path feel safer
+    than the seam, and is the only thing the seam needs in exchange.
+    """
+    from denoiser import runtime
+
+    yield
+    runtime.reset()

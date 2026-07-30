@@ -22,6 +22,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from sqlalchemy.orm import Session
 
+from denoiser import runtime
 from denoiser.api.auth import verify_ingest_auth
 from denoiser.logging import get_logger
 from denoiser.settings import is_testing
@@ -37,20 +38,18 @@ router = APIRouter(tags=["Compat"])
 async def _persist(records: list[dict[str, Any]], tenant_id: str) -> int:
     if not records:
         return 0
-    from denoiser.api.main import DATA_DIR, clickhouse_store, redis_client
-
-    stream_file = DATA_DIR / "live_stream.log"
+    stream_file = runtime.data_dir() / "live_stream.log"
     try:
         with open(stream_file, "a") as f:
             f.write("".join(json.dumps(r) + "\n" for r in records))
     except Exception as e:
         logger.warning(f"compat: failed to append live_stream.log: {e}")
 
-    if clickhouse_store.client:
-        clickhouse_store.insert_logs(records, tenant_id=tenant_id)
+    if runtime.clickhouse_store().client:
+        runtime.clickhouse_store().insert_logs(records, tenant_id=tenant_id)
 
     try:
-        async with redis_client.pipeline(transaction=False) as pipe:
+        async with runtime.redis_client().pipeline(transaction=False) as pipe:
             for r in records:
                 pipe.publish(f"log_stream:{tenant_id}", json.dumps(r))
             await pipe.execute()

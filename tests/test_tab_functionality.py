@@ -94,7 +94,10 @@ class TestSearchIndexing:
                 captured["tenant_id"] = tenant_id
                 return True
 
-        monkeypatch.setattr("denoiser.storage.clickhouse_store.ClickHouseStore", lambda: FakeStore())
+        # One seam, one substitution — this used to patch the class inside its
+        # defining module because the worker did a deferred import of it.
+        from denoiser import runtime
+        runtime.set_clickhouse_store(FakeStore())
 
         indexed = analysis_worker.index_records_for_search(self._records(), tenant_id=1, run_id="run-abc")
 
@@ -118,7 +121,8 @@ class TestSearchIndexing:
         class DeadStore:
             client = None
 
-        monkeypatch.setattr("denoiser.storage.clickhouse_store.ClickHouseStore", lambda: DeadStore())
+        from denoiser import runtime
+        runtime.set_clickhouse_store(DeadStore())
         assert analysis_worker.index_records_for_search(self._records(), tenant_id=1, run_id="r") == 0
 
 

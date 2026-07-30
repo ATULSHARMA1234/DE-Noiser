@@ -17,8 +17,8 @@ import os
 from celery import Celery
 from sqlalchemy import func
 
+from denoiser import runtime
 from denoiser.logging import get_logger
-from denoiser.storage.clickhouse_store import ClickHouseStore
 from denoiser.storage.db import BillingMeter, SessionLocal, Span, Tenant
 from denoiser.utils.time import utcnow
 
@@ -46,7 +46,7 @@ def aggregate_billing(db=None, *, enforce_retention: bool = True) -> dict:
     logger.info("Starting daily billing aggregation...")
     owns_session = db is None
     db = db or SessionLocal()
-    ch_store = ClickHouseStore()
+    ch_store = runtime.clickhouse_store()
 
     summary = {"tenants": 0, "metered": 0, "failed": 0, "logs": 0, "bytes": 0, "traces": 0}
 
@@ -60,23 +60,31 @@ def aggregate_billing(db=None, *, enforce_retention: bool = True) -> dict:
                 count = 0
                 bytes_ingested = 0
 
+                if not ch_store.available:
+                    # Metering a customer at zero because we could not read the
+                    # store commits a day of "they sent us nothing" that is
+                    # indistinguishable from the truth once written. Skip the
+                    # tenant entirely and count it as failed, so the summary
+                    # says so and the pass can be re-run.
+                    summary["failed"] += 1
+                    logger.warning(
+                        "ClickHouse unavailable — tenant %s not metered this run", tenant.id
+                    )
+                    continue
+
                 if ch_store.client is not None:
-                    # Parameterized: tenant_id is bound, not interpolated.
+                    # The window comes from the store rather than being typed
+                    # out here: it is the only module that knows how
+                    # `semantic_logs` is partitioned, and it will not build a
+                    # clause without a tenant.
+                    where, params = ch_store.scope(tenant.id)
                     result = ch_store.client.query(
-                        """
-                        SELECT count(), sum(length(message))
-                        FROM semantic_logs
-                        WHERE tenant_id = {tenant_id:String}
-                          AND toDate(timestamp) = toDate(now())
-                        """,
-                        parameters={"tenant_id": str(tenant.id)},
+                        "SELECT count(), sum(length(message)) FROM semantic_logs "
+                        f"WHERE {where} AND toDate(timestamp) = toDate(now())",
+                        parameters=params,
                     ).result_rows
                     count = result[0][0] if result else 0
                     bytes_ingested = result[0][1] if result and result[0][1] else 0
-                else:
-                    logger.warning(
-                        f"ClickHouse unavailable — log usage for tenant {tenant.id} not metered"
-                    )
 
                 # Traces live in Postgres, not ClickHouse. This was hardcoded to
                 # 0, so trace-heavy tenants metered as if they sent none.

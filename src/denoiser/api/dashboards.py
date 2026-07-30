@@ -6,6 +6,8 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from denoiser.api.auth import User, require_role
+from denoiser.api.pagination import ResourceId
+from denoiser.api.scope import TenantScope, tenant_scope
 from denoiser.dashboards.models import DashboardCreateSchema, DashboardSchema, DashboardUpdateSchema
 from denoiser.storage.db import AnalysisRun, Incident, ServiceLevelObjective, get_db
 from denoiser.storage.db import Dashboard as DBDashboard
@@ -14,49 +16,35 @@ from denoiser.utils.time import utcnow
 router = APIRouter(prefix="/dashboards", tags=["dashboards"])
 
 @router.get("", response_model=list[DashboardSchema])
-def list_dashboards(db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
-    # Dashboards are scoped per tenant (the model has no per-user owner column).
-    dashboards = db.query(DBDashboard).filter(
-        DBDashboard.tenant_id == current_user.tenant_id
-    ).all()
-    return dashboards
+def list_dashboards(scope: TenantScope = Depends(tenant_scope), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
+    # Dashboards are scoped per organisation (the model has no per-user owner column).
+    return scope.query(DBDashboard).all()
 
 @router.get("/{dashboard_id}", response_model=DashboardSchema)
-def get_dashboard(dashboard_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
-    dashboard = db.query(DBDashboard).filter(DBDashboard.id == dashboard_id).first()
-    if not dashboard:
-        raise HTTPException(status_code=404, detail="Dashboard not found")
-
-    if dashboard.tenant_id != current_user.tenant_id:
-        raise HTTPException(status_code=403, detail="Not authorized to view this dashboard")
+def get_dashboard(dashboard_id: ResourceId, db: Session = Depends(get_db), scope: TenantScope = Depends(tenant_scope), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
+    dashboard = scope.get_or_404(DBDashboard, dashboard_id, "Dashboard not found")
 
     return dashboard
 
 @router.post("", response_model=DashboardSchema)
-def create_dashboard(payload: DashboardCreateSchema, db: Session = Depends(get_db), current_user: User = Depends(require_role(["ANALYST", "ADMIN"]))):
+def create_dashboard(payload: DashboardCreateSchema, db: Session = Depends(get_db), scope: TenantScope = Depends(tenant_scope), current_user: User = Depends(require_role(["ANALYST", "ADMIN"]))):
     # For some reason, pydantic dicts come through directly sometimes, but let's ensure json safety
     db_dash = DBDashboard(
         name=payload.name,
-        tenant_id=current_user.tenant_id,
         layout=[layout_item for layout_item in payload.layout],
         widgets=[w.dict() for w in payload.widgets],
         is_shared=payload.is_shared,
         default_time_range=payload.default_time_range,
         template_variables=payload.template_variables
     )
-    db.add(db_dash)
+    scope.add(db_dash)
     db.commit()
     db.refresh(db_dash)
     return db_dash
 
 @router.put("/{dashboard_id}", response_model=DashboardSchema)
-def update_dashboard(dashboard_id: int, payload: DashboardUpdateSchema, db: Session = Depends(get_db), current_user: User = Depends(require_role(["ANALYST", "ADMIN"]))):
-    dashboard = db.query(DBDashboard).filter(DBDashboard.id == dashboard_id).first()
-    if not dashboard:
-        raise HTTPException(status_code=404, detail="Dashboard not found")
-
-    if dashboard.tenant_id != current_user.tenant_id:
-        raise HTTPException(status_code=403, detail="Not authorized to update this dashboard")
+def update_dashboard(dashboard_id: ResourceId, payload: DashboardUpdateSchema, db: Session = Depends(get_db), scope: TenantScope = Depends(tenant_scope), current_user: User = Depends(require_role(["ANALYST", "ADMIN"]))):
+    dashboard = scope.get_or_404(DBDashboard, dashboard_id, "Dashboard not found")
 
     if payload.name is not None:
         dashboard.name = payload.name
@@ -76,13 +64,8 @@ def update_dashboard(dashboard_id: int, payload: DashboardUpdateSchema, db: Sess
     return dashboard
 
 @router.delete("/{dashboard_id}")
-def delete_dashboard(dashboard_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_role(["ANALYST", "ADMIN"]))):
-    dashboard = db.query(DBDashboard).filter(DBDashboard.id == dashboard_id).first()
-    if not dashboard:
-        raise HTTPException(status_code=404, detail="Dashboard not found")
-
-    if dashboard.tenant_id != current_user.tenant_id:
-        raise HTTPException(status_code=403, detail="Not authorized to delete this dashboard")
+def delete_dashboard(dashboard_id: ResourceId, db: Session = Depends(get_db), scope: TenantScope = Depends(tenant_scope), current_user: User = Depends(require_role(["ANALYST", "ADMIN"]))):
+    dashboard = scope.get_or_404(DBDashboard, dashboard_id, "Dashboard not found")
 
     db.delete(dashboard)
     db.commit()
@@ -90,24 +73,20 @@ def delete_dashboard(dashboard_id: int, db: Session = Depends(get_db), current_u
 
 @router.get("/{dashboard_id}/widgets/{widget_id}/data")
 def get_widget_data(
-    dashboard_id: int, 
+    dashboard_id: ResourceId, 
     widget_id: str, 
     start_time: str | None = None,
     end_time: str | None = None,
     variables: str | None = None,
-    db: Session = Depends(get_db), 
+    db: Session = Depends(get_db),
+    scope: TenantScope = Depends(tenant_scope),
     current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))
 ):
     """
-    Fetch the underlying data for a specific widget, computed from the tenant's
-    own rows. Every branch is scoped to current_user.tenant_id.
+    Fetch the underlying data for a specific widget, computed from the
+    organisation's own rows. Every branch is scoped through `scope`.
     """
-    dashboard = db.query(DBDashboard).filter(DBDashboard.id == dashboard_id).first()
-    if not dashboard:
-        raise HTTPException(status_code=404, detail="Dashboard not found")
-
-    if dashboard.tenant_id != current_user.tenant_id:
-        raise HTTPException(status_code=403, detail="Not authorized to view this dashboard")
+    dashboard = scope.get_or_404(DBDashboard, dashboard_id, "Dashboard not found")
 
     widget = next((w for w in dashboard.widgets if w.get("id") == widget_id), None)
     if not widget:

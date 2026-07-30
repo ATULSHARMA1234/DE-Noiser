@@ -42,8 +42,16 @@ falling back to anything weaker.
 
 ### SCIM 2.0 provisioning
 
-IdP-driven user lifecycle. Auth: `Authorization: Bearer <SCIM_BEARER_TOKEN>`
-(endpoints return `403` until the token is configured).
+IdP-driven user lifecycle. Auth: `Authorization: Bearer <token>` (endpoints
+return `403` until a token is configured).
+
+**Which token decides which organisation the IdP may manage.** Each organisation
+has its own token, issued by `POST /platform/tenants/{id}/scim-token/rotate`;
+every endpoint below is filtered to that organisation, so one customer's IdP
+cannot see or de-provision another's staff. A deployment-wide
+`SCIM_BEARER_TOKEN` still works for a single-customer install, and is refused
+with `403` once any organisation registers an email domain — at that point it no
+longer names one organisation.
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -123,6 +131,22 @@ parameterized ClickHouse SQL.
 | GET | `/incidents/{id}` | ABAC read | Incident detail. |
 | PUT | `/incidents/{id}/resolve` | ABAC write | Resolve/reopen. |
 
+## Issues
+
+An issue is one log pattern tracked across runs (fingerprint of the normalized
+template, scoped to its service), which is what carries first/last seen, the
+occurrence trend and triage state — a cluster cannot, because its id is
+reassigned on every run.
+
+| Method | Path | Role | Notes |
+|--------|------|------|-------|
+| GET | `/issues` | VIEWER+ | List. Filters: `state`, `severity`, `service`, `assignee_id`, `q`; `sort=last_seen\|first_seen\|events\|severity\|anomaly`; `limit` ≤ 200, `offset`. Returns per-state counts over the unfiltered set, for the status tabs. |
+| GET | `/issues/facets` | VIEWER+ | Value counts for service, severity, state and assignee. |
+| GET | `/issues/{id}` | VIEWER+ | Detail: tags with prevalence, hourly histogram, samples, comments, activity, and the suspect deployment (last marker in the 24h before first seen). |
+| PATCH | `/issues/{id}` | ANALYST+ | Set `state` (`FOR_REVIEW`/`REVIEWED`/`IGNORED`/`RESOLVED`), `severity`, `assignee_id` (0 unassigns), `team_id`. Each change is written to the activity feed. |
+| POST | `/issues/{id}/comments` | ANALYST+ | Add a comment. |
+| GET | `/issues/{id}/assignees` | VIEWER+ | Active users in the tenant, for the assignment picker. |
+
 ## Alerting & runbooks
 
 | Method | Path | Role | Description |
@@ -160,6 +184,36 @@ parameterized ClickHouse SQL.
 | GET | `/vitals` · `/metrics/current` | VIEWER+ | Vitals of the **SemanticOS host**, not the monitored fleet; the response carries `scope` and `host`. |
 | GET | `/telemetry/kernel-events` | VIEWER+ | eBPF kernel events (TCP retransmits, OOM kills). Linux + `bcc` only. |
 | WS | `/stream?token=` | any | Live per-tenant log tail (Redis pub/sub). |
+
+## Platform operations (hosting several organisations)
+
+Onboarding and offboarding whole customers. Auth: `Authorization: Bearer
+<SEMANTICOS_PLATFORM_TOKEN>` — the *vendor's* credential, deliberately not the
+ADMIN role, since ADMIN belongs to a customer's own administrator and must not
+be able to move the boundary between two customers. Returns `403` until the
+token is set.
+
+| Method | Path | Notes |
+|--------|------|-------|
+| GET | `/platform/tenants` | Every organisation, with user counts and registered domains. No secrets. |
+| POST | `/platform/tenants` | Onboard. Returns `api_key` and `scim_token` **once**. |
+| PATCH | `/platform/tenants/{id}` | Update `domains` / `tier`. |
+| POST | `/platform/tenants/{id}/scim-token/rotate` | Re-issue the SCIM token. Returned once. |
+| DELETE | `/platform/tenants/{id}` | Offboard. Body must echo `{"confirm_name": "<name>"}`. |
+
+**Domains.** `domains` are the email domains a customer owns. SSO and SCIM route
+federated identities by them, so registering one is what turns a
+single-customer deployment into a shared one. A domain can be claimed by only
+one organisation (`409` otherwise), and an address from an unregistered domain
+is refused at login rather than assigned to a guess. With no domains registered
+anywhere, SSO keeps its single-customer fallback.
+
+**Deletion is irreversible** and spans stores nothing else cleans together:
+relational rows (including child tables with no `tenant_id` of their own),
+ClickHouse logs and traces, LanceDB embeddings, uploaded sources, and cold
+archives. The response reports what was removed per store; if any store could
+not be reached it returns `"status": "partial"` and lists the failures, and the
+purge should be repeated rather than treated as a completed erasure.
 
 ## Conventions
 

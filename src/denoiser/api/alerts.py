@@ -1,23 +1,26 @@
 
 from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
 
 from denoiser.api.auth import require_role
-from denoiser.storage.db import AlertLog, User, get_db
+from denoiser.api.pagination import limit_param, offset_param
+from denoiser.api.scope import TenantScope, tenant_scope
+from denoiser.storage.db import AlertLog, User
 
 router = APIRouter(prefix="/alerts", tags=["Alerts"])
 
 @router.get("/")
 def get_alert_history(
-    limit: int = 100,
-    skip: int = 0,
+    limit: int = limit_param(),
+    skip: int = offset_param(),
     priority: str | None = None,
     status: str | None = None,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))
+    scope: TenantScope = Depends(tenant_scope),
+    _: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"])),
 ):
-    """Fetch chronological log of sent notifications."""
-    query = db.query(AlertLog)
+    """Chronological log of notifications sent for the caller's tenant."""
+    # Unfiltered, this served every tenant's notification history — including
+    # which of their channels failed and when — to whoever asked.
+    query = scope.query(AlertLog)
 
     if priority:
         query = query.filter(AlertLog.priority == priority)

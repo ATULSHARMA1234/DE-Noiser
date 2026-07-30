@@ -45,10 +45,10 @@ def _make_alert(priority: str = "P1") -> AlertPayload:
 
 def _make_cfg(channel: ChannelType = ChannelType.GENERIC, min_priority: str = "P1") -> WebhookConfig:
     return WebhookConfig(
-        id=WebhookConfig.make_id("test-chan", "http://example.com/hook"),
+        id=WebhookConfig.make_id("test-chan", "https://example.com/hook"),
         name="test-chan",
         channel_type=channel,
-        url="http://example.com/hook",
+        url="https://example.com/hook",
         min_priority=min_priority,
     )
 

@@ -224,6 +224,39 @@ code, pre, .font-mono, kbd, .mono {
   animation: skeleton-pulse 1.4s ease-in-out infinite;
 }
 
+/* ── Landing page motion (restrained: reveal, caret, meter fill) ─────────── */
+@keyframes caret-blink {
+  0%, 45% { opacity: 1; }
+  55%, 100% { opacity: 0; }
+}
+.caret {
+  display: inline-block;
+  width: 0.55em;
+  height: 1.05em;
+  vertical-align: -0.15em;
+  background: var(--primary);
+  animation: caret-blink 1.05s steps(1) infinite;
+}
+
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: none; }
+}
+.reveal { opacity: 0; }
+.reveal.in-view { animation: rise-in 0.55s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+
+/* A single amber wash behind the hero — the one place light is allowed. */
+.hero-wash {
+  background:
+    radial-gradient(60rem 32rem at 12% -8%, var(--primary-glow), transparent 62%),
+    radial-gradient(44rem 28rem at 92% 4%, var(--signal-info-dim), transparent 60%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal, .reveal.in-view { opacity: 1; animation: none; }
+  .caret { animation: none; }
+}
+
 /* ── Theme transitions ───────────────────────────────────────────────────── */
 *, *::before, *::after {
   transition: background-color 0.15s ease, border-color 0.15s ease, color 0.1s ease;

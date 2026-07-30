@@ -6,6 +6,19 @@ based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **Issue tracking.** A cluster only existed inside the run that produced it —
+  HDBSCAN renumbers cluster ids each run — so the same failing pattern was
+  reported as brand new every time and could carry no history, state or owner.
+  Every run now folds its clusters into `log_issues`, keyed on a fingerprint of
+  the normalized template (with a template-hash fallback so a drifting
+  representative does not fork the issue). Each issue carries first/last seen, a
+  merged hourly occurrence histogram, tag prevalence, samples, triage state
+  (`FOR_REVIEW`/`REVIEWED`/`IGNORED`/`RESOLVED`), assignee, comments and an
+  activity feed; recurrence after resolution reopens the issue as a regression.
+  Served by `/issues` (list, facets, detail, PATCH, comments) and rendered on a
+  new **Issues** page with a facet rail, status tabs and a detail panel that
+  includes the suspect deployment — the last deploy marker before the issue was
+  first seen.
 - **Real SAML 2.0 SSO.** `/auth/sso/saml/acs` verifies the assertion's XML
   signature against the configured IdP certificate and checks issuer, audience,
   `Destination`/`Recipient`, the validity window (with configurable skew) and
@@ -31,7 +44,95 @@ based on [Keep a Changelog](https://keepachangelog.com/).
   `GITHUB_MAX_LINES_PER_RUN`) and `sync_metadata` returns real deployments and
   releases. Both previously raised `NotImplementedError`.
 
+- **Organisation onboarding and offboarding** (`/platform/*`, gated by
+  `SEMANTICOS_PLATFORM_TOKEN`). Create a customer with their own API key, SCIM
+  token and registered email domains; list and update them; and delete one,
+  which purges their relational rows, ClickHouse logs and traces, embeddings,
+  uploaded sources and cold archives, reporting what was removed from each store
+  and naming any store it could not reach. There was previously no way to remove
+  a customer at all. The endpoints are gated by an operator credential rather
+  than the ADMIN role, because ADMIN belongs to a customer's own administrator
+  and must not be able to move the boundary that separates two customers.
+
+### Changed
+- **Tenant ownership is decided in one module.** `TenantScope`
+  (`denoiser.api.scope`) replaces four disagreeing dialects spread over 58 call
+  sites. Ten of those sites guarded the check behind `if current_user.tenant_id`,
+  so an unassigned account walked past it; three treated a NULL-tenant *row* as
+  shared, making one organisation's legacy notebooks and metric rules readable
+  and writable by another. Cross-tenant access is now uniformly **404**, not the
+  mix of 404 and 403 it was — a 403 confirms the id exists, which is enough to
+  enumerate another customer's resources. Migration `f7a2c04b91de` adopts rows
+  that predate tenant scoping into the first organisation, so ownership is a
+  plain equality with no legacy special case.
+- **A generated tenancy conformance suite** (`tests/test_tenancy_conformance.py`)
+  drives every registered resource through the same cross-organisation
+  assertions. A tenant-scoped model with no entry fails the suite, so isolation
+  coverage can no longer quietly stop growing when a feature is added — which is
+  how the `/users` directory leak survived an audit that probed it for role
+  boundaries but never for tenant boundaries.
+- **Process-wide handles moved to `denoiser.runtime`.** `api.main` owned the
+  Redis client, ClickHouse store, Kafka producer and data directory, so four
+  modules — including `storage/archiver.py` — imported the HTTP application from
+  inside function bodies to break the cycle. Importing any router opened a Redis
+  connection and issued two ClickHouse `CREATE TABLE` statements as a side
+  effect; it now opens nothing, and substituting a store in tests is one seam
+  rather than a patch per import path.
+- **Path parameters are bounded** on every scoped router (`ResourceId`), so an
+  out-of-range id is a 422 instead of reaching the database driver.
+
+### Removed
+- **`api/automation.py`** — four routes on `/runbooks` that were never
+  registered; `runbooks.py` owns that prefix.
+
+### Fixed
+- **Alerts, email and runbooks no longer run inside the analysis transaction.**
+  `run_analysis_task` dispatched webhooks — network I/O with retries and a
+  ten-second timeout per attempt — before its `db.commit()`, so one unresponsive
+  Slack endpoint held a Postgres transaction and its pooled connection open for
+  tens of seconds; at `pool_size=20`, enough concurrent analyses exhausted the
+  pool and surfaced as unrelated API requests hanging. The run is now durable
+  before anyone is told about it, which also stops an alert arriving that names
+  a run not yet readable. `new_incident` and the alert payload are bound before
+  the transaction rather than inside a branch of it, and the duplicate
+  `tenant_id` read that shadowed the resolved one is gone.
+
 ### Security
+- **An unreachable store can no longer be recorded as a measurement.**
+  `aggregate_metric` returned `0.0` when ClickHouse was down and the metric
+  worker committed it, once a minute, as a real observation; the billing pass
+  committed a day of zero usage for every customer the same way. Stores now
+  raise `StoreUnavailable`, the metric worker leaves a gap in the series, and
+  billing marks the tenant unmetered instead of metering it at nothing. A
+  monitor during an outage now reports `ERROR` rather than `NO_DATA`, which had
+  made every alert look healthy for as long as the store was down.
+- **Federated identities are routed to the right organisation.** SSO and SCIM
+  both assigned every user to whichever tenant had the lowest id — correct for a
+  single-customer deployment, and wrong for a shared one, where an employee of
+  the second company signing in through their own IdP landed inside the first
+  company's data. Organisations now register the email domains they own, and an
+  address from an unregistered domain is refused rather than guessed at. A
+  deployment where nobody has registered a domain keeps the previous fallback,
+  so single-customer installs are unaffected.
+- **SCIM is scoped to the organisation whose token authenticated.** Every SCIM
+  endpoint ran unfiltered across the whole deployment, so an IdP holding the one
+  shared token could list, patch, re-role and de-provision *any* customer's
+  staff. Each organisation now has its own token, group membership can only bind
+  users from the group's own organisation, and the deployment-wide
+  `SCIM_BEARER_TOKEN` is refused once domains are registered, because at that
+  point it names no one organisation.
+- **The vector store is tenant-scoped.** `log_embeddings` held every customer's
+  log templates in one untagged table; templates carry table names, endpoints
+  and internal hostnames with only the variable parts stripped. Rows are now
+  stamped with their owner, `search()` takes a required `tenant_id`, and a write
+  without one is refused. A table created before this change is migrated in
+  place and its existing rows are quarantined as unattributed.
+- **Cold archives are partitioned by customer.** The archiver wrote one gzip per
+  run containing every tenant's rows, which both commingled two companies' logs
+  in a single object and made a customer's archived data impossible to delete
+  without destroying everyone else's. Archives are now one object per customer
+  per run under `archive/{logs,traces}/tenant=<id>/`.
+
 - **AWS CloudWatch & Docker connectors are fail-closed in production.** Like the
   k8s connector, they now return a real `502` when the backend is unreachable
   instead of silently serving labeled `"simulated"` sample data (gated by
@@ -42,6 +143,9 @@ based on [Keep a Changelog](https://keepachangelog.com/).
   returns `501` rather than degrading to anything weaker.
 
 ### Fixed
+- **Rehydrated spans keep their owner.** `hydrate_archive` did not restore
+  `tenant_id`, so every span archived under a customer came back belonging to
+  nobody.
 - **AWS connector endpoints fail fast.** boto3 clients now carry explicit
   connect/read timeouts and bounded IMDS credential resolution, so an
   unreachable or credential-less AWS returns in ~2s instead of blocking ~20s on

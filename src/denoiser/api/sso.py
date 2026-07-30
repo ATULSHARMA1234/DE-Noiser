@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from denoiser.api.auth import issue_token_pair
 from denoiser.api.schemas import TokenResponse
 from denoiser.logging import get_logger
-from denoiser.storage.db import Tenant, User, get_db
+from denoiser.storage.db import User, get_db
 
 logger = get_logger(__name__)
 
@@ -60,11 +60,20 @@ def _provision_sso_user(db: Session, fields: dict, default_environments: list[st
     Matches on the IdP subject (``external_id``) first, then email, so a user
     whose email changes at the IdP is still recognised. Role and team membership
     are refreshed on every login, so IdP group changes take effect immediately.
+
+    Which organisation the user joins is decided by their email domain, not by
+    which tenant happens to sort first — see `denoiser.api.tenancy`. An address
+    from a domain no customer has registered is refused rather than guessed at,
+    because guessing seats one company's employee inside another's data.
     """
     from denoiser.api.auth import get_password_hash
+    from denoiser.api.tenancy import TenantRoutingError, resolve_identity_tenant
 
-    default_tenant = db.query(Tenant).order_by(Tenant.id).first()
-    tenant_id = default_tenant.id if default_tenant else None
+    try:
+        tenant_id = resolve_identity_tenant(db, fields.get("email"))
+    except TenantRoutingError as e:
+        logger.warning("Rejected SSO login: %s", e)
+        raise HTTPException(status_code=403, detail=str(e))
 
     user = None
     if fields.get("external_id"):
@@ -93,6 +102,18 @@ def _provision_sso_user(db: Session, fields: dict, default_environments: list[st
         if fields.get("external_id"):
             user.external_id = fields["external_id"]
         user.is_active = True
+        # An existing account's organisation is left alone. Re-homing a user
+        # because a domain claim changed would move their work between two
+        # customers as a side effect of them logging in; that is a deliberate
+        # migration, not something a login should do quietly.
+        if user.tenant_id is None:
+            user.tenant_id = tenant_id
+        elif tenant_id is not None and user.tenant_id != tenant_id:
+            logger.warning(
+                "SSO user %s belongs to tenant %s but their domain is registered to "
+                "tenant %s; leaving the existing membership in place.",
+                user.email, user.tenant_id, tenant_id,
+            )
 
     db.commit()
     db.refresh(user)

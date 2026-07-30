@@ -10,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from denoiser.api.auth import create_access_token, get_password_hash
+from denoiser.integrations import connectors
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -55,28 +56,24 @@ def analyst_auth():
 
 class TestConnectorFailClosed:
     def test_aws_groups_502_when_simulation_disabled(self, client, analyst_auth, monkeypatch):
-        import denoiser.api.main as main
-        monkeypatch.setattr(main, "_simulated_connectors_allowed", lambda: False)
+        monkeypatch.setattr(connectors, "simulated_allowed", lambda: False)
         # No AWS creds in the test env → the real path fails → 502, not fake data.
         res = client.get("/connectors/aws/groups", headers=analyst_auth)
         assert res.status_code == 502
 
     def test_docker_containers_502_when_simulation_disabled(self, client, analyst_auth, monkeypatch):
-        import denoiser.api.main as main
-        monkeypatch.setattr(main, "_simulated_connectors_allowed", lambda: False)
+        monkeypatch.setattr(connectors, "simulated_allowed", lambda: False)
         res = client.get("/connectors/docker/containers", headers=analyst_auth)
         assert res.status_code == 502
 
     def test_aws_fetch_502_when_simulation_disabled(self, client, analyst_auth, monkeypatch):
-        import denoiser.api.main as main
-        monkeypatch.setattr(main, "_simulated_connectors_allowed", lambda: False)
+        monkeypatch.setattr(connectors, "simulated_allowed", lambda: False)
         res = client.post("/connectors/aws/fetch", headers=analyst_auth,
                           data={"log_group": "/aws/lambda/x"})
         assert res.status_code == 502
 
     def test_simulated_still_available_in_sandbox(self, client, analyst_auth, monkeypatch):
-        import denoiser.api.main as main
-        monkeypatch.setattr(main, "_simulated_connectors_allowed", lambda: True)
+        monkeypatch.setattr(connectors, "simulated_allowed", lambda: True)
         res = client.get("/connectors/aws/groups", headers=analyst_auth)
         assert res.status_code == 200
         assert res.json()["status"] == "simulated"
@@ -91,10 +88,10 @@ class TestSimulationGate:
 
     @staticmethod
     def _allowed(monkeypatch, *, environment: str, explicit: str | None) -> bool:
-        import denoiser.api.main as main
         from denoiser.settings import InfraSettings
 
-        monkeypatch.setattr(main, "is_testing", lambda: False, raising=False)
+        # `connectors.simulated_allowed` reads both of these from
+        # denoiser.settings at call time, so patching them there is what counts.
         monkeypatch.setattr("denoiser.settings.is_testing", lambda: False)
         monkeypatch.setattr(
             "denoiser.settings.get_settings", lambda: InfraSettings(environment=environment)
@@ -103,7 +100,7 @@ class TestSimulationGate:
             monkeypatch.delenv("ALLOW_SIMULATED_CONNECTORS", raising=False)
         else:
             monkeypatch.setenv("ALLOW_SIMULATED_CONNECTORS", explicit)
-        return main._simulated_connectors_allowed()
+        return connectors.simulated_allowed()
 
     def test_production_fails_closed_by_default(self, monkeypatch):
         assert self._allowed(monkeypatch, environment="production", explicit=None) is False

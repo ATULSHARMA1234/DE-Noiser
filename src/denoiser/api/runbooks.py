@@ -5,6 +5,8 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
 from denoiser.api.auth import User, require_role
+from denoiser.api.pagination import ResourceId
+from denoiser.api.scope import TenantScope, tenant_scope
 from denoiser.storage.db import Runbook, RunbookExecution, get_db
 from denoiser.utils.time import iso_utc
 
@@ -36,7 +38,7 @@ class RunbookResponseSchema(BaseModel):
 
 class RunbookExecutionResponseSchema(BaseModel):
     id: int
-    runbook_id: int
+    runbook_id: ResourceId
     incident_id: int | None
     status: str
     logs: list[str]
@@ -46,20 +48,19 @@ class RunbookExecutionResponseSchema(BaseModel):
 
 
 @router.get("", response_model=list[RunbookResponseSchema])
-def list_runbooks(db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
-    runbooks = db.query(Runbook).filter(Runbook.tenant_id == current_user.tenant_id).order_by(Runbook.created_at.desc()).all()
+def list_runbooks(scope: TenantScope = Depends(tenant_scope), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
+    runbooks = scope.query(Runbook).order_by(Runbook.created_at.desc()).all()
     return runbooks
 
 @router.post("", response_model=RunbookResponseSchema)
-def create_runbook(payload: RunbookCreateSchema, db: Session = Depends(get_db), current_user: User = Depends(require_role(["ANALYST", "ADMIN"]))):
+def create_runbook(payload: RunbookCreateSchema, db: Session = Depends(get_db), scope: TenantScope = Depends(tenant_scope), current_user: User = Depends(require_role(["ANALYST", "ADMIN"]))):
     rb = Runbook(
         name=payload.name,
-        tenant_id=current_user.tenant_id,
         trigger_condition=payload.trigger_condition,
         steps=payload.steps,
         enabled=payload.enabled
     )
-    db.add(rb)
+    scope.add(rb)
     db.commit()
     db.refresh(rb)
     return rb
@@ -79,15 +80,14 @@ class RunbookRunSchema(BaseModel):
 
 @router.put("/{runbook_id}", response_model=RunbookResponseSchema)
 def update_runbook(
-    runbook_id: int,
+    runbook_id: ResourceId,
     payload: RunbookUpdateSchema,
     db: Session = Depends(get_db),
+    scope: TenantScope = Depends(tenant_scope),
     current_user: User = Depends(require_role(["ANALYST", "ADMIN"])),
 ):
     """Update a runbook — used by the UI's enable/disable toggle and editing."""
-    rb = db.query(Runbook).filter(Runbook.id == runbook_id, Runbook.tenant_id == current_user.tenant_id).first()
-    if not rb:
-        raise HTTPException(status_code=404, detail="Runbook not found")
+    rb = scope.get_or_404(Runbook, runbook_id, "Runbook not found")
 
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(rb, field, value)
@@ -99,9 +99,10 @@ def update_runbook(
 
 @router.post("/{runbook_id}/run", response_model=dict)
 def run_runbook_now(
-    runbook_id: int,
+    runbook_id: ResourceId,
     payload: RunbookRunSchema | None = None,
     db: Session = Depends(get_db),
+    scope: TenantScope = Depends(tenant_scope),
     current_user: User = Depends(require_role(["ANALYST", "ADMIN"])),
 ):
     """Execute a runbook immediately, without waiting for a matching incident.
@@ -112,15 +113,12 @@ def run_runbook_now(
     from denoiser.automation.engine import run_runbook
     from denoiser.storage.db import Incident
 
-    rb = db.query(Runbook).filter(Runbook.id == runbook_id, Runbook.tenant_id == current_user.tenant_id).first()
-    if not rb:
-        raise HTTPException(status_code=404, detail="Runbook not found")
+    rb = scope.get_or_404(Runbook, runbook_id, "Runbook not found")
 
     incident = None
     if payload and payload.incident_id:
-        incident = db.query(Incident).filter(
-            Incident.id == payload.incident_id,
-            Incident.tenant_id == current_user.tenant_id,
+        incident = scope.query(Incident).filter(
+            Incident.id == payload.incident_id
         ).first()
         if not incident:
             raise HTTPException(status_code=404, detail="Incident not found")
@@ -128,8 +126,8 @@ def run_runbook_now(
         # Most recent open incident gives the steps something real to report;
         # with none at all the run still proceeds against an empty context.
         incident = (
-            db.query(Incident)
-            .filter(Incident.tenant_id == current_user.tenant_id, Incident.status == "OPEN")
+            scope.query(Incident)
+            .filter(Incident.status == "OPEN")
             .order_by(Incident.created_at.desc())
             .first()
         )
@@ -148,21 +146,19 @@ def run_runbook_now(
 
 
 @router.delete("/{runbook_id}")
-def delete_runbook(runbook_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_role(["ADMIN"]))):
-    rb = db.query(Runbook).filter(Runbook.id == runbook_id, Runbook.tenant_id == current_user.tenant_id).first()
-    if not rb:
-        raise HTTPException(status_code=404, detail="Runbook not found")
+def delete_runbook(runbook_id: ResourceId, db: Session = Depends(get_db), scope: TenantScope = Depends(tenant_scope), current_user: User = Depends(require_role(["ADMIN"]))):
+    rb = scope.get_or_404(Runbook, runbook_id, "Runbook not found")
     db.delete(rb)
     db.commit()
     return {"status": "deleted"}
 
 @router.get("/executions", response_model=list[dict])
-def list_executions(db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
+def list_executions(db: Session = Depends(get_db), scope: TenantScope = Depends(tenant_scope), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
     executions = (
         db.query(RunbookExecution)
         .select_from(RunbookExecution)
         .join(Runbook, Runbook.id == RunbookExecution.runbook_id)
-        .filter(Runbook.tenant_id == current_user.tenant_id)
+        .filter(scope.predicate(Runbook))
         .order_by(RunbookExecution.created_at.desc())
         .limit(100)
         .all()

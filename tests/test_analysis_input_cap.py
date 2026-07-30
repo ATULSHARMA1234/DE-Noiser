@@ -4,9 +4,11 @@ A single analysis run bounds how many raw lines it loads so a huge source cannot
 OOM the worker. These lock the precedence: per-request override > env > default.
 """
 
-from denoiser.workers.analysis_worker import (
-    _DEFAULT_MAX_ANALYSIS_LINES,
-    _resolve_max_lines,
+from denoiser.analysis.pipeline import (
+    DEFAULT_MAX_ANALYSIS_LINES as _DEFAULT_MAX_ANALYSIS_LINES,
+)
+from denoiser.analysis.pipeline import (
+    resolve_max_lines as _resolve_max_lines,
 )
 
 

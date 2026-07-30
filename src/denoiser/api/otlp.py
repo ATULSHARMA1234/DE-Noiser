@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
+from denoiser import runtime
 from denoiser.api.auth import verify_ingest_auth
 from denoiser.storage.db import Span, get_db
 
@@ -34,21 +35,20 @@ async def ingest_otlp_logs(request: Request, tenant_id: str = Depends(verify_ing
         return {"status": "success", "ingested": 0}
 
     # Write logs to standard live_stream.log file (fallback)
-    from denoiser.api.main import DATA_DIR, clickhouse_store, redis_client
-    stream_file = DATA_DIR / "live_stream.log"
+    stream_file = runtime.data_dir() / "live_stream.log"
     with open(stream_file, "a") as f:
         for log in extracted_logs:
             f.write(json.dumps(log) + "\n")
 
     # Insert to ClickHouse
     clickhouse_inserted = False
-    if clickhouse_store.client:
-        clickhouse_inserted = clickhouse_store.insert_logs(extracted_logs, tenant_id=tenant_id)
+    if runtime.clickhouse_store().client:
+        clickhouse_inserted = runtime.clickhouse_store().insert_logs(extracted_logs, tenant_id=tenant_id)
 
     # Publish to Redis
     try:
         for log in extracted_logs:
-            await redis_client.publish(f"log_stream:{tenant_id}", json.dumps(log))
+            await runtime.redis_client().publish(f"log_stream:{tenant_id}", json.dumps(log))
     except Exception:
         pass
 
@@ -129,10 +129,9 @@ async def ingest_otlp_traces(request: Request, db: Session = Depends(get_db), te
     db.commit()
 
     # Insert to ClickHouse
-    from denoiser.api.main import clickhouse_store
     clickhouse_inserted = False
-    if clickhouse_store.client and clickhouse_rows:
-        clickhouse_inserted = clickhouse_store.insert_traces(clickhouse_rows, tenant_id=tenant_id)
+    if runtime.clickhouse_store().client and clickhouse_rows:
+        clickhouse_inserted = runtime.clickhouse_store().insert_traces(clickhouse_rows, tenant_id=tenant_id)
 
     return {
         "status": "success",

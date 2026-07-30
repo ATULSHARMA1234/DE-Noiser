@@ -190,6 +190,13 @@ def get_current_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
     if not token:
+        # Browsers carry the session in an httpOnly cookie, which JavaScript
+        # cannot read and therefore cannot put in an Authorization header.
+        # Programmatic clients keep using the header.
+        from denoiser.api.cookies import token_from_cookie
+
+        token = token_from_cookie(request)
+    if not token:
         raise credentials_exception
 
     try:
@@ -224,6 +231,8 @@ def get_current_user(
     if request is not None:
         request.state.audit_user_id = user.id
         request.state.audit_user_email = user.email
+        # The audit row is filtered by tenant on read, so it has to carry one.
+        request.state.audit_tenant_id = user.tenant_id
     return user
 
 

@@ -91,9 +91,14 @@ class TestWebSocketPubSub:
     """Tests verifying the horizontally scaled WebSocket pub/sub subscriber."""
 
     @pytest.mark.asyncio
-    @patch("denoiser.api.main.redis_client")
     @patch("denoiser.api.main.get_current_user")
-    async def test_websocket_pubsub_broadcasting(self, mock_get_current_user, mock_redis_client):
+    async def test_websocket_pubsub_broadcasting(self, mock_get_current_user):
+        # Redis is substituted through the runtime seam rather than by patching
+        # a module global. `denoiser.api.main.redis_client` used to be the object
+        # itself, so every consumer had to be patched by the path it imported it
+        # from; there is now one place to replace it for all of them.
+        from denoiser import runtime
+
         # Setup mock user
         mock_get_current_user.return_value = MagicMock(id=1, email="admin@semanticos.io")
 
@@ -118,11 +123,16 @@ class TestWebSocketPubSub:
         mock_pubsub.listen = mock_listen
         
         # Use sync MagicMock for .pubsub() to ensure it returns the subscriber object directly
+        mock_redis_client = MagicMock()
         mock_redis_client.pubsub = MagicMock(return_value=mock_pubsub)
+        runtime.set_redis_client(mock_redis_client)
 
-        client = TestClient(app)
-        with client.websocket_connect("/stream?token=test_token") as websocket:
-            data = websocket.receive_json()
-            assert data["service"] == "payment-api"
-            assert data["level"] == "ERROR"
-            assert "Payment timeout" in data["message"]
+        try:
+            client = TestClient(app)
+            with client.websocket_connect("/stream?token=test_token") as websocket:
+                data = websocket.receive_json()
+                assert data["service"] == "payment-api"
+                assert data["level"] == "ERROR"
+                assert "Payment timeout" in data["message"]
+        finally:
+            runtime.reset()

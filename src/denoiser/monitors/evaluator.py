@@ -82,8 +82,8 @@ def evaluate_monitor(monitor: Monitor, store=None, now: datetime.datetime | None
     window = monitor.window_seconds or _DEFAULT_WINDOW_SECONDS
 
     if store is None:
-        from denoiser.storage.clickhouse_store import ClickHouseStore
-        store = ClickHouseStore()
+        from denoiser import runtime
+        store = runtime.clickhouse_store()
 
     to_ms = to_epoch_ms(now)
     from_ms = to_ms - window * 1000
@@ -175,8 +175,8 @@ def evaluate_all(db: Session, store=None, now: datetime.datetime | None = None) 
         return []
 
     if store is None:
-        from denoiser.storage.clickhouse_store import ClickHouseStore
-        store = ClickHouseStore()
+        from denoiser import runtime
+        store = runtime.clickhouse_store()
 
     results = []
     for monitor in monitors:

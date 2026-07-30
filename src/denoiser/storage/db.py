@@ -132,6 +132,9 @@ class AuditLog(Base):
     __tablename__ = "audit_logs"
 
     id = Column(Integer, primary_key=True, index=True)
+    # Without this the audit trail is a single global stream: one tenant's admin
+    # could read every other tenant's actions, user ids, and source IPs.
+    tenant_id = Column(Integer, index=True, nullable=True)
     user_id = Column(Integer, nullable=True)  # Nullable for unauthenticated actions
     action = Column(String, nullable=False)
     resource_type = Column(String, nullable=False)
@@ -144,6 +147,7 @@ class AlertLog(Base):
     __tablename__ = "alert_logs"
 
     id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, index=True, nullable=True)
     webhook_id = Column(String, index=True)
     alert_fingerprint = Column(String, index=True)
     priority = Column(String)
@@ -152,6 +156,30 @@ class AlertLog(Base):
     latency_ms = Column(Float, nullable=True)
     error = Column(String, nullable=True)
     timestamp = Column(String, default=lambda: utcnow().isoformat(), index=True)
+
+
+class Webhook(Base):
+    """A registered alert destination, owned by exactly one tenant.
+
+    Previously these lived in a process-global dict inside the AlertRouter,
+    which had two consequences: every destination was lost on restart, and no
+    route could tell one tenant's destinations from another's.
+
+    ``url`` holds a credential (a Slack or PagerDuty webhook URL authenticates
+    by possession), so it is stored encrypted and never returned in full.
+    """
+    __tablename__ = "webhooks"
+
+    id = Column(String, primary_key=True, index=True)
+    tenant_id = Column(Integer, index=True, nullable=False)
+    name = Column(String, nullable=False)
+    channel_type = Column(String, nullable=False)
+    url_encrypted = Column(String, nullable=False)
+    min_priority = Column(String, default="P1")
+    enabled = Column(Boolean, default=True)
+    extra = Column(JSON, default=dict)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
 # ── Wave 2 Models ────────────────────────────────────────────────────────────
 
@@ -176,6 +204,9 @@ class SavedQuery(Base):
     __tablename__ = "saved_queries"
 
     id = Column(Integer, primary_key=True, index=True)
+    # The only model here that used to carry no owner at all: /query/saved
+    # listed and deleted across every organisation on the deployment.
+    tenant_id = Column(Integer, index=True, nullable=True)
     name = Column(String, nullable=False)
     query_text = Column(String, nullable=False)
     user_id = Column(Integer, nullable=True)
@@ -318,6 +349,16 @@ class Tenant(Base):
     api_key_previous_expires_at = Column(DateTime, nullable=True)
     api_key_rotated_at = Column(DateTime, nullable=True)
     tier = Column(String, default="free")  # free, pro, enterprise
+    # Email domains this customer owns, lowercased and without the "@". An SSO
+    # or SCIM identity is routed to the tenant that claims its domain; without
+    # this, every federated user in the deployment landed in whichever tenant
+    # happened to have the lowest id.
+    sso_domains = Column(JSON, nullable=True, default=list)
+    # Per-tenant SCIM bearer token, encrypted at rest. Which token authenticates
+    # decides which company the IdP is allowed to provision into, so two
+    # customers can each point their own Okta at the same deployment.
+    scim_token = Column(String, nullable=True)
+    scim_token_rotated_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=utcnow)
 
 class PlatformSetting(Base):
@@ -365,6 +406,90 @@ class DeploymentMarker(Base):
     environment = Column(String, nullable=False)
     description = Column(String, nullable=True)
     timestamp = Column(DateTime, default=utcnow, index=True)
+
+
+class LogIssue(Base):
+    """A log pattern tracked across analysis runs.
+
+    A cluster only exists inside the run that produced it: its ``cluster_id``
+    comes from HDBSCAN and is renumbered on every run, so the same failing
+    pattern appeared as a brand-new row each time and nothing could be said
+    about it beyond "it is here now". An issue is the durable identity for that
+    pattern — keyed on a fingerprint of its normalized template — which is what
+    makes first/last seen, an occurrence trend, triage state and assignment
+    meaningful.
+    """
+
+    __tablename__ = "log_issues"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, index=True, nullable=True)
+    # sha256(service|template)[:16]. Unique per tenant; the index is not itself
+    # unique because two tenants legitimately share a fingerprint.
+    fingerprint = Column(String, index=True, nullable=False)
+    # Hashes of every template that has ever landed in this issue. A cluster's
+    # representative template can drift between runs (it is whichever template
+    # sits closest to the centroid), so an exact-fingerprint miss falls back to
+    # intersecting these — without it, drift silently forks one issue into two.
+    template_hashes = Column(JSON, default=list)
+
+    title = Column(String, nullable=False)
+    template = Column(String, nullable=True)
+    representative_log = Column(String, nullable=True)
+    service = Column(String, index=True, nullable=True)
+
+    severity = Column(String, default="P3", index=True)   # P0..P3
+    state = Column(String, default="FOR_REVIEW", index=True)  # FOR_REVIEW|REVIEWED|IGNORED|RESOLVED
+    assignee_id = Column(Integer, nullable=True, index=True)
+    team_id = Column(Integer, nullable=True, index=True)
+
+    first_seen = Column(DateTime, default=utcnow, index=True)
+    last_seen = Column(DateTime, default=utcnow, index=True)
+    total_events = Column(Integer, default=0)
+    run_count = Column(Integer, default=0)
+    last_run_id = Column(String, nullable=True)
+    last_cluster_id = Column(Integer, nullable=True)
+
+    anomaly_score = Column(Float, default=0.0)
+    is_noise = Column(Boolean, default=False)
+
+    # {"service": [{"value": "payments", "count": 412, "pct": 83.1}, ...]}
+    tags = Column(JSON, default=dict)
+    # [{"ts": "2026-02-10T16:00:00+00:00", "count": 42}, ...] — hourly buckets,
+    # merged across runs so the trend outlives the run that produced it.
+    histogram = Column(JSON, default=list)
+    # A handful of raw lines to page through in the detail panel.
+    samples = Column(JSON, default=list)
+
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class IssueComment(Base):
+    __tablename__ = "issue_comments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, index=True, nullable=True)
+    issue_id = Column(Integer, index=True, nullable=False)
+    user_id = Column(Integer, nullable=True)
+    author_email = Column(String, nullable=True)
+    body = Column(String, nullable=False)
+    created_at = Column(DateTime, default=utcnow)
+
+
+class IssueEvent(Base):
+    """One entry in an issue's activity feed (state change, assignment, sighting)."""
+
+    __tablename__ = "issue_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, index=True, nullable=True)
+    issue_id = Column(Integer, index=True, nullable=False)
+    user_id = Column(Integer, nullable=True)
+    actor_email = Column(String, nullable=True)
+    kind = Column(String, nullable=False)  # state | assignee | severity | seen | comment
+    detail = Column(JSON, default=dict)
+    created_at = Column(DateTime, default=utcnow, index=True)
 
 
 # ── Session helpers ──────────────────────────────────────────────────────────

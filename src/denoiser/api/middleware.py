@@ -43,6 +43,13 @@ class CorrelationIDMiddleware(BaseHTTPMiddleware):
         # Use client-provided ID if present, otherwise generate one
         rid = request.headers.get("X-Request-ID", str(uuid.uuid4())[:12])
         request_id_ctx.set(rid)
+        # Also stamped on request.state. BaseHTTPMiddleware runs the downstream
+        # app in a separate task, so a ContextVar set here is not guaranteed to
+        # be visible to the exception handlers — which is why every 500 used to
+        # come back with "request_id": "no-request", leaving a customer-reported
+        # error with no way to find the matching server log. request.state is
+        # the same object throughout, so it always resolves.
+        request.state.request_id = rid
 
         start = time.perf_counter()
         response = await call_next(request)
@@ -87,12 +94,69 @@ def _cors_headers(request: Request) -> dict[str, str]:
     }
 
 
+def _resolve_request_id(request: Request) -> str:
+    """The correlation id for this request, preferring the per-request value.
+
+    Falls back to the ContextVar, then to a literal, so a handler invoked
+    outside a request scope still returns something printable.
+    """
+    rid = getattr(request.state, "request_id", None)
+    if rid:
+        return str(rid)
+    return request_id_ctx.get("no-request")
+
+
+#: Largest request body accepted on any route. Log shippers post batches, not
+#: gigabytes; without a ceiling a single request can be read into memory until
+#: the process dies. Uploads have their own, larger, streamed limit.
+MAX_REQUEST_BODY_BYTES = int(os.getenv("SEMANTICOS_MAX_BODY_BYTES", str(32 * 1024 * 1024)))
+
+#: Paths exempt from the body cap because they stream to disk with their own
+#: limit rather than buffering.
+_BODY_LIMIT_EXEMPT = ("/sources/upload",)
+
+
+class BodySizeLimitMiddleware(BaseHTTPMiddleware):
+    """Reject oversized request bodies with 413 before they are buffered.
+
+    Checks Content-Length, which every real client sends. A chunked request
+    without one is passed through: the per-route validators (ingest batch size,
+    upload streaming cap) bound those.
+    """
+
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        if request.url.path in _BODY_LIMIT_EXEMPT:
+            return await call_next(request)
+
+        content_length = request.headers.get("content-length")
+        if content_length:
+            try:
+                declared = int(content_length)
+            except ValueError:
+                declared = 0
+            if declared > MAX_REQUEST_BODY_BYTES:
+                return JSONResponse(
+                    status_code=413,
+                    content={
+                        "error": "Request body too large",
+                        "detail": (
+                            f"Body of {declared} bytes exceeds the "
+                            f"{MAX_REQUEST_BODY_BYTES} byte limit"
+                        ),
+                        "request_id": _resolve_request_id(request),
+                    },
+                    headers=_cors_headers(request),
+                )
+
+        return await call_next(request)
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     """Register global exception handlers that return clean JSON errors."""
 
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-        rid = request_id_ctx.get("no-request")
+        rid = _resolve_request_id(request)
         logger.error(
             "[%s] Unhandled exception on %s %s: %s",
             rid, request.method, request.url.path, str(exc),
@@ -110,7 +174,7 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(ValueError)
     async def value_error_handler(request: Request, exc: ValueError) -> JSONResponse:
-        rid = request_id_ctx.get("no-request")
+        rid = _resolve_request_id(request)
         return JSONResponse(
             status_code=422,
             content={
@@ -454,3 +518,51 @@ def _lookup_tenant(api_key: str | None, subject: str | None) -> tuple[str, str] 
         return None
     finally:
         db.close()
+
+
+class CSRFMiddleware(BaseHTTPMiddleware):
+    """Reject cookie-authenticated state changes that lack a CSRF token.
+
+    Only applies when the request authenticated by cookie *and* carries no
+    ``Authorization`` header. A browser attaches cookies to cross-site requests
+    automatically but never attaches an Authorization header, so bearer-token
+    clients — the CLI, log shippers, CI — are not exposed to CSRF and are not
+    burdened by the check.
+    """
+
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        from denoiser.api.cookies import (
+            ACCESS_COOKIE,
+            CSRF_EXEMPT_PATHS,
+            UNSAFE_METHODS,
+            csrf_is_valid,
+        )
+
+        if request.method not in UNSAFE_METHODS:
+            return await call_next(request)
+        if request.url.path in CSRF_EXEMPT_PATHS:
+            return await call_next(request)
+        if request.headers.get("authorization"):
+            return await call_next(request)
+        if request.headers.get("x-api-key"):
+            return await call_next(request)
+        if ACCESS_COOKIE not in request.cookies:
+            # Unauthenticated, or authenticated some other way; the route's own
+            # dependency decides. Nothing to forge.
+            return await call_next(request)
+
+        if not csrf_is_valid(request):
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "error": "CSRF validation failed",
+                    "detail": (
+                        "This request changed state using a cookie session but did "
+                        "not present a matching CSRF token."
+                    ),
+                    "request_id": _resolve_request_id(request),
+                },
+                headers=_cors_headers(request),
+            )
+
+        return await call_next(request)

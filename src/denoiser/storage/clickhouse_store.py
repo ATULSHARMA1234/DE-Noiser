@@ -1,10 +1,12 @@
 import json
 import os
 import re
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
 from denoiser.logging import get_logger
+from denoiser.storage.errors import StoreUnavailable
 
 logger = get_logger(__name__)
 
@@ -261,14 +263,23 @@ def resolve_timestamp(log: dict[str, Any]) -> datetime:
 
 
 class ClickHouseStore:
-    def __init__(self):
+    def __init__(self, client: Any = None):
+        """The store, optionally over a client the caller already has.
+
+        Passing ``client`` skips connecting: construction opens no socket and
+        issues no DDL. Tests previously had to monkeypatch the private
+        ``_init_client`` to stop the constructor dialling out, which meant every
+        test knew a private method's name — and a rename would have broken them
+        all while the production path stayed green.
+        """
         self.host = os.getenv("CLICKHOUSE_HOST", "localhost")
         self.port = int(os.getenv("CLICKHOUSE_PORT", "8123"))
         self.username = os.getenv("CLICKHOUSE_USER", "default")
         self.password = os.getenv("CLICKHOUSE_PASSWORD", "")
         self.database = os.getenv("CLICKHOUSE_DB", "default")
-        self.client = None
-        self._init_client()
+        self.client = client
+        if client is None:
+            self._init_client()
 
     def _init_client(self):
         try:
@@ -317,12 +328,84 @@ class ClickHouseStore:
             logger.error(f"Failed to connect to ClickHouse: {e}")
             self.client = None
 
-    def cleanup_old_data(self, tenant_id: str, days_to_keep: int):
+    def scope(
+        self,
+        tenant_id: Any,
+        *,
+        query_string: str | None = None,
+        from_ts: int | None = None,
+        to_ts: int | None = None,
+        since: datetime | None = None,
+        time_column: str = "timestamp",
+        extra: Sequence[str] = (),
+        bind: dict[str, Any] | None = None,
+    ) -> tuple[str, dict[str, Any]]:
+        """The WHERE clause and bound parameters for one organisation's rows.
+
+        Every read of `semantic_logs` goes through here, and there is no way to
+        obtain a clause without naming a tenant: `_require_tenant` raises on an
+        empty one rather than quietly dropping the predicate. That mattered —
+        the SLO engine and the billing worker each hand-wrote their own window
+        and one of them left the tenant out entirely, so two organisations
+        running a service of the same name were scored against each other's
+        traffic.
+
+        ``query_string`` is LQL, compiled and ANDed in. ``extra`` carries SQL
+        fragments for columns this signature does not know about, and ``bind``
+        their values — ``extra=["source = {service:String}"], bind={"service": s}``.
+        Values are always bound, never interpolated.
         """
-        Phase 26: Data Tiering. Deletes logs and traces older than `days_to_keep` for a specific tenant.
+        params: dict[str, Any] = {"tenant_id": _require_tenant(tenant_id)}
+        params.update(bind or {})
+        clauses = ["tenant_id = {tenant_id:String}"]
+
+        if query_string is not None:
+            from denoiser.query.parser import compile_to_sql, parse_query
+
+            compiled = compile_to_sql(parse_query(query_string), params)
+            clauses.append(f"({compiled})")
+
+        # `semantic_logs` times its rows on `timestamp`, `semantic_traces` on
+        # `start_time`. The column name is the caller's, so it is validated
+        # rather than trusted — it is the one part of the clause that cannot be
+        # a bound parameter.
+        if time_column not in ("timestamp", "start_time"):
+            raise ValueError(f"unknown time column {time_column!r}")
+
+        if from_ts is not None:
+            clauses.append(f"{time_column} >= toDateTime64({{from_ts:Float64}}, 3, 'UTC')")
+            params["from_ts"] = from_ts / 1000.0
+        if to_ts is not None:
+            clauses.append(f"{time_column} <= toDateTime64({{to_ts:Float64}}, 3, 'UTC')")
+            params["to_ts"] = to_ts / 1000.0
+        if since is not None:
+            clauses.append(f"{time_column} >= toDateTime64({{since:Float64}}, 3, 'UTC')")
+            params["since"] = since.timestamp()
+
+        clauses.extend(extra)
+
+        return " AND ".join(clauses), params
+
+    @property
+    def available(self) -> bool:
+        """Whether the store can answer at all.
+
+        Read paths that legitimately degrade check this and say so, rather than
+        drawing an empty result that means something quite different.
+        """
+        return self.client is not None
+
+    def cleanup_old_data(self, tenant_id: str, days_to_keep: int) -> bool:
+        """Delete logs and traces older than `days_to_keep` for one tenant.
+
+        Returns whether the deletion was submitted. It previously returned
+        ``None`` on every path, so a caller could not tell a completed retention
+        pass from one that never ran — and retention that silently stops is a
+        disk that silently fills.
         """
         if not self.client:
-            return
+            logger.warning("Retention skipped for tenant %s: ClickHouse unavailable", tenant_id)
+            return False
         try:
             # tenant_id is bound as a parameter (never string-interpolated) so a
             # crafted tenant id cannot break out of the WHERE clause. days is a
@@ -343,8 +426,33 @@ class ClickHouseStore:
                 parameters=params,
             )
             logger.info(f"Cleaned up data older than {days} days for tenant {tenant_id}")
+            return True
         except Exception as e:
             logger.error(f"Failed to cleanup old data for tenant {tenant_id}: {e}")
+            return False
+
+    def delete_tenant(self, tenant_id: str) -> bool:
+        """Delete every log and trace belonging to a tenant. For offboarding.
+
+        Mutations in ClickHouse are asynchronous, so this returning True means
+        the delete was accepted, not that the parts have been rewritten yet.
+        `mutations_sync` is not set because a customer's final purge should not
+        hold an HTTP request open for however long a large table takes.
+        """
+        if not self.client:
+            return False
+        try:
+            params = {"tenant_id": _require_tenant(tenant_id)}
+            for table in ("semantic_logs", "semantic_traces"):
+                self.client.command(
+                    f"ALTER TABLE {table} DELETE WHERE tenant_id = {{tenant_id:String}}",
+                    parameters=params,
+                )
+            logger.info("Submitted deletion of all ClickHouse data for tenant %s", tenant_id)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete ClickHouse data for tenant {tenant_id}: {e}")
+            return False
 
     def insert_logs(self, logs: list[dict[str, Any]], tenant_id: str):
         """Dual-write logs to ClickHouse"""
@@ -402,21 +510,9 @@ class ClickHouseStore:
         if not self.client:
             return []
 
-        from denoiser.query.parser import compile_to_sql, parse_query
-
-        ast = parse_query(query_string)
-        params = {}
-        sql_where = compile_to_sql(ast, params)
-
-        params['tenant_id'] = _require_tenant(tenant_id)
-        sql_where = f"tenant_id = {{tenant_id:String}} AND ({sql_where})"
-
-        if from_ts is not None:
-            sql_where += " AND timestamp >= toDateTime64({from_ts:Float64}, 3, 'UTC')"
-            params['from_ts'] = from_ts / 1000.0
-        if to_ts is not None:
-            sql_where += " AND timestamp <= toDateTime64({to_ts:Float64}, 3, 'UTC')"
-            params['to_ts'] = to_ts / 1000.0
+        sql_where, params = self.scope(
+            tenant_id, query_string=query_string, from_ts=from_ts, to_ts=to_ts
+        )
 
         sql = "SELECT * FROM semantic_logs"
         
@@ -456,24 +552,18 @@ class ClickHouseStore:
         rule-level target field, so we aggregate a numeric value pulled from the
         common latency/value keys, falling back to a count when none is present.
         The LQL where-clause and all bounds are parameterized.
+
+        Raises `StoreUnavailable` rather than returning ``0.0`` when ClickHouse
+        cannot answer. The caller writes this number into a timeseries, and a
+        zero it did not measure is indistinguishable, forever, from a zero it
+        did — a flat line through an outage reads as "nothing happened".
         """
         if not self.client:
-            return 0.0
+            raise StoreUnavailable("ClickHouse", "no client")
 
-        from denoiser.query.parser import compile_to_sql, parse_query
-
-        ast = parse_query(query_string)
-        params: dict[str, Any] = {}
-        sql_where = compile_to_sql(ast, params)
-
-        params["tenant_id"] = _require_tenant(tenant_id)
-        sql_where = f"tenant_id = {{tenant_id:String}} AND ({sql_where})"
-        if from_ts is not None:
-            sql_where += " AND timestamp >= toDateTime64({from_ts:Float64}, 3, 'UTC')"
-            params["from_ts"] = from_ts / 1000.0
-        if to_ts is not None:
-            sql_where += " AND timestamp <= toDateTime64({to_ts:Float64}, 3, 'UTC')"
-            params["to_ts"] = to_ts / 1000.0
+        sql_where, params = self.scope(
+            tenant_id, query_string=query_string, from_ts=from_ts, to_ts=to_ts
+        )
 
         agg = (aggregation or "count").lower()
         if agg in ("sum", "avg", "max", "min"):
@@ -493,23 +583,14 @@ class ClickHouseStore:
             return float(value or 0)
         except Exception as e:
             logger.error(f"Failed to aggregate metric: {e}")
-            return 0.0
+            raise StoreUnavailable("ClickHouse", str(e)) from e
 
     def get_facets(self, tenant_id: str = "", from_ts: int | None = None, to_ts: int | None = None):
         """Get facet counts for log explorer sidebar"""
         if not self.client:
             return {"source": [], "level": []}
             
-        params = {}
-        params['tenant_id'] = _require_tenant(tenant_id)
-        sql_where = "tenant_id = {tenant_id:String}"
-
-        if from_ts is not None:
-            sql_where += " AND timestamp >= toDateTime64({from_ts:Float64}, 3, 'UTC')"
-            params['from_ts'] = from_ts / 1000.0
-        if to_ts is not None:
-            sql_where += " AND timestamp <= toDateTime64({to_ts:Float64}, 3, 'UTC')"
-            params['to_ts'] = to_ts / 1000.0
+        sql_where, params = self.scope(tenant_id, from_ts=from_ts, to_ts=to_ts)
 
         facets = {"source": [], "level": []}
         
@@ -534,20 +615,9 @@ class ClickHouseStore:
         if not self.client:
             return []
             
-        from denoiser.query.parser import compile_to_sql, parse_query
-        ast = parse_query(query_string)
-        params = {}
-        sql_where = compile_to_sql(ast, params)
-
-        params['tenant_id'] = _require_tenant(tenant_id)
-        sql_where = f"tenant_id = {{tenant_id:String}} AND ({sql_where})"
-
-        if from_ts is not None:
-            sql_where += " AND timestamp >= toDateTime64({from_ts:Float64}, 3, 'UTC')"
-            params['from_ts'] = from_ts / 1000.0
-        if to_ts is not None:
-            sql_where += " AND timestamp <= toDateTime64({to_ts:Float64}, 3, 'UTC')"
-            params['to_ts'] = to_ts / 1000.0
+        sql_where, params = self.scope(
+            tenant_id, query_string=query_string, from_ts=from_ts, to_ts=to_ts
+        )
 
         # Determine grouping interval if not explicitly provided based on time range
         # ClickHouse syntax: toStartOfInterval(timestamp, INTERVAL 1 hour)

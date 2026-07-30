@@ -9,6 +9,7 @@ Modern enterprise observability tools (like Datadog, Splunk, or New Relic) are e
 
 ### Key Features
 - **Semantic Clustering:** Automatically groups similar log lines into unique pattern templates using a hybrid Agglomerative/HDBSCAN pipeline over local sentence embeddings.
+- **Issue Tracking:** Folds each run's clusters into durable issues keyed on the log pattern itself, so one failing pattern keeps a single identity across runs — first/last seen, an occurrence trend, tag prevalence, samples, triage state, assignee, comments, and the deploy that most likely introduced it. Recurrence after resolution reopens the issue as a regression.
 - **Causal Root-Cause Analysis:** Correlates clustered events across services within a sliding time window to surface directed, cross-service causal links.
 - **Predictive AI & SLOs:** Computes availability/latency SLIs from real ingested logs, tracks error budgets, and uses Holt-Winters forecasting to predict when an SLO will breach.
 - **Distributed Tracing (OTLP):** Ingests and stores OpenTelemetry spans in ClickHouse. A separate optional **eBPF agent** captures kernel-level process-execution telemetry on Linux (via bcc/libbpf) — this is host telemetry, not span-level distributed tracing.

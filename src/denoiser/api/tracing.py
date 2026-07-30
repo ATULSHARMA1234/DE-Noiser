@@ -2,13 +2,15 @@ import json
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
 # SQLite dependencies just for OTLP collector signature if needed
 from sqlalchemy.orm import Session
 
+from denoiser import runtime
 from denoiser.api.auth import User, require_role
-from denoiser.storage.clickhouse_store import ClickHouseStore
+from denoiser.api.pagination import MAX_PAGE_SIZE
+from denoiser.api.scope import TenantScope, tenant_scope
 from denoiser.storage.db import get_db
 from denoiser.tracing.models import SpanSchema, TraceSchema
 from denoiser.tracing.otlp_collector import process_otlp_traces
@@ -22,7 +24,7 @@ from datetime import UTC, datetime, timedelta
 from fastapi import Header
 
 DATA_DIR = Path("data")
-_clickhouse_store = ClickHouseStore()
+
 
 from sqlalchemy import case, func
 
@@ -44,11 +46,11 @@ async def ingest_traces(
         # Default fallback for testing if no key is provided
         tenant_id = tenant.id if tenant else "default_tenant"
 
-        from denoiser.api.main import kafka_producer
-        if kafka_producer:
+        producer = runtime.kafka_producer()
+        if producer:
             payload["_tenant_id"] = tenant_id
             msg_bytes = json.dumps(payload).encode('utf-8')
-            await kafka_producer.send_and_wait("traces_topic", msg_bytes)
+            await producer.send_and_wait("traces_topic", msg_bytes)
         else:
             process_otlp_traces(db, payload, tenant_id=tenant_id)
         return {"status": "success"}
@@ -126,7 +128,7 @@ def import_traces_from_file(
     if not rows:
         raise HTTPException(status_code=400, detail=f"No spans found in {candidate.name}")
 
-    if not _clickhouse_store.insert_traces(rows, tenant_id=tenant_id):
+    if not runtime.clickhouse_store().insert_traces(rows, tenant_id=tenant_id):
         raise HTTPException(status_code=502, detail="Trace store rejected the spans")
 
     # Report the span of what was imported: an exported file usually carries its
@@ -159,14 +161,30 @@ def _parse_span_time(value: Any):
 
 
 @router.get("", response_model=list[TraceSchema])
-def list_traces(from_ts: int | None = None, to_ts: int | None = None, limit: int = 50, db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
+def list_traces(
+    from_ts: int | None = None,
+    to_ts: int | None = None,
+    limit: int = Query(50, ge=1, le=MAX_PAGE_SIZE),
+    db: Session = Depends(get_db),
+    scope: TenantScope = Depends(tenant_scope),
+    current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"])),
+):
     """
     List trace aggregates. Uses ClickHouse if available, else falls back to SQLite data.
     """
-    client = _clickhouse_store.client
+    store = runtime.clickhouse_store()
+    client = store.client
     if client:
         try:
-            # Group by trace_id to get root span data and trace metadata
+            # The tenant predicate and the time bounds come from the store —
+            # the only module that knows how the trace table is partitioned, and
+            # the only one that refuses to build a clause without a tenant.
+            where, params = store.scope(
+                current_user.tenant_id,
+                from_ts=from_ts,
+                to_ts=to_ts,
+                time_column="start_time",
+            )
             sql = f"""
                 SELECT
                     trace_id,
@@ -177,19 +195,11 @@ def list_traces(from_ts: int | None = None, to_ts: int | None = None, limit: int
                     count() AS span_count,
                     countIf(status_code = 'ERROR') AS error_count
                 FROM semantic_traces
-                WHERE tenant_id = {{tenant_id:String}}
-                { " AND start_time >= toDateTime64({from_ts:Float64}, 3, 'UTC')" if from_ts is not None else "" }
-                { " AND start_time <= toDateTime64({to_ts:Float64}, 3, 'UTC')" if to_ts is not None else "" }
+                WHERE {where}
                 GROUP BY trace_id
                 ORDER BY start_time DESC
                 LIMIT {limit}
             """
-
-            params = {'tenant_id': current_user.tenant_id}
-            if from_ts is not None:
-                params['from_ts'] = from_ts / 1000.0
-            if to_ts is not None:
-                params['to_ts'] = to_ts / 1000.0
 
             result = client.query(sql, parameters=params)
 
@@ -226,7 +236,7 @@ def list_traces(from_ts: int | None = None, to_ts: int | None = None, limit: int
             func.max(Span.end_time).label("end_time"),
             func.count(Span.id).label("span_count"),
             func.sum(case((Span.status_code == 'ERROR', 1), else_=0)).label("error_count")
-        ).filter(Span.tenant_id == current_user.tenant_id)
+        ).filter(scope.predicate(Span))
         
         if from_ts is not None:
             query = query.filter(Span.start_time >= datetime.fromtimestamp(from_ts / 1000.0, tz=UTC))
@@ -266,21 +276,31 @@ def list_traces(from_ts: int | None = None, to_ts: int | None = None, limit: int
         return []
 
 @router.get("/{trace_id}", response_model=TraceSchema)
-def get_trace(trace_id: str, db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
+def get_trace(
+    trace_id: str,
+    scope: TenantScope = Depends(tenant_scope),
+    current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"])),
+):
     """
     Get full trace details including all spans. Uses ClickHouse if available, else falls back to SQLite.
     """
-    client = _clickhouse_store.client
+    store = runtime.clickhouse_store()
+    client = store.client
     if client:
         try:
-            sql = """
+            where, params = store.scope(
+                current_user.tenant_id,
+                extra=["trace_id = {trace_id:String}"],
+                bind={"trace_id": trace_id},
+            )
+            sql = f"""
                 SELECT *
                 FROM semantic_traces
-                WHERE tenant_id = {tenant_id:String} AND trace_id = {trace_id:String}
+                WHERE {where}
                 ORDER BY start_time ASC
             """
 
-            result = client.query(sql, parameters={'tenant_id': current_user.tenant_id, 'trace_id': trace_id})
+            result = client.query(sql, parameters=params)
             if result.result_rows:
                 spans = []
                 for row in result.result_rows:
@@ -332,7 +352,12 @@ def get_trace(trace_id: str, db: Session = Depends(get_db), current_user: User =
 
     # SQLite fallback
     try:
-        db_spans = db.query(Span).filter(Span.trace_id == trace_id, Span.tenant_id == current_user.tenant_id).order_by(Span.start_time.asc()).all()
+        db_spans = (
+            scope.query(Span)
+            .filter(Span.trace_id == trace_id)
+            .order_by(Span.start_time.asc())
+            .all()
+        )
         if not db_spans:
             raise HTTPException(status_code=404, detail="Trace not found")
             

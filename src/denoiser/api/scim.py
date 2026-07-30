@@ -7,8 +7,13 @@ membership, without an admin touching the platform. De-provisioning sets
 ``is_active = False``, which the auth layer already rejects, so a departing
 employee loses access the moment the IdP pushes the change.
 
-Auth: a static bearer token (``SCIM_BEARER_TOKEN``) presented by the IdP. The
-endpoints are disabled (403) until that token is configured.
+Auth: a bearer token presented by the IdP. Each customer gets their own token
+(``POST /admin/tenant/scim-token/rotate``), and *which* token authenticates
+decides which organisation the IdP may provision into — so two companies can
+point their own Okta tenants at one deployment without either being able to see
+or de-provision the other's staff. A deployment-wide ``SCIM_BEARER_TOKEN`` is
+still honoured for single-customer installs; it is refused once any customer has
+registered an email domain, because at that point it names no one organisation.
 """
 
 from __future__ import annotations
@@ -19,6 +24,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
 from denoiser.api.auth import get_password_hash, revoke_token  # noqa: F401  (revoke_token kept for symmetry)
+from denoiser.api.scope import tenant_predicate
 from denoiser.logging import get_logger
 from denoiser.settings import get_settings
 from denoiser.storage.db import Team, Tenant, User, get_db
@@ -33,27 +39,72 @@ LIST_SCHEMA = "urn:ietf:params:scim:api:messages:2.0:ListResponse"
 ERROR_SCHEMA = "urn:ietf:params:scim:api:messages:2.0:Error"
 
 
-def require_scim_auth(authorization: str | None = Header(None)) -> bool:
-    """Validate the SCIM bearer token. 403 when SCIM is not configured."""
+def scim_tenant(
+    authorization: str | None = Header(None),
+    db: Session = Depends(get_db),
+) -> int | None:
+    """Authenticate the IdP and return the organisation it may manage.
+
+    Every endpoint below depends on this and filters by the value it returns, so
+    an IdP holding one customer's token cannot read, patch or de-provision
+    another customer's users — which, with a single shared token, it could.
+    """
     from denoiser.api.credentials import matches_static_secret, secrets_match
+    from denoiser.api.tenancy import domain_routing_configured, tenant_for_scim_token
+
+    if not authorization or not authorization.lower().startswith("bearer "):
+        # 403 when the feature is off entirely, so an operator can tell "not
+        # enabled" from "wrong credential".
+        if not get_settings().scim_bearer_token and not _any_tenant_token(db):
+            raise HTTPException(status_code=403, detail="SCIM provisioning is not enabled")
+        raise HTTPException(status_code=401, detail="Missing SCIM bearer token")
+
+    token = authorization.split(" ", 1)[1].strip()
+
+    tenant = tenant_for_scim_token(db, token)
+    if tenant is not None:
+        return tenant.id
 
     configured = get_settings().scim_bearer_token
-    if not configured:
+    if not configured and not _any_tenant_token(db):
         raise HTTPException(status_code=403, detail="SCIM provisioning is not enabled")
-    if not authorization or not authorization.lower().startswith("bearer "):
-        raise HTTPException(status_code=401, detail="Missing SCIM bearer token")
-    token = authorization.split(" ", 1)[1].strip()
+
     # Compared in constant time, and SCIM_BEARER_TOKEN_PREVIOUS is accepted
     # during a rotation — otherwise changing the token means the IdP's next
     # provisioning run fails until someone updates it there too.
-    if not (secrets_match(token, configured) or matches_static_secret(token, "SCIM_BEARER_TOKEN")):
-        raise HTTPException(status_code=401, detail="Invalid SCIM bearer token")
-    return True
+    if configured and (secrets_match(token, configured) or matches_static_secret(token, "SCIM_BEARER_TOKEN")):
+        if domain_routing_configured(db):
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "The deployment-wide SCIM token cannot be used once organisations "
+                    "are registered by email domain, because it does not identify one "
+                    "of them. Issue a per-organisation token instead."
+                ),
+            )
+        return _default_tenant_id(db)
+
+    raise HTTPException(status_code=401, detail="Invalid SCIM bearer token")
+
+
+def _any_tenant_token(db: Session) -> bool:
+    return db.query(Tenant).filter(Tenant.scim_token.isnot(None)).first() is not None
 
 
 def _default_tenant_id(db: Session) -> int | None:
     tenant = db.query(Tenant).order_by(Tenant.id).first()
     return tenant.id if tenant else None
+
+
+def _scoped(query, model, tenant_id: int | None):
+    """Restrict a query to one organisation.
+
+    SCIM resolves its tenant from a bearer token rather than a logged-in user,
+    so it cannot take a `TenantScope` — but the rule it applies is the same one,
+    and it now comes from the same place. This used to be a second, independent
+    implementation, right down to a copy of the ``IS NULL`` rationale.
+    """
+    return query.filter(tenant_predicate(model, tenant_id))
 
 
 # ── Serialization ────────────────────────────────────────────────────────────
@@ -97,11 +148,11 @@ def _parse_username_filter(flt: str | None) -> str | None:
 @router.get("/Users")
 def list_users(
     filter: str | None = Query(None),
-    _: bool = Depends(require_scim_auth),
+    tenant_id: int | None = Depends(scim_tenant),
     db: Session = Depends(get_db),
 ):
     username = _parse_username_filter(filter)
-    q = db.query(User)
+    q = _scoped(db.query(User), User, tenant_id)
     if username:
         q = q.filter(User.email == username)
     users = q.order_by(User.id).limit(200).all()
@@ -115,15 +166,32 @@ def list_users(
 
 
 @router.get("/Users/{user_id}")
-def get_user(user_id: int, _: bool = Depends(require_scim_auth), db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+def get_user(user_id: int, tenant_id: int | None = Depends(scim_tenant), db: Session = Depends(get_db)):
+    user = _tenant_user(db, user_id, tenant_id)
     return _user_to_scim(user)
 
 
+def _tenant_user(db: Session, user_id: int, tenant_id: int | None) -> User:
+    """One user from the authenticated organisation, or 404.
+
+    404 rather than 403 for somebody else's user: a 403 would confirm the id
+    exists, which is enough to enumerate another customer's headcount.
+    """
+    user = _scoped(db.query(User).filter(User.id == user_id), User, tenant_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
+
+
+def _tenant_team(db: Session, group_id: int, tenant_id: int | None) -> Team:
+    team = _scoped(db.query(Team).filter(Team.id == group_id), Team, tenant_id).first()
+    if not team:
+        raise HTTPException(status_code=404, detail="Group not found")
+    return team
+
+
 @router.post("/Users", status_code=201)
-def create_user(payload: dict, _: bool = Depends(require_scim_auth), db: Session = Depends(get_db)):
+def create_user(payload: dict, tenant_id: int | None = Depends(scim_tenant), db: Session = Depends(get_db)):
     import uuid
 
     email = payload.get("userName")
@@ -134,6 +202,9 @@ def create_user(payload: dict, _: bool = Depends(require_scim_auth), db: Session
     primary_email = next((e.get("value") for e in emails if e.get("primary")), None)
     email = primary_email or email
 
+    # Checked across the whole deployment, not just this organisation, because
+    # email is globally unique — a tenant-scoped check would pass and then fail
+    # on insert. The 409 says only that the address is taken, never by whom.
     existing = db.query(User).filter(User.email == email).first()
     if existing:
         # SCIM: return 409 so the IdP switches to update instead of duplicating.
@@ -143,7 +214,7 @@ def create_user(payload: dict, _: bool = Depends(require_scim_auth), db: Session
         email=email,
         hashed_password=get_password_hash(str(uuid.uuid4())),  # provisioned users have no local password
         role="VIEWER",
-        tenant_id=_default_tenant_id(db),
+        tenant_id=tenant_id,
         is_active=bool(payload.get("active", True)),
         external_id=payload.get("externalId"),
         teams=[],
@@ -204,10 +275,8 @@ def _as_bool(v: Any) -> bool:
 
 
 @router.patch("/Users/{user_id}")
-def patch_user(user_id: int, payload: dict, _: bool = Depends(require_scim_auth), db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+def patch_user(user_id: int, payload: dict, tenant_id: int | None = Depends(scim_tenant), db: Session = Depends(get_db)):
+    user = _tenant_user(db, user_id, tenant_id)
     _apply_user_patch(user, payload)
     db.commit()
     db.refresh(user)
@@ -215,10 +284,8 @@ def patch_user(user_id: int, payload: dict, _: bool = Depends(require_scim_auth)
 
 
 @router.put("/Users/{user_id}")
-def replace_user(user_id: int, payload: dict, _: bool = Depends(require_scim_auth), db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+def replace_user(user_id: int, payload: dict, tenant_id: int | None = Depends(scim_tenant), db: Session = Depends(get_db)):
+    user = _tenant_user(db, user_id, tenant_id)
     if payload.get("userName"):
         user.email = payload["userName"]
     if payload.get("externalId"):
@@ -230,15 +297,13 @@ def replace_user(user_id: int, payload: dict, _: bool = Depends(require_scim_aut
 
 
 @router.delete("/Users/{user_id}", status_code=204)
-def deprovision_user(user_id: int, _: bool = Depends(require_scim_auth), db: Session = Depends(get_db)):
+def deprovision_user(user_id: int, tenant_id: int | None = Depends(scim_tenant), db: Session = Depends(get_db)):
     """De-provision: deactivate rather than hard-delete so audit history survives.
 
     ``is_active = False`` is already rejected by the auth layer, so the user
     loses all access immediately.
     """
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    user = _tenant_user(db, user_id, tenant_id)
     user.is_active = False
     db.commit()
     logger.info(f"SCIM de-provisioned user {user.email} (id={user.id})")
@@ -249,13 +314,16 @@ def deprovision_user(user_id: int, _: bool = Depends(require_scim_auth), db: Ses
 
 def _members_of(db: Session, team: Team) -> list[User]:
     # teams is a JSON column; membership is checked in Python (portable across
-    # SQLite/Postgres without dialect-specific JSON operators).
-    return [u for u in db.query(User).all() if team.name in (u.teams or [])]
+    # SQLite/Postgres without dialect-specific JSON operators). Restricted to the
+    # team's own organisation so that two customers who both happen to have an
+    # "sre" team do not appear in each other's membership lists.
+    users = _scoped(db.query(User), User, team.tenant_id).all()
+    return [u for u in users if team.name in (u.teams or [])]
 
 
 @router.get("/Groups")
-def list_groups(_: bool = Depends(require_scim_auth), db: Session = Depends(get_db)):
-    teams = db.query(Team).order_by(Team.id).limit(200).all()
+def list_groups(tenant_id: int | None = Depends(scim_tenant), db: Session = Depends(get_db)):
+    teams = _scoped(db.query(Team), Team, tenant_id).order_by(Team.id).limit(200).all()
     return {
         "schemas": [LIST_SCHEMA],
         "totalResults": len(teams),
@@ -266,11 +334,11 @@ def list_groups(_: bool = Depends(require_scim_auth), db: Session = Depends(get_
 
 
 @router.post("/Groups", status_code=201)
-def create_group(payload: dict, _: bool = Depends(require_scim_auth), db: Session = Depends(get_db)):
+def create_group(payload: dict, tenant_id: int | None = Depends(scim_tenant), db: Session = Depends(get_db)):
     name = payload.get("displayName")
     if not name:
         raise HTTPException(status_code=400, detail="displayName is required")
-    team = Team(name=name, external_id=payload.get("externalId"), tenant_id=_default_tenant_id(db))
+    team = Team(name=name, external_id=payload.get("externalId"), tenant_id=tenant_id)
     db.add(team)
     db.commit()
     db.refresh(team)
@@ -283,17 +351,22 @@ def create_group(payload: dict, _: bool = Depends(require_scim_auth), db: Sessio
 
 
 @router.get("/Groups/{group_id}")
-def get_group(group_id: int, _: bool = Depends(require_scim_auth), db: Session = Depends(get_db)):
-    team = db.query(Team).filter(Team.id == group_id).first()
-    if not team:
-        raise HTTPException(status_code=404, detail="Group not found")
+def get_group(group_id: int, tenant_id: int | None = Depends(scim_tenant), db: Session = Depends(get_db)):
+    team = _tenant_team(db, group_id, tenant_id)
     return _team_to_scim(team, _members_of(db, team))
 
 
 def _add_member(db: Session, team: Team, user_id: Any) -> None:
+    """Add a user to a team, silently ignoring anyone outside its organisation.
+
+    The member ids come from the IdP, so they are attacker-influenced input as
+    far as this service is concerned: without the scope check, one customer's
+    IdP could bind another customer's employee into its own team and inherit
+    whatever that team grants.
+    """
     if user_id is None:
         return
-    user = db.query(User).filter(User.id == int(user_id)).first()
+    user = _scoped(db.query(User).filter(User.id == int(user_id)), User, team.tenant_id).first()
     if user and team.name not in (user.teams or []):
         user.teams = [*(user.teams or []), team.name]
 
@@ -301,16 +374,14 @@ def _add_member(db: Session, team: Team, user_id: Any) -> None:
 def _remove_member(db: Session, team: Team, user_id: Any) -> None:
     if user_id is None:
         return
-    user = db.query(User).filter(User.id == int(user_id)).first()
+    user = _scoped(db.query(User).filter(User.id == int(user_id)), User, team.tenant_id).first()
     if user and team.name in (user.teams or []):
         user.teams = [t for t in user.teams if t != team.name]
 
 
 @router.patch("/Groups/{group_id}")
-def patch_group(group_id: int, payload: dict, _: bool = Depends(require_scim_auth), db: Session = Depends(get_db)):
-    team = db.query(Team).filter(Team.id == group_id).first()
-    if not team:
-        raise HTTPException(status_code=404, detail="Group not found")
+def patch_group(group_id: int, payload: dict, tenant_id: int | None = Depends(scim_tenant), db: Session = Depends(get_db)):
+    team = _tenant_team(db, group_id, tenant_id)
 
     for op in payload.get("Operations", []):
         action = (op.get("op") or "").lower()
@@ -333,10 +404,8 @@ def patch_group(group_id: int, payload: dict, _: bool = Depends(require_scim_aut
 
 
 @router.delete("/Groups/{group_id}", status_code=204)
-def delete_group(group_id: int, _: bool = Depends(require_scim_auth), db: Session = Depends(get_db)):
-    team = db.query(Team).filter(Team.id == group_id).first()
-    if not team:
-        raise HTTPException(status_code=404, detail="Group not found")
+def delete_group(group_id: int, tenant_id: int | None = Depends(scim_tenant), db: Session = Depends(get_db)):
+    team = _tenant_team(db, group_id, tenant_id)
     # Drop membership references, then remove the group.
     for u in _members_of(db, team):
         u.teams = [t for t in (u.teams or []) if t != team.name]

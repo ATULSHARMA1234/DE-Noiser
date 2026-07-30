@@ -8,8 +8,8 @@ from pathlib import Path
 from aiokafka import AIOKafkaConsumer
 from redis import asyncio as redis_asyncio
 
+from denoiser import runtime
 from denoiser.logging import get_logger
-from denoiser.storage.clickhouse_store import ClickHouseStore
 from denoiser.storage.db import SessionLocal
 from denoiser.tracing.otlp_collector import process_otlp_traces
 from denoiser.workers.heartbeat import (
@@ -46,8 +46,7 @@ async def run_ingestion_worker():
     logger.info("Starting Hyperscale Ingestion Worker (Kafka Consumer)...")
     kafka_broker = os.getenv("KAFKA_BROKER", "localhost:9092")
 
-    # Initialize ClickHouse Store
-    ch_store = ClickHouseStore()
+    ch_store = runtime.clickhouse_store()
 
     # Heartbeat channel. The API's readiness probe reads this; without it a
     # stopped consumer is invisible and /ingest keeps returning 200 for records

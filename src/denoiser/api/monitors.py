@@ -1,11 +1,13 @@
 import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from denoiser.api.auth import User, require_role
+from denoiser.api.pagination import ResourceId
+from denoiser.api.scope import TenantScope, tenant_scope
 from denoiser.storage.db import Monitor, get_db
 from denoiser.utils.time import iso_utc, utcnow
 
@@ -57,18 +59,14 @@ def _monitor_to_dict(m: Monitor, now: datetime.datetime) -> dict[str, Any]:
     }
 
 @router.get("", response_model=list[dict[str, Any]])
-def list_monitors(db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
-    query = db.query(Monitor)
-    if current_user.tenant_id:
-        query = query.filter(Monitor.tenant_id == current_user.tenant_id)
-    monitors = query.all()
+def list_monitors(scope: TenantScope = Depends(tenant_scope), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
+    monitors = scope.query(Monitor).all()
     now = utcnow()
     return [_monitor_to_dict(m, now) for m in monitors]
 
 @router.post("", response_model=dict[str, Any])
-def create_monitor(payload: MonitorCreateSchema, db: Session = Depends(get_db), current_user: User = Depends(require_role(["ANALYST", "ADMIN"]))):
+def create_monitor(payload: MonitorCreateSchema, db: Session = Depends(get_db), scope: TenantScope = Depends(tenant_scope), current_user: User = Depends(require_role(["ANALYST", "ADMIN"]))):
     m = Monitor(
-        tenant_id=current_user.tenant_id,
         name=payload.name,
         type=payload.type,
         query=payload.query,
@@ -80,27 +78,19 @@ def create_monitor(payload: MonitorCreateSchema, db: Session = Depends(get_db), 
         enabled=payload.enabled,
         status="PENDING",
     )
-    db.add(m)
+    scope.add(m)
     db.commit()
     db.refresh(m)
     return {"status": "created", "id": m.id}
 
 @router.get("/{monitor_id}", response_model=dict[str, Any])
-def get_monitor(monitor_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
-    m = db.query(Monitor).filter(Monitor.id == monitor_id).first()
-    if not m:
-        raise HTTPException(status_code=404, detail="Monitor not found")
-    if current_user.tenant_id and m.tenant_id != current_user.tenant_id:
-        raise HTTPException(status_code=403, detail="Forbidden")
+def get_monitor(monitor_id: ResourceId, db: Session = Depends(get_db), scope: TenantScope = Depends(tenant_scope), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
+    m = scope.get_or_404(Monitor, monitor_id, "Monitor not found")
     return _monitor_to_dict(m, utcnow())
 
 @router.put("/{monitor_id}", response_model=dict[str, Any])
-def update_monitor(monitor_id: int, payload: MonitorUpdateSchema, db: Session = Depends(get_db), current_user: User = Depends(require_role(["ANALYST", "ADMIN"]))):
-    m = db.query(Monitor).filter(Monitor.id == monitor_id).first()
-    if not m:
-        raise HTTPException(status_code=404, detail="Monitor not found")
-    if current_user.tenant_id and m.tenant_id != current_user.tenant_id:
-        raise HTTPException(status_code=403, detail="Forbidden")
+def update_monitor(monitor_id: ResourceId, payload: MonitorUpdateSchema, db: Session = Depends(get_db), scope: TenantScope = Depends(tenant_scope), current_user: User = Depends(require_role(["ANALYST", "ADMIN"]))):
+    m = scope.get_or_404(Monitor, monitor_id, "Monitor not found")
     
     update_data = payload.model_dump(exclude_unset=True)
     for key, value in update_data.items():
@@ -110,12 +100,8 @@ def update_monitor(monitor_id: int, payload: MonitorUpdateSchema, db: Session = 
     return {"status": "updated", "id": m.id}
 
 @router.delete("/{monitor_id}", response_model=dict[str, Any])
-def delete_monitor(monitor_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_role(["ADMIN"]))):
-    m = db.query(Monitor).filter(Monitor.id == monitor_id).first()
-    if not m:
-        raise HTTPException(status_code=404, detail="Monitor not found")
-    if current_user.tenant_id and m.tenant_id != current_user.tenant_id:
-        raise HTTPException(status_code=403, detail="Forbidden")
+def delete_monitor(monitor_id: ResourceId, db: Session = Depends(get_db), scope: TenantScope = Depends(tenant_scope), current_user: User = Depends(require_role(["ADMIN"]))):
+    m = scope.get_or_404(Monitor, monitor_id, "Monitor not found")
     
     db.delete(m)
     db.commit()
@@ -124,8 +110,9 @@ def delete_monitor(monitor_id: int, db: Session = Depends(get_db), current_user:
 
 @router.post("/{monitor_id}/evaluate", response_model=dict[str, Any])
 def evaluate_monitor_now(
-    monitor_id: int,
+    monitor_id: ResourceId,
     db: Session = Depends(get_db),
+    scope: TenantScope = Depends(tenant_scope),
     current_user: User = Depends(require_role(["ANALYST", "ADMIN"])),
 ):
     """Run a monitor's query immediately and return what it found.
@@ -136,11 +123,7 @@ def evaluate_monitor_now(
     """
     from denoiser.monitors.evaluator import apply_result, evaluate_monitor
 
-    m = db.query(Monitor).filter(Monitor.id == monitor_id).first()
-    if not m:
-        raise HTTPException(status_code=404, detail="Monitor not found")
-    if current_user.tenant_id and m.tenant_id != current_user.tenant_id:
-        raise HTTPException(status_code=403, detail="Forbidden")
+    m = scope.get_or_404(Monitor, monitor_id, "Monitor not found")
 
     result = evaluate_monitor(m)
     alerted = apply_result(db, m, result)
@@ -164,17 +147,14 @@ class MuteRequest(BaseModel):
 
 @router.put("/{monitor_id}/mute", response_model=dict[str, Any])
 def mute_monitor(
-    monitor_id: int,
+    monitor_id: ResourceId,
     payload: MuteRequest,
     db: Session = Depends(get_db),
+    scope: TenantScope = Depends(tenant_scope),
     current_user: User = Depends(require_role(["ANALYST", "ADMIN"]))
 ):
     """Mute (snooze) a monitor for N minutes. Pass 0 to unmute."""
-    m = db.query(Monitor).filter(Monitor.id == monitor_id).first()
-    if not m:
-        raise HTTPException(status_code=404, detail="Monitor not found")
-    if current_user.tenant_id and m.tenant_id != current_user.tenant_id:
-        raise HTTPException(status_code=403, detail="Forbidden")
+    m = scope.get_or_404(Monitor, monitor_id, "Monitor not found")
 
     if payload.duration_minutes <= 0:
         m.muted_until = None

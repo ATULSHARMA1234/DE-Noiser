@@ -4,11 +4,12 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import ReactEcharts from 'echarts-for-react';
 import * as echarts from 'echarts';
-import { Database, TrendingUp, Zap, Loader2, AlertTriangle, RefreshCw, FileText, Cpu, MemoryStick, HardDrive, Wifi, Search, ArrowRight } from 'lucide-react';
+import { Database, TrendingUp, Zap, Loader2, AlertTriangle, RefreshCw, FileText, Cpu, MemoryStick, HardDrive, Wifi, Search, ArrowRight, Maximize2 } from 'lucide-react';
 import { LineChart, Line, ResponsiveContainer, YAxis } from 'recharts';
 import { apiFetch, runAnalysis as runAnalysisJob } from '@/lib/api';
 import { useTimeRange } from '@/context/TimeRangeContext';
 import { useTasks } from '@/context/TaskContext';
+import { TopologyModal } from '@/components/TopologyModal';
 
 // ECharts draws to a canvas, where `var(--token)` is not a valid colour — it
 // would silently render black. Resolve design tokens to their computed value.
@@ -58,6 +59,7 @@ export default function CommandCenter() {
  const [selectedSource, setSelectedSource] = useState('');
  const [elapsedTime, setElapsedTime] = useState(0);
  const [settings, setSettings] = useState<any>(null);
+ const [topologyExpanded, setTopologyExpanded] = useState(false);
 
  // Fetch settings on mount
  useEffect(() => {
@@ -392,7 +394,10 @@ export default function CommandCenter() {
  tooltip: { show: false },
  legend: { bottom: 0, left: 10, textStyle: { color: cssVar('--text-muted', '#6a717a'), fontSize: 9 }, icon: 'circle' },
  grid: { top: 10, bottom: 30, left: 10, right: 10 },
- xAxis: { show: false }, yAxis: { show: false },
+ // UMAP coordinates are not centred on zero, and a value axis includes the
+ // origin unless scaled — without this every cluster lands in one corner.
+ xAxis: { show: false, type: 'value', scale: true },
+ yAxis: { show: false, type: 'value', scale: true },
  series: groups.map((g, gi) => ({
  name: g,
  type: 'scatter',
@@ -412,9 +417,11 @@ export default function CommandCenter() {
  };
  };
 
+ const hasProjection = projectionPoints() !== null;
+
  return (
  <div className="space-y-6 max-w-[1600px] mx-auto pb-10">
- 
+
  {/* Source Selector + Run Button */}
  <div className="flex items-center gap-4">
  <div className="flex-1 flex items-center gap-3">
@@ -781,11 +788,32 @@ export default function CommandCenter() {
 
  {/* Neural Topology */}
  <div className="lg:col-span-1 bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-xl p-6">
+ <div className="flex items-start justify-between mb-6">
+ <div>
  <h2 className="text-sm font-semibold text-[var(--text-primary)] mb-1">Neural Topology</h2>
- <p className="text-xs text-[var(--text-muted)] mb-6">HDBSCAN Projection</p>
- <div className="h-[200px] bg-[var(--bg-inset)] rounded-lg border border-[var(--border-subtle)] relative">
+ <p className="text-xs text-[var(--text-muted)]">HDBSCAN Projection</p>
+ </div>
+ {hasProjection && <Maximize2 size={14} className="text-[var(--text-muted)] mt-0.5" />}
+ </div>
+ <div
+ className={`h-[200px] bg-[var(--bg-inset)] rounded-lg border border-[var(--border-subtle)] relative transition-colors ${
+ hasProjection ? 'cursor-pointer hover:border-[var(--primary)]' : ''
+ }`}
+ // The scatter is unreadable at 200px; clicking opens the same option
+ // full screen. Only offer it when there is something to enlarge.
+ onClick={() => hasProjection && setTopologyExpanded(true)}
+ onKeyDown={(e) => {
+ if (hasProjection && (e.key === 'Enter' || e.key === ' ')) {
+ e.preventDefault();
+ setTopologyExpanded(true);
+ }
+ }}
+ role={hasProjection ? 'button' : undefined}
+ tabIndex={hasProjection ? 0 : undefined}
+ aria-label={hasProjection ? 'Expand neural topology projection' : undefined}
+ >
  <ReactEcharts option={getTopologyOption()} style={{ height: '100%', width: '100%' }} />
- {!projectionPoints() && (
+ {!hasProjection && (
  <div className="absolute inset-0 flex items-center justify-center text-xs text-[var(--text-muted)] text-center px-6 pointer-events-none">
  {loading
  ? 'Computing UMAP projection…'
@@ -798,6 +826,12 @@ export default function CommandCenter() {
  </div>
 
  </div>
+
+ <TopologyModal
+ isOpen={topologyExpanded}
+ onClose={() => setTopologyExpanded(false)}
+ option={getTopologyOption()}
+ />
 
  </div>
  );

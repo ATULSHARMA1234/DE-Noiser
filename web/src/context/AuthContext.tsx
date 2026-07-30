@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
+import { apiFetch, apiPost, setSessionToken } from '@/lib/api';
 
 type User = {
  id: number;
@@ -11,7 +12,6 @@ type User = {
 
 type AuthContextType = {
  user: User | null;
- token: string | null;
  loading: boolean;
  logout: () => void;
  hasRole: (roles: string[]) => boolean;
@@ -21,32 +21,58 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
  const [user, setUser] = useState<User | null>(null);
- const [token, setToken] = useState<string | null>(null);
  const [loading, setLoading] = useState(true);
  const router = useRouter();
  const pathname = usePathname();
 
  useEffect(() => {
- // Read from localStorage on mount
- const storedToken = localStorage.getItem('token');
+ // The session lives in httpOnly cookies, which JavaScript cannot read, so
+ // the only way to know whether one is active is to ask the server. The
+ // cached profile just avoids a blank frame while that call is in flight.
  const storedUser = localStorage.getItem('user');
-
- if (storedToken && storedUser) {
- setToken(storedToken);
+ if (storedUser) {
+ try {
  setUser(JSON.parse(storedUser));
- } else if (!pathname?.startsWith('/login') && pathname !== '/') {
- // If not logged in and trying to access app paths, redirect to login
- router.push('/login');
+ } catch {
+ localStorage.removeItem('user');
+ }
  }
 
- setLoading(false);
+ let cancelled = false;
+ apiFetch('/auth/me')
+ .then((me) => {
+ if (cancelled) return;
+ setUser(me);
+ localStorage.setItem('user', JSON.stringify(me));
+ })
+ .catch(() => {
+ if (cancelled) return;
+ // apiFetch already tried a refresh and redirected if that failed.
+ setUser(null);
+ localStorage.removeItem('user');
+ if (!pathname?.startsWith('/login') && pathname !== '/') {
+ router.push('/login');
+ }
+ })
+ .finally(() => {
+ if (!cancelled) setLoading(false);
+ });
+
+ return () => { cancelled = true; };
  }, [pathname, router]);
 
- const logout = () => {
- localStorage.removeItem('token');
+ const logout = async () => {
+ // Ask the server to revoke the tokens and clear the cookies. Dropping the
+ // client's copy alone would leave a valid session the browser still holds.
+ try {
+ await apiPost('/auth/logout', {});
+ } catch {
+ // Already expired or unreachable; clear locally regardless.
+ }
+ setSessionToken(null);
  localStorage.removeItem('user');
+ localStorage.removeItem('token');
  setUser(null);
- setToken(null);
  router.push('/login');
  };
 
@@ -56,7 +82,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
  };
 
  return (
- <AuthContext.Provider value={{ user, token, loading, logout, hasRole }}>
+ <AuthContext.Provider value={{ user, loading, logout, hasRole }}>
  {children}
  </AuthContext.Provider>
  );

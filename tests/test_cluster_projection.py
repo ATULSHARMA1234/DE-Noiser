@@ -12,6 +12,7 @@ import pytest
 
 from denoiser.api.schemas import ClusterResponse
 from denoiser.clustering.models import Cluster
+from denoiser.storage.runs import format_clusters
 
 
 def _cluster(cluster_id: int, projection: list[list[float]] | None) -> Cluster:
@@ -29,17 +30,11 @@ def _cluster(cluster_id: int, projection: list[list[float]] | None) -> Cluster:
     )
 
 
-def _format(clusters: list[Cluster]) -> list[dict]:
-    """The worker's cluster formatting, isolated from the Celery task body."""
-    formatted = []
-    for c in clusters:
-        formatted.append({
-            "id": c.cluster_id,
-            "cluster_id": c.cluster_id,
-            "size": c.size,
-            "projection_2d": [list(point) for point in (getattr(c, "projection_2d", None) or [])],
-        })
-    return formatted
+#: The real formatter. This used to be a copy of the worker's inlined loop,
+#: which meant the test could only ever agree with itself — it was paired with a
+#: grep over the worker source to check the two had not drifted. The formatting
+#: now lives in a module both the worker and the CLI call, so the test calls it.
+_format = format_clusters
 
 
 class TestClusterModel:
@@ -67,21 +62,25 @@ class TestWorkerPayload:
         payload = _format([_cluster(1, None)])
         assert payload[0]["projection_2d"] == []
 
-    def test_formatter_matches_the_worker(self):
-        """Guard against the worker's formatting drifting away from this test.
+    def test_the_pipeline_and_the_cli_share_this_formatter(self):
+        """Neither may re-implement the snapshot shape locally.
 
-        Reads the worker source rather than running a Celery task, which would
-        need embeddings, a broker and a database.
+        The CLI did exactly that, and recorded a thinner cluster row into its own
+        private database as a result.
         """
         from pathlib import Path
 
-        import denoiser.workers.analysis_worker as worker
+        import denoiser.analysis.pipeline as pipeline
+        import denoiser.cli.main as cli
 
-        source = Path(worker.__file__).read_text(encoding="utf-8")
-        assert '"projection_2d"' in source, (
-            "analysis_worker no longer emits projection_2d — the Neural Topology "
-            "chart will fall back to having no data"
-        )
+        for module in (pipeline, cli):
+            source = Path(module.__file__).read_text(encoding="utf-8")
+            assert "format_clusters" in source, (
+                f"{module.__name__} does not go through the shared formatter"
+            )
+            assert '"projection_2d"' not in source, (
+                f"{module.__name__} is building the cluster snapshot itself again"
+            )
 
 
 @pytest.mark.parametrize("points", [[], [[0.0, 0.0]], [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]]])
