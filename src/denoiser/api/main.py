@@ -5,11 +5,9 @@ import contextlib
 import json
 import os
 import time
-from collections import deque
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
-from typing import Any
 
 from denoiser.logging import get_logger
 from denoiser.settings import get_settings as get_infra_settings
@@ -55,7 +53,7 @@ from denoiser.api.middleware import (
     TenantQuotaMiddleware,
     register_exception_handlers,
 )
-from denoiser.api.pagination import MAX_PAGE_SIZE, ResourceId
+from denoiser.api.pagination import MAX_PAGE_SIZE
 from denoiser.api.scheduler import start_scheduler, stop_scheduler
 from denoiser.api.schemas import (
     AnalysisRequest,
@@ -63,11 +61,10 @@ from denoiser.api.schemas import (
     RefreshRequest,
     SettingsUpdate,
     TokenResponse,
-    UserCreate,
     UserLogin,
     UserResponse,
 )
-from denoiser.api.scope import TenantScope, tenant_predicate, tenant_scope
+from denoiser.api.scope import TenantScope, tenant_scope
 from denoiser.integrations.alert_router import (
     AlertPayload,
 )
@@ -79,11 +76,9 @@ from denoiser.storage.db import (
     init_db,
 )
 from denoiser.telemetry.ebpf_collector import EBPFCollector
-from denoiser.telemetry.metrics_collector import MetricsCollector
 from denoiser.utils.time import iso_utc, utcnow
 
 # Background agents
-metrics_agent = MetricsCollector()
 ebpf_agent = EBPFCollector()
 
 from aiokafka import AIOKafkaProducer
@@ -128,6 +123,11 @@ from denoiser.api.observability import MetricsMiddleware, authorize_scrape, metr
 from denoiser.api.otlp import router as otlp_router
 from denoiser.api.platform_admin import router as platform_router
 from denoiser.api.query import router as query_router
+from denoiser.api.routers_health import router as health_router
+from denoiser.api.routers_telemetry import metrics_agent
+from denoiser.api.routers_telemetry import router as telemetry_router
+from denoiser.api.routers_users import _same_tenant
+from denoiser.api.routers_users import router as users_router
 from denoiser.api.runbooks import router as runbooks_router
 from denoiser.api.scim import router as scim_router
 from denoiser.api.slo import router as slo_router
@@ -143,6 +143,9 @@ app.add_middleware(AuditMiddleware)
 app.add_middleware(VersionPrefixMiddleware, fastapi_app=app)
 # Outermost: time the full request (including every other middleware).
 app.add_middleware(MetricsMiddleware)
+app.include_router(health_router)
+app.include_router(users_router)
+app.include_router(telemetry_router)
 app.include_router(audit_router)
 app.include_router(alerts_router)
 app.include_router(tracing_router)
@@ -524,187 +527,9 @@ def logout(
     return {"status": "logged_out"}
 
 
-# The user directory is the membership list of one organisation. Every lookup
-# below is filtered by the caller's tenant, so an admin can only ever see and
-# manage their own colleagues. Unfiltered, these four endpoints let one
-# customer's admin enumerate, delete and deactivate another customer's staff.
-def _same_tenant(tenant_id: int | None):
-    """Predicate matching the users belonging to ``tenant_id``.
+# The user directory moved to denoiser.api.routers_users.
 
-    Unassigned users form their own bucket: an admin without a tenant manages
-    the users without one. The NULL handling that makes that work lives in
-    `denoiser.api.scope`, which is where every other router gets it — this was
-    a third independent copy of the same rule.
-    """
-    return tenant_predicate(User, tenant_id)
-
-
-#: The actor every unattributed audit row is written against. Deleting or
-#: deactivating it would break attribution for the whole deployment, so it is
-#: protected unconditionally rather than relying on tenant scoping to hide it.
-SYSTEM_AUDIT_EMAIL = "system-audit@semanticos.io"
-
-
-def _tenant_user(db: Session, user_id: int, current_user: User) -> User:
-    """Fetch a user *from the caller's own organisation*, or 404.
-
-    Returning 404 rather than 403 for someone else's user is deliberate: a 403
-    would confirm that the id exists, which is enough to enumerate another
-    organisation's headcount.
-    """
-    # Looked up unscoped first, purely to enforce the platform-wide protection
-    # below. The only fact this can reveal is which id belongs to a fixed,
-    # seeded service account — not anything about another organisation.
-    user = db.query(User).filter(User.id == user_id).first()
-    if user and user.email == SYSTEM_AUDIT_EMAIL:
-        raise HTTPException(status_code=400, detail="Cannot modify the system-audit user")
-
-    if user is None or not _in_tenant(user, current_user.tenant_id):
-        raise HTTPException(status_code=404, detail="User not found")
-    return user
-
-
-def _in_tenant(user: User, tenant_id: int | None) -> bool:
-    return user.tenant_id == tenant_id
-
-
-@app.get("/users", response_model=list[UserResponse])
-def list_users(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_role(["ADMIN"])),
-    limit: int = Query(200, ge=1, le=1000),
-    offset: int = Query(0, ge=0),
-):
-    """List the operators in the caller's organisation (paginated)."""
-    return (
-        db.query(User)
-        .filter(_same_tenant(current_user.tenant_id))
-        .order_by(User.id)
-        .limit(limit)
-        .offset(offset)
-        .all()
-    )
-
-
-@app.post("/users", response_model=UserResponse, status_code=201)
-def create_user(payload: UserCreate, db: Session = Depends(get_db), current_user: User = Depends(require_role(["ADMIN"]))):
-    """Provision a new operator inside the caller's organisation."""
-    exists = db.query(User).filter(User.email == payload.email).first()
-    if exists:
-        raise HTTPException(status_code=400, detail="User with this email already exists")
-
-    from denoiser.api.auth import get_password_hash
-    user = User(
-        email=payload.email,
-        hashed_password=get_password_hash(payload.password),
-        role=payload.role,
-        # Inherited from the admin creating them, never taken from the request:
-        # a client-supplied tenant would let an admin plant an account inside
-        # another organisation. Without it the new account was orphaned with a
-        # null tenant and could not see its own colleagues' work.
-        tenant_id=current_user.tenant_id,
-        department=payload.department,
-        environment_access=payload.environment_access,
-    )
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-    return user
-
-
-@app.delete("/users/{user_id}")
-def delete_user(user_id: ResourceId, db: Session = Depends(get_db), current_user: User = Depends(require_role(["ADMIN"]))):
-    """Delete an operator from the caller's organisation."""
-    user = _tenant_user(db, user_id, current_user)
-
-    if user.email == current_user.email:
-        raise HTTPException(status_code=400, detail="Cannot delete currently logged in admin user")
-
-    db.delete(user)
-    db.commit()
-    return {"status": "deleted", "id": user_id}
-
-
-@app.put("/users/{user_id}/deactivate")
-def deactivate_user(user_id: ResourceId, db: Session = Depends(get_db), current_user: User = Depends(require_role(["ADMIN"]))):
-    """Deactivate an operator in the caller's organisation (soft deactivation)."""
-    user = _tenant_user(db, user_id, current_user)
-
-    if user.email == current_user.email:
-        raise HTTPException(status_code=400, detail="Cannot deactivate currently logged in admin user")
-
-    user.is_active = False
-    db.commit()
-    db.refresh(user)
-    return {"status": "deactivated", "id": user_id, "is_active": user.is_active}
-
-
-# ─── HEALTH ───────────────────────────────────────────────────────────────────
-
-@app.get("/health")
-@app.get("/health/live")
-def health_check():
-    """Liveness: the process is up and serving. Cheap, no dependency I/O."""
-    return {"status": "healthy", "version": "2.0.0"}
-
-
-@app.get("/health/ready")
-async def readiness_check(response: Response):
-    """Readiness: probe every critical dependency and report per-component status.
-
-    Returns 503 when any critical dependency is down so an orchestrator can pull
-    the instance out of rotation instead of routing traffic into a broken pod.
-    """
-    checks: dict[str, str] = {}
-
-    # Database (critical)
-    try:
-        from sqlalchemy import text
-
-        from denoiser.storage.db import SessionLocal
-        db = SessionLocal()
-        try:
-            db.execute(text("SELECT 1"))
-            checks["database"] = "ok"
-        finally:
-            db.close()
-    except Exception as e:
-        checks["database"] = f"error: {e}"
-
-    # Redis (critical: rate limiting, websocket fan-out)
-    try:
-        await runtime.redis_client().ping()
-        checks["redis"] = "ok"
-    except Exception as e:
-        checks["redis"] = f"error: {e}"
-
-    # ClickHouse (non-critical: log storage/query degrade, API still serves)
-    checks["clickhouse"] = "ok" if runtime.clickhouse_store().client is not None else "unavailable"
-
-    # Kafka producer (non-critical: falls back to direct ClickHouse insert)
-    checks["kafka"] = "ok" if runtime.kafka_producer() is not None else "unavailable"
-
-    # Ingestion consumer. Only meaningful when we are actually publishing to
-    # Kafka — without a producer, /ingest writes straight to ClickHouse and the
-    # consumer is not in the path. When it *is* in the path, a missing consumer
-    # means every accepted write is silently unqueryable, so it is critical.
-    consumer_required = runtime.kafka_producer() is not None
-    if consumer_required:
-        from denoiser.workers.heartbeat import evaluate_heartbeat, read_heartbeat
-
-        consumer_ok, detail = evaluate_heartbeat(await read_heartbeat(runtime.redis_client()))
-        checks["ingestion_consumer"] = detail
-    else:
-        consumer_ok = True
-        checks["ingestion_consumer"] = "not_required (no Kafka producer; direct writes)"
-
-    critical_ok = (
-        checks["database"] == "ok" and checks["redis"] == "ok" and consumer_ok
-    )
-    if not critical_ok:
-        response.status_code = 503
-    return {"status": "ready" if critical_ok else "degraded", "checks": checks}
-
+# Health moved to denoiser.api.routers_health.
 
 @app.get("/admin/signing-keys")
 def signing_key_status(current_user: User = Depends(require_role(["ADMIN"]))):
@@ -939,82 +764,7 @@ def kernel_events(
     }
 
 
-# ─── TELEMETRY — Live-ish host vitals (Task 16) ──────────────────────────────
-@app.get("/vitals")
-def get_vitals(limit: int = Query(20, ge=1, le=MAX_PAGE_SIZE), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
-    """
-    Returns the latest host telemetry points for dashboard sparkline charts.
-    Backed by `data/metrics_stream.jsonl` written by `MetricsCollector` (Task 14).
-
-    These are the vitals of the node running SemanticOS, not of the services it
-    monitors. The response says so explicitly — unlabelled, a CPU spike here
-    reads as a spike in the customer's own infrastructure.
-    """
-    scope = {
-        "scope": "semanticos_api_host",
-        "host": metrics_agent.host,
-        "description": "Vitals of the SemanticOS API host, not the monitored fleet.",
-    }
-    try:
-        if not metrics_agent.enabled:
-            return {"status": "disabled", "vitals": [], **scope}
-        if not metrics_agent.stream_path.exists():
-            return {"status": "no_telemetry_available", "vitals": [], **scope}
-
-        limit = max(1, min(int(limit), 120))
-        buf: deque[dict[str, Any]] = deque(maxlen=limit)
-
-        with open(metrics_agent.stream_path) as f:
-            for line in f:
-                if not line.strip():
-                    continue
-                payload = json.loads(line)
-                buf.append(payload)
-
-        vitals = []
-        for m in list(buf):
-            vitals.append(
-                {
-                    "timestamp": m.get("timestamp"),
-                    "cpu": m.get("cpu_percent", 0),
-                    "mem": m.get("memory_percent", 0),
-                    "disk": m.get("disk_iops", 0),
-                    # Dashboard expects "pkt/s"; our stream stores drops per second when available.
-                    "net": m.get("network_drops_per_s", m.get("network_drops", 0)),
-                }
-            )
-
-        return {"status": "ok", "vitals": vitals, **scope}
-    except Exception as e:
-        logger.error(f"Failed to load /vitals: {e}")
-        return {"status": "error", "message": str(e), "vitals": [], **scope}
-
-
-@app.get("/metrics/current")
-def get_metrics_current(limit: int = Query(20, ge=1, le=MAX_PAGE_SIZE), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
-    """
-    Alias for /vitals — returns latest host telemetry for dashboard sparklines.
-    Compatible with Phase 3 telemetry integration (Task 16).
-    """
-    return get_vitals(limit=limit)
-
-
-@app.get("/metrics/stream")
-def get_metrics_stream(limit: int = Query(100, ge=1, le=MAX_PAGE_SIZE), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
-    """Return raw metrics stream entries for historical analysis."""
-    try:
-        if not metrics_agent.stream_path.exists():
-            return {"status": "no_data", "entries": []}
-        buf: deque[dict[str, Any]] = deque(maxlen=max(1, min(int(limit), 1000)))
-        with open(metrics_agent.stream_path) as f:
-            for line in f:
-                if line.strip():
-                    buf.append(json.loads(line))
-        return {"status": "ok", "count": len(buf), "entries": list(buf)}
-    except Exception as e:
-        logger.error(f"Failed to load /metrics/stream: {e}")
-        return {"status": "error", "message": str(e), "entries": []}
-
+# Host vitals and the metric stream moved to denoiser.api.routers_telemetry.
 
 # ─── SOURCES — Dynamic file discovery + upload ───────────────────────────────
 
