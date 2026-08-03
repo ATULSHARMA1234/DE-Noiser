@@ -207,9 +207,8 @@ The cap is logged (`pipeline.py:226`), which is honest, but a customer paying fo
 
 ## TODO — status
 
-All 30 tasks were worked. **28 landed complete, 1 needed no change, 1 is
-partial** — see the bottom of this section for the two that are not simply
-done.
+All 30 tasks were worked. **29 landed complete, 1 needed no change** — T4 was
+based on a finding that turned out to be wrong; see the bottom of this section.
 
 Suite: **1004 passing** (860 at the start of this work). Lint and the enforced
 type-check gates are green; both were red beforehand.
@@ -248,7 +247,7 @@ type-check gates are green; both were red beforehand.
 
 | | Task | Status |
 |---|---|---|
-| T21 | Split `api/main.py` | **partial** — see below |
+| T21 | Split `api/main.py` | done — 1,500 → **253 lines** |
 | T22 | No `print()` in library code, ruff `T20` rule | done |
 | T23 | Strict-mypy allowlist | done — 6 → **17 modules** |
 | T24 | OpenTelemetry self-instrumentation | done |
@@ -272,34 +271,68 @@ Redis is unreachable, not the primary store: `_login_failures`,
 ([main.py:297-339](src/denoiser/api/main.py#L297-L339)). The lockout was
 already shared across workers and replicas. Left alone.
 
-### T21 — partial, and deliberately stopped
+### T21 — complete
 
-`api/main.py` went from ~1,500 lines to **1,281**. Health, the user directory
-and host telemetry are now `routers_health.py`, `routers_users.py` and
-`routers_telemetry.py` — pure moves, verified by asserting the served route
-table is unchanged.
+`api/main.py` went from ~1,500 lines to **253**, and is now imports, the
+middleware stack, the lifespan and router registration. Twelve routers came out
+of it, the largest 310 lines.
 
-The acceptance criterion was "no module over 400 lines", and that is not met.
-What remains in `main.py` is auth, admin, sources, ingest, settings, the
-websocket, analyse and alert triggers — and unlike the three that moved, those
-share module-level state and helpers with each other. Extracting them is worth
-doing and should be done as its own reviewed change, not appended to a batch
-this size where a subtle mistake would be hard to spot in the diff.
+Pure moves, verified by capturing the served route table before and after: 157
+routes, same paths, same methods, nothing added and nothing removed. That check
+is what makes a refactor of this size reviewable — reading 1,200 relocated lines
+for a transcription error is not.
+
+Two things were *not* pure moves and are called out rather than folded in:
+`_human_size` and `_estimate_lines` sat beside the query endpoint but serve the
+sources listing, and went with their caller; and `if __name__ == "__main__"` had
+ended up trailing the alert-trigger handler and went back to the application
+module.
 
 ---
 
-## Two defects found while writing the tests
+## Six defects found by actually running things
 
-Both were introduced by this work and caught before they shipped, which is the
-argument for the tests existing at all:
+None of these were visible by reading. Each was found by executing the thing
+that was previously only described — which is the argument for the verification
+work in the first place.
 
-- **The raw-log object key was not collision-proof.** It was unique only if a
-  process held exactly one sink — true then, and not a property worth betting a
+**Writing the tests (P0/P1):**
+
+- **The raw-log object key was not collision-proof.** Unique only if a process
+  held exactly one sink — true then, and not a property worth betting a
   customer's logs on. Now carries a random suffix.
 - **The CEF header escape did not strip newlines.** A crafted request path could
   terminate one audit record and begin a second, attacker-authored one inside
-  the customer's SIEM. Forging an audit entry is a more useful outcome to an
-  attacker than most of what the audit log watches for.
+  the customer's SIEM.
+
+**Rendering the Helm chart:**
+
+- **`ingress.enabled=true` produced nothing at all.** `values.yaml` had
+  documented className, hosts, paths, a per-path backend selector and TLS since
+  the chart was written, and no template consumed any of it. `helm install`
+  reported success and created no Ingress. `helm lint` passes on a chart whose
+  values are wired to nothing.
+
+**Running the restore drill:**
+
+- **ClickHouse was not being backed up at all.** The CronJob dumped tables named
+  `logs` and `spans`; the real tables are `semantic_logs` and
+  `semantic_traces`. Both `SHOW CREATE TABLE` calls failed, hit the `||
+  continue` guard, and the job reported success. The verification step counted
+  the Postgres dump and passed.
+- **The ClickHouse schema dump was unusable.** It used the default TabSeparated
+  format, which escapes the newlines inside the single String column `SHOW
+  CREATE TABLE` returns — so the saved DDL was one line containing literal
+  `\n`, and ClickHouse rejects it on restore with a syntax error.
+
+**Running the load test:**
+
+- **`/ingest` was capped at 100 requests per minute, hardcoded.** The first run
+  of the gate returned 100 successes and 5,052 rate-limited responses. Beyond
+  breaking the gate, that ceiling is far too low for real shippers: one Fluent
+  Bit agent flushing once a second exhausts it in under two minutes, and behind
+  a proxy every shipper shares one bucket. Now configurable, defaulting to
+  6,000/minute.
 
 ## Corrections to the analysis above
 
@@ -312,17 +345,27 @@ corrected here rather than quietly edited out:
   caught `fingerprint` and Rich's `console.print`.
 - **The login lockout was not process-local** (T4, above).
 
-## Not verified
+## Verification performed
 
-- **The Helm chart has not been rendered.** `helm` is not installed in the
-  environment this work was done in. Template action and block balance were
-  checked mechanically across every chart file, and the values are valid YAML,
-  but `helm template` has not been run — do that before deploying the chart
-  changes.
-- **The restore drill has not been run.** `docs/operations.md` records the RTO
-  as unverified and carries an empty, dated table waiting for the first real
-  result. The RPO of 24 hours follows from the CronJob schedule and is real.
-- **The performance baseline is unrecorded.** The gate passes with no baseline
-  by design — the first run on a new machine has nothing to compare against.
-  Run the workflow once with `update_baseline` and commit
-  `deploy/perf-baseline.json` to arm it.
+Everything previously listed as unverified has now been run.
+
+| | Result |
+|---|---|
+| **Helm chart** | `helm lint` clean. Rendered in two shapes — defaults, and every optional feature at once — and validated against real Kubernetes 1.29 schemas with `kubeconform`: **18 and 27 resources, all valid.** The three misconfiguration guards are asserted to actually refuse. CI runs all of this now (`helm-chart` job), because a template behind an `if` is one nobody renders. |
+| **Restore drill** | Run against live Postgres and ClickHouse: seed, back up with the CronJob's own commands, drop both schemas, restore, verify. **1,000,000 rows restored in 1.34 s** from a 29 MB backup taken in 0.48 s. Row counts, record content and tenant attribution all verified. Recorded, dated, in `docs/operations.md`. Repeatable via `scripts/restore_drill.py`. |
+| **Performance gate** | Measured end to end: **22,755 logs/s, p95 223 ms, zero errors over 1,366,000 logs.** All four gate paths verified — no baseline passes (the arming path), a matching run passes, halved throughput and tripled p95 both fail, and errors under load invalidate the run. |
+| **Suite** | **1,004 passing.** Lint and the enforced type-check gates green. |
+
+### One thing deliberately not done
+
+**No performance baseline is committed to this repository.** A throughput figure
+is a property of the machine that produced it. The 22,755 logs/s above came from
+an M-series laptop; a shared CI runner is several times slower, so committing
+that number would fail the nightly gate every night — and the first response to a
+gate that always fails is to switch it off.
+
+The baseline instead lives in the GitHub Actions cache, keyed by runner image.
+The first nightly run on a new runner records its own and arms the gate with no
+step for anyone to remember, and a runner-image upgrade re-baselines rather than
+reporting a fake regression. `workflow_dispatch` with `reset_baseline`
+re-records deliberately.
