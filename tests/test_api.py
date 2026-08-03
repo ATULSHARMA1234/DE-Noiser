@@ -13,8 +13,8 @@ from fastapi.testclient import TestClient
 @pytest.fixture(scope="module")
 def client():
     """Create a test client for the SemanticOS API with bypassed authentication."""
-    from denoiser.api.auth import get_current_user
-    from denoiser.api.main import app, verify_ingest_auth
+    from denoiser.api.auth import get_current_user, verify_ingest_auth
+    from denoiser.api.main import app
     from denoiser.storage.db import User
 
     # Carries a tenant: every source/webhook/audit path is tenant-scoped now,

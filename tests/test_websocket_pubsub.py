@@ -91,7 +91,7 @@ class TestWebSocketPubSub:
     """Tests verifying the horizontally scaled WebSocket pub/sub subscriber."""
 
     @pytest.mark.asyncio
-    @patch("denoiser.api.main.get_current_user")
+    @patch("denoiser.api.routers_stream.get_current_user")
     async def test_websocket_pubsub_broadcasting(self, mock_get_current_user):
         # Redis is substituted through the runtime seam rather than by patching
         # a module global. `denoiser.api.main.redis_client` used to be the object

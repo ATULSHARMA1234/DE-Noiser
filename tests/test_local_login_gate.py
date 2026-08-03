@@ -38,7 +38,9 @@ def test_login_endpoint_rejects_when_local_login_disabled(monkeypatch):
     # Explicit disable (dev env keeps the production startup guard from firing;
     # the gate only reads local_login_enabled).
     disabled = InfraSettings(environment="development", allow_local_login=False)
-    monkeypatch.setattr(main, "get_infra_settings", lambda: disabled)
+    from denoiser.api import routers_auth
+
+    monkeypatch.setattr(routers_auth, "get_infra_settings", lambda: disabled)
 
     with TestClient(main.app) as client:
         res = client.post("/auth/login", json={"email": "a@b.com", "password": "x"})

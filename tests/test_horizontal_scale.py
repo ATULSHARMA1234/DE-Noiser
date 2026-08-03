@@ -442,9 +442,9 @@ class TestLoginDoesNotBlockTheEventLoop:
         """
         import inspect
 
-        from denoiser.api import main
+        from denoiser.api import routers_auth
 
-        source = inspect.getsource(main.login)
+        source = inspect.getsource(routers_auth.login)
         assert "run_in_threadpool" in source, (
             "login must run its blocking work off the event loop"
         )
@@ -453,9 +453,9 @@ class TestLoginDoesNotBlockTheEventLoop:
         """Otherwise the response time enumerates the user directory."""
         import inspect
 
-        from denoiser.api import main
+        from denoiser.api import routers_auth
 
-        source = inspect.getsource(main.login)
+        source = inspect.getsource(routers_auth.login)
         assert "_DUMMY_PASSWORD_HASH" in source
 
 

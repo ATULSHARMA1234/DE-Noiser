@@ -437,7 +437,7 @@ class TestLoginBackoff:
     """A flat lockout let anyone lock out any account they knew the email of."""
 
     def test_backoff_escalates_rather_than_locking_flat(self):
-        from denoiser.api.main import LOGIN_FREE_ATTEMPTS, _backoff_seconds
+        from denoiser.api.routers_auth import LOGIN_FREE_ATTEMPTS, _backoff_seconds
 
         assert _backoff_seconds(LOGIN_FREE_ATTEMPTS) == 0
         delays = [_backoff_seconds(n) for n in range(LOGIN_FREE_ATTEMPTS + 1, LOGIN_FREE_ATTEMPTS + 6)]

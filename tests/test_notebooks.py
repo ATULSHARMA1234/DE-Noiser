@@ -13,8 +13,8 @@ from fastapi.testclient import TestClient
 @pytest.fixture(scope="module")
 def client():
     """Test client authenticated as an ADMIN with no tenant scoping."""
-    from denoiser.api.auth import get_current_user
-    from denoiser.api.main import app, verify_ingest_auth
+    from denoiser.api.auth import get_current_user, verify_ingest_auth
+    from denoiser.api.main import app
     from denoiser.storage.db import User
 
     mock_user = User(id=1, email="admin@semanticos.io", role="ADMIN")
