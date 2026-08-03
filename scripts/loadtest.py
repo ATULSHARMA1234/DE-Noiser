@@ -19,8 +19,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import statistics
 import time
+from pathlib import Path
 
 import httpx
 
@@ -84,6 +86,12 @@ async def main() -> None:
     ap.add_argument("--concurrency", type=int, default=16)
     ap.add_argument("--duration", type=float, default=30.0, help="seconds")
     ap.add_argument("--batch", type=int, default=200, help="logs per request")
+    ap.add_argument(
+        "--json",
+        dest="json_path",
+        default=None,
+        help="also write the results as JSON here, for the CI performance gate",
+    )
     args = ap.parse_args()
 
     headers: dict[str, str] = {}
@@ -124,6 +132,32 @@ async def main() -> None:
               f"{_pct(latencies, 95)*1000:.1f} / "
               f"{_pct(latencies, 99)*1000:.1f} ms "
               f"(mean {statistics.mean(latencies)*1000:.1f} ms)")
+
+    if args.json_path:
+        # Machine-readable, so a CI gate can compare against a recorded
+        # baseline instead of somebody reading the numbers above and
+        # remembering what they used to be.
+        results = {
+            "wall_seconds": round(wall, 3),
+            "requests_ok": counters["ok"],
+            "requests_err": counters["err"],
+            "requests_exc": counters["exc"],
+            "logs_ingested": counters["logs"],
+            "logs_per_second": round(counters["logs"] / wall, 1) if wall else 0.0,
+            "requests_per_second": round(total_reqs / wall, 1) if wall else 0.0,
+            "latency_ms": {
+                "p50": round(_pct(latencies, 50) * 1000, 2) if latencies else None,
+                "p95": round(_pct(latencies, 95) * 1000, 2) if latencies else None,
+                "p99": round(_pct(latencies, 99) * 1000, 2) if latencies else None,
+            },
+            "config": {
+                "concurrency": args.concurrency,
+                "duration": args.duration,
+                "batch": args.batch,
+            },
+        }
+        Path(args.json_path).write_text(json.dumps(results, indent=2) + "\n")
+        print(f"\n  results written to {args.json_path}")
 
 
 if __name__ == "__main__":

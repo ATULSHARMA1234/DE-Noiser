@@ -201,6 +201,17 @@ async def _startup() -> None:
                 f"Refusing to start in production with {len(problems)} unsafe setting(s); see the errors above."
             )
 
+    # Before anything else does work worth tracing. Off unless an OTLP endpoint
+    # is configured, and it never raises — telemetry watches the work, it is
+    # not the work. See denoiser.telemetry.otel.
+    try:
+        from denoiser.storage.db import engine as _db_engine
+        from denoiser.telemetry.otel import configure as configure_tracing
+
+        configure_tracing(app=app, engine=_db_engine)
+    except Exception as e:
+        logger.warning(f"Self-tracing setup skipped: {e}")
+
     init_db()
     DATA_DIR.mkdir(exist_ok=True)
     # Materialise the settings row (and import any legacy settings.json) so the

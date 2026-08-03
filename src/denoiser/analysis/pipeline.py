@@ -45,7 +45,25 @@ logger = get_logger(__name__)
 #: Default cap on raw lines pulled into memory for one run. Without a cap, a
 #: multi-million-line source loads entirely into a list → polars frame → per-row
 #: objects, which can OOM the worker.
-DEFAULT_MAX_ANALYSIS_LINES = 500_000
+#:
+#: Since ingestion became streaming (see `ingest`), this is a *safety ceiling*
+#: rather than the working limit: lines are normalised and folded into the
+#: deduplicator a chunk at a time and then dropped, so memory tracks unique
+#: templates, not lines read. Raised accordingly — the old value meant a large
+#: customer's run silently analysed the first 500k lines and ignored the rest,
+#: which is the opposite of what "denoise everything" promises.
+DEFAULT_MAX_ANALYSIS_LINES = 20_000_000
+
+#: How many raw lines are held in memory at once before being folded into the
+#: deduplicator and discarded. Sized so one chunk is a few tens of MB through
+#: the polars frame, which is what actually bounds the worker.
+INGEST_CHUNK_LINES = 50_000
+
+#: Ceiling on *distinct* templates. This is the real limit: embedding and
+#: clustering are O(templates), and a run with a million distinct templates is
+#: not a run anyone can read — it is a normalisation failure being reported as
+#: an analysis. Hit, it truncates and says so rather than exhausting the worker.
+DEFAULT_MAX_TEMPLATES = 200_000
 
 
 class RunAborted(Exception):
@@ -115,7 +133,12 @@ class RunState:
     started_at: float = field(default_factory=time.time)
 
     records: list[dict] = field(default_factory=list)
+    #: Counted separately from `len(records)`, which is now one chunk rather
+    #: than the whole input.
+    lines_read: int = 0
     truncated: bool = False
+    templates_truncated: bool = False
+    max_templates: int = DEFAULT_MAX_TEMPLATES
     deduper: Any = None
     unique_templates: list[str] = field(default_factory=list)
     vectors: Any = None
@@ -158,7 +181,7 @@ def _noop_progress(percent: int, status: str) -> None:
 
 # ── Stages ───────────────────────────────────────────────────────────────────
 
-def ingest(state: RunState) -> RunState:
+def ingest(state: RunState, on_chunk: Callable[[list[dict]], None] | None = None) -> RunState:
     """Resolve the requested sources, read them, redact as we go.
 
     Redaction happens at the point of reading, before anything is retained, so
@@ -167,6 +190,15 @@ def ingest(state: RunState) -> RunState:
     copy indexed into ClickHouse for search, and the sample lines handed to the
     LLM. Redacting only the embedding input left all three carrying the
     original secrets.
+
+    **Streaming.** With `on_chunk`, records are handed over in batches of
+    `INGEST_CHUNK_LINES` and dropped, so peak memory is one chunk rather than
+    the whole input. That is what lets a run cover a 5M-line source instead of
+    stopping at the first 500k and logging that it did — a cap that quietly
+    meant most of a large customer's data was never analysed.
+
+    Without `on_chunk` every record is accumulated in `state.records`, which is
+    the old behaviour and is what the stage tests exercise.
     """
     from denoiser.api.platform_settings import build_redactor
     from denoiser.api.sources import SourceNotAllowed, resolve_source
@@ -220,8 +252,16 @@ def ingest(state: RunState) -> RunState:
                     "timestamp_ms": epoch_ms or 0,
                     "metadata": json.dumps(record.metadata),
                 })
+                state.lines_read += 1
 
-                if len(state.records) >= request.max_lines:
+                # Hand the chunk over and drop it. Without this the list grows
+                # to the size of the input, which is the whole reason the run
+                # used to stop early.
+                if on_chunk is not None and len(state.records) >= INGEST_CHUNK_LINES:
+                    on_chunk(state.records)
+                    state.records = []
+
+                if state.lines_read >= request.max_lines:
                     state.truncated = True
                     logger.warning(
                         f"Analysis input capped at max_lines={request.max_lines}; "
@@ -232,30 +272,48 @@ def ingest(state: RunState) -> RunState:
         except Exception as e:
             logger.warning(f"Failed to read source {src}: {e}")
 
-    if not state.records:
+    if on_chunk is not None and state.records:
+        on_chunk(state.records)
+        state.records = []
+
+    if not state.lines_read:
         raise RunAborted("No logs found at source(s)")
 
     return state
 
 
-def normalize_and_dedupe(state: RunState) -> RunState:
-    """Template the redacted lines and collapse them to unique templates.
+def fold_chunk(state: RunState, records: list[dict], deduper: Any) -> None:
+    """Normalise one chunk and fold it into the shared deduplicator.
 
-    `raw_text` is already redacted by `ingest`, so templating works from the
-    masked form and no second pass is needed.
+    Called once per chunk by the streaming path and once for everything by the
+    non-streaming one, so both produce byte-identical deduplicator state — the
+    grouping must not depend on how the input happened to be sliced.
+
+    The deduplicator keeps at most 100 sample records per template but counts
+    every occurrence, so folding chunk by chunk is exact for the counts that
+    drive cluster sizes, and lossy only for samples in the same way a single
+    pass already was.
     """
     import polars as pl
 
     from denoiser.ingestion.models import LogRecord
-    from denoiser.preprocessing.deduplication import Deduplicator
     from denoiser.preprocessing.normalization import Normalizer
 
-    df = pl.DataFrame(state.records)
+    if not records:
+        return
+
+    df = pl.DataFrame(records)
     normalized = Normalizer().normalize_batch(df["raw_text"].to_list())
     df = df.with_columns(pl.Series("normalized_text", normalized))
 
-    deduper = Deduplicator()
+    at_ceiling = state.templates_truncated
     for row in df.iter_rows(named=True):
+        # Past the template ceiling, keep counting occurrences of templates
+        # already seen but stop admitting new ones. Dropping the chunk outright
+        # would understate the sizes of the clusters that *are* being reported.
+        if at_ceiling and row["normalized_text"] not in deduper.get_all_counts():
+            continue
+
         meta = json.loads(row["metadata"]) if row["metadata"] else {}
         meta["source_label"] = row["source_label"]
         deduper.add(LogRecord(
@@ -266,6 +324,33 @@ def normalize_and_dedupe(state: RunState) -> RunState:
             metadata=meta,
             normalized_text=row["normalized_text"],
         ))
+
+        if not at_ceiling and deduper.unique_count >= state.max_templates:
+            at_ceiling = True
+            state.templates_truncated = True
+            logger.warning(
+                "Analysis reached max_templates=%d; further distinct templates "
+                "are not being admitted. This usually means normalisation is "
+                "not collapsing a high-cardinality field.",
+                state.max_templates,
+            )
+
+
+def normalize_and_dedupe(state: RunState) -> RunState:
+    """Template the redacted lines and collapse them to unique templates.
+
+    `raw_text` is already redacted by `ingest`, so templating works from the
+    masked form and no second pass is needed.
+
+    When the streaming path has already folded every chunk, this only finalises
+    the result; `state.records` is empty by then and there is nothing left to
+    fold.
+    """
+    from denoiser.preprocessing.deduplication import Deduplicator
+
+    deduper = state.deduper or Deduplicator()
+    fold_chunk(state, state.records, deduper)
+    state.records = []
 
     state.deduper = deduper
     state.unique_templates = deduper.get_unique_templates()
@@ -510,8 +595,23 @@ def analyse(
     """
     state = RunState(request=request)
 
+    # Ingestion and templating run as one streaming pass rather than two
+    # sequential ones. Reading everything into a list first is what forced the
+    # old 500k-line ceiling, and that ceiling meant a large customer's run
+    # silently analysed a fraction of their data and logged that it had.
+    from denoiser.preprocessing.deduplication import Deduplicator
+
+    state.deduper = Deduplicator()
+
+    def fold(records: list[dict]) -> None:
+        progress(
+            min(28, 10 + state.lines_read // 200_000),
+            f"Ingesting and templating ({state.lines_read:,} lines)",
+        )
+        fold_chunk(state, records, state.deduper)
+
     progress(10, "Ingesting files")
-    ingest(state)
+    ingest(state, on_chunk=fold)
 
     progress(30, "Redacting and Normalizing")
     normalize_and_dedupe(state)

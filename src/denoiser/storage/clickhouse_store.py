@@ -617,6 +617,21 @@ class ClickHouseStore:
         if not self.client:
             return []
 
+        # Hand-written rather than relying on a driver instrumentor: there is
+        # no OpenTelemetry instrumentation for clickhouse-connect, and this is
+        # the span that usually explains a slow query. Without it a trace shows
+        # a four-second request with a one-millisecond database call and an
+        # unexplained gap. See denoiser.telemetry.otel.
+        from denoiser.telemetry.otel import tracer
+
+        with tracer().start_as_current_span("clickhouse.query_logs") as span:
+            span.set_attribute("db.system", "clickhouse")
+            span.set_attribute("db.sql.table", "semantic_logs")
+            span.set_attribute("semanticos.tenant_id", str(tenant_id))
+            span.set_attribute("semanticos.limit", int(limit))
+            return self._query_logs(query_string, limit, tenant_id, from_ts, to_ts, group_by)
+
+    def _query_logs(self, query_string: str = "", limit: int = 100, tenant_id: str = "", from_ts: int | None = None, to_ts: int | None = None, group_by: str | None = None):
         sql_where, params = self.scope(
             tenant_id, query_string=query_string, from_ts=from_ts, to_ts=to_ts
         )
