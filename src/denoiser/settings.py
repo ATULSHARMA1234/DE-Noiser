@@ -219,7 +219,7 @@ def validate_for_production(settings: InfraSettings) -> list[str]:
     return problems
 
 
-def load_dotenv_into_environ(path: str | os.PathLike = ".env") -> int:
+def load_dotenv_into_environ(path: str | os.PathLike[str] = ".env") -> int:
     """Export ``.env`` into ``os.environ``. Returns how many keys were set.
 
     ``InfraSettings`` parses ``.env`` itself, but plenty of infrastructure

@@ -60,7 +60,18 @@ jobs:
             src/denoiser/api/observability.py \
             src/denoiser/preprocessing/redaction.py \
             src/denoiser/preprocessing/normalization.py \
-            src/denoiser/exceptions.py
+            src/denoiser/exceptions.py \
+            src/denoiser/api/abac.py \
+            src/denoiser/api/alerts.py \
+            src/denoiser/api/otlp.py \
+            src/denoiser/api/schemas.py \
+            src/denoiser/api/siem.py \
+            src/denoiser/api/sources.py \
+            src/denoiser/api/versioning.py \
+            src/denoiser/storage/raw_log_sink.py \
+            src/denoiser/storage/source_store.py \
+            src/denoiser/workers/dead_letter.py \
+            src/denoiser/workers/heartbeat.py
 
       # Advisory: strict mypy across the whole package is a goal, not yet met
       # (tracked debt). Runs so the total error count is visible on every PR.

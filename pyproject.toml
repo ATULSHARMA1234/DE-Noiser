@@ -1,7 +1,9 @@
 [project]
 name = "semantic-log-denoiser"
-version = "0.1.0"
-description = "CLI tool for semantic log clustering, noise reduction, and anomaly detection"
+# Kept in step with the Helm chart's appVersion; a `helm install` with no
+# --set pulls the image tagged with this. Bump both in the release commit.
+version = "2.0.0"
+description = "Privacy-first on-premise log analysis and observability platform"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
@@ -10,7 +12,7 @@ authors = [
 ]
 keywords = ["logs", "sre", "devops", "anomaly-detection", "clustering", "observability"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
     "Environment :: Console",
     "Intended Audience :: Developers",
     "Intended Audience :: System Administrators",
@@ -103,11 +105,23 @@ line-length = 200
 src = ["src"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "RUF"]
+# T20 (flake8-print) is deliberate: a bare print() in library or server code
+# writes to stdout with no level, no correlation id and nothing an operator can
+# filter on in production. The CLI and the Rich reporters are exempt below —
+# printing is their job.
+select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "RUF", "T20"]
 # F821 (undefined name) and F841 (unused local) are deliberately NOT ignored:
 # they catch real defects — a NameError waiting to happen, and a computed value
 # that is silently thrown away — rather than style.
 ignore = ["E402", "E501", "E701", "E712", "E722", "E741", "RUF002", "RUF012", "RUF013", "B904", "B905", "SIM108", "N806", "W291", "W293", "RUF005", "N818", "B008"]
+
+[tool.ruff.lint.per-file-ignores]
+# Writing to the terminal is what these do.
+"src/denoiser/cli/*" = ["T20"]
+"src/denoiser/reporting/*" = ["T20"]
+"scripts/*" = ["T20"]
+# Tests print diagnostics when they fail; that output is the point.
+"tests/*" = ["T20"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

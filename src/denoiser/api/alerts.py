@@ -1,4 +1,6 @@
 
+from typing import Any
+
 from fastapi import APIRouter, Depends
 
 from denoiser.api.auth import require_role
@@ -16,7 +18,7 @@ def get_alert_history(
     status: str | None = None,
     scope: TenantScope = Depends(tenant_scope),
     _: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"])),
-):
+) -> dict[str, Any]:
     """Chronological log of notifications sent for the caller's tenant."""
     # Unfiltered, this served every tenant's notification history — including
     # which of their channels failed and when — to whoever asked.

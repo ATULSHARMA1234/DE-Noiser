@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from denoiser.api.credentials import generate_api_key, secrets_match
+from denoiser.api.idp_registry import PROTOCOLS, describe, upsert_provider
 from denoiser.api.keys import read_secret
 from denoiser.api.pagination import ResourceId
 from denoiser.api.tenancy import (
@@ -25,8 +26,8 @@ from denoiser.api.tenancy import (
     tenant_claiming,
 )
 from denoiser.logging import get_logger
-from denoiser.storage.db import Tenant, User, get_db
-from denoiser.utils.time import iso_utc
+from denoiser.storage.db import ErasureRecord, Tenant, TenantIdentityProvider, User, get_db
+from denoiser.utils.time import iso_utc, utcnow
 
 logger = get_logger(__name__)
 
@@ -271,10 +272,288 @@ def delete_tenant(
             detail="confirm_name does not match the organisation's name",
         )
 
+    tenant_name = tenant.name
     report = purge_tenant(db, tenant)
+
+    # Record the erasure so it can be certified later. This outlives the tenant
+    # on purpose: everything else about them is gone, and the ClickHouse
+    # deletes are only *submitted* at this point — the mutations that actually
+    # rewrite the parts finish minutes or hours later on a large table. Issuing
+    # a certificate against this response would be certifying a queued request.
+    record = ErasureRecord(
+        purged_tenant_id=tenant_id,
+        tenant_name=tenant_name,
+        clickhouse_mutations=report.get("clickhouse_mutations", []),
+        report=report,
+    )
+    try:
+        db.add(record)
+        db.commit()
+        db.refresh(record)
+        erasure_id = record.id
+    except Exception as e:
+        db.rollback()
+        logger.error("Could not record the erasure for tenant %s: %s", tenant_id, e)
+        erasure_id = None
+
+    response = {
+        **report,
+        "erasure_id": erasure_id,
+        # Named so nobody reads a 200 here as "the data is gone".
+        "erasure_status": "submitted",
+        "certificate_url": f"/platform/erasures/{erasure_id}" if erasure_id else None,
+    }
     if report["errors"]:
         # Reported rather than raised: the relational delete already succeeded,
         # and a 500 here would hide both what was removed and what was not. The
         # caller must not treat "partial" as a completed erasure request.
-        return {**report, "status": "partial"}
-    return {**report, "status": "purged"}
+        return {**response, "status": "partial"}
+    return {**response, "status": "purged"}
+
+
+class IdentityProviderRequest(BaseModel):
+    """One organisation's IdP. Only the fields for `protocol` are read."""
+
+    protocol: str = Field(..., description="oidc or saml")
+    enabled: bool = True
+
+    oidc_issuer: str | None = None
+    oidc_client_id: str | None = None
+    oidc_client_secret: str | None = None
+
+    saml_idp_entity_id: str | None = None
+    saml_idp_sso_url: str | None = None
+    saml_idp_certificate: str | None = None
+
+
+@router.put("/tenants/{tenant_id}/idp")
+def configure_identity_provider(
+    tenant_id: ResourceId,
+    payload: IdentityProviderRequest,
+    _: bool = Depends(require_platform_operator),
+    db: Session = Depends(get_db),
+):
+    """Give one organisation its own identity provider.
+
+    Platform-operator gated rather than ADMIN: whoever controls an
+    organisation's IdP configuration controls who can sign in as their staff,
+    and — through the SAML issuer, which is the inbound routing key — could
+    claim assertions intended for a different customer. That is a boundary a
+    customer's own administrator must not be able to move.
+
+    Secrets are write-only. Supplying no client secret on an update leaves the
+    stored one in place, so editing an issuer does not silently break sign-in
+    at the next login rather than at the moment of the edit.
+    """
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Organisation not found")
+
+    protocol = payload.protocol.strip().lower()
+    if protocol not in PROTOCOLS:
+        raise HTTPException(
+            status_code=400, detail=f"protocol must be one of {', '.join(PROTOCOLS)}"
+        )
+
+    if protocol == "saml" and payload.saml_idp_entity_id:
+        # An issuer identifies exactly one organisation, because it is what an
+        # inbound assertion is routed by. Two organisations claiming the same
+        # issuer would make that routing ambiguous, and the loser's staff would
+        # be seated inside the winner's data.
+        clash = (
+            db.query(TenantIdentityProvider)
+            .filter(
+                TenantIdentityProvider.protocol == "saml",
+                TenantIdentityProvider.saml_idp_entity_id == payload.saml_idp_entity_id.strip(),
+                TenantIdentityProvider.tenant_id != tenant_id,
+            )
+            .first()
+        )
+        if clash:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "That SAML issuer is already registered to another organisation. "
+                    "An issuer identifies exactly one customer."
+                ),
+            )
+
+    try:
+        provider = upsert_provider(
+            db,
+            tenant_id,
+            protocol,
+            enabled=payload.enabled,
+            oidc_issuer=payload.oidc_issuer,
+            oidc_client_id=payload.oidc_client_id,
+            oidc_client_secret=payload.oidc_client_secret,
+            saml_idp_entity_id=payload.saml_idp_entity_id,
+            saml_idp_sso_url=payload.saml_idp_sso_url,
+            saml_idp_certificate=payload.saml_idp_certificate,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return {"status": "configured", "tenant_id": tenant_id, **describe(provider)}
+
+
+@router.get("/tenants/{tenant_id}/idp")
+def list_identity_providers(
+    tenant_id: ResourceId,
+    _: bool = Depends(require_platform_operator),
+    db: Session = Depends(get_db),
+):
+    """This organisation's providers. Never returns a secret's value."""
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Organisation not found")
+
+    providers = (
+        db.query(TenantIdentityProvider)
+        .filter(TenantIdentityProvider.tenant_id == tenant_id)
+        .all()
+    )
+    return {
+        "tenant_id": tenant_id,
+        "providers": [describe(p) for p in providers],
+        # Says plainly what happens when the list is empty, rather than leaving
+        # an operator to infer that sign-in is broken.
+        "fallback": (
+            "This organisation has no provider of its own; sign-in uses the "
+            "deployment-wide OIDC/SAML environment configuration."
+            if not providers
+            else None
+        ),
+    }
+
+
+@router.delete("/tenants/{tenant_id}/idp/{protocol}")
+def remove_identity_provider(
+    tenant_id: ResourceId,
+    protocol: str,
+    _: bool = Depends(require_platform_operator),
+    db: Session = Depends(get_db),
+):
+    """Remove a provider. The organisation falls back to the deployment-wide one."""
+    provider = (
+        db.query(TenantIdentityProvider)
+        .filter(
+            TenantIdentityProvider.tenant_id == tenant_id,
+            TenantIdentityProvider.protocol == protocol.strip().lower(),
+        )
+        .first()
+    )
+    if not provider:
+        raise HTTPException(status_code=404, detail="No such provider for this organisation")
+
+    db.delete(provider)
+    db.commit()
+    return {"status": "removed", "tenant_id": tenant_id, "protocol": protocol}
+
+
+@router.get("/erasures")
+def list_erasures(
+    _: bool = Depends(require_platform_operator),
+    db: Session = Depends(get_db),
+):
+    """Every offboarding this deployment has performed, newest first."""
+    records = (
+        db.query(ErasureRecord).order_by(ErasureRecord.requested_at.desc()).limit(200).all()
+    )
+    return {
+        "erasures": [
+            {
+                "id": r.id,
+                "tenant_id": r.purged_tenant_id,
+                "tenant_name": r.tenant_name,
+                "requested_at": r.requested_at.isoformat() if r.requested_at else None,
+                "completed_at": r.completed_at.isoformat() if r.completed_at else None,
+                "complete": r.completed_at is not None,
+            }
+            for r in records
+        ]
+    }
+
+
+@router.get("/erasures/{erasure_id}")
+def get_erasure(
+    erasure_id: ResourceId,
+    _: bool = Depends(require_platform_operator),
+    db: Session = Depends(get_db),
+):
+    """Whether an offboarding has actually finished, and the evidence for it.
+
+    Checks the ClickHouse mutations rather than trusting that the purge
+    endpoint returned 200. Until every one reports `is_done`, the erasure is
+    *submitted* — the customer's log rows are still on disk in parts that have
+    not been rewritten yet, and a certificate issued now would be wrong.
+
+    Completion is recorded once and then trusted: mutations leave
+    `system.mutations` after they are applied, so re-deriving the answer
+    forever would eventually turn a finished erasure back into an unknown one.
+    """
+    record = db.query(ErasureRecord).filter(ErasureRecord.id == erasure_id).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="Erasure record not found")
+
+    body: dict = {
+        "id": record.id,
+        "tenant_id": record.purged_tenant_id,
+        "tenant_name": record.tenant_name,
+        "requested_at": record.requested_at.isoformat() if record.requested_at else None,
+        "stores": record.report.get("deleted", {}) if record.report else {},
+        "errors": record.report.get("errors", []) if record.report else [],
+        "warnings": record.report.get("warnings", []) if record.report else [],
+    }
+
+    if record.completed_at:
+        return {
+            **body,
+            "status": "complete",
+            "completed_at": record.completed_at.isoformat(),
+            "certificate": (
+                f"All data belonging to organisation {record.tenant_name} "
+                f"(id {record.purged_tenant_id}) was erased from every store by "
+                f"{record.completed_at.isoformat()}."
+            ),
+        }
+
+    from denoiser import runtime
+
+    status = runtime.clickhouse_store().mutation_status(
+        list(record.clickhouse_mutations or [])
+    )
+    body["mutations"] = status.get("mutations", [])
+
+    if status.get("error"):
+        return {**body, "status": "unverified", "detail": status["error"]}
+
+    if not status.get("complete"):
+        return {
+            **body,
+            "status": "submitted",
+            "pending_mutations": status.get("pending", 0),
+            "detail": (
+                "The deletion has been accepted but ClickHouse has not finished "
+                "rewriting the affected parts. No erasure certificate should be "
+                "issued until this reports complete."
+            ),
+        }
+
+    record.completed_at = utcnow()
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.error("Could not mark erasure %s complete: %s", erasure_id, e)
+
+    return {
+        **body,
+        "status": "complete",
+        "completed_at": record.completed_at.isoformat(),
+        "certificate": (
+            f"All data belonging to organisation {record.tenant_name} "
+            f"(id {record.purged_tenant_id}) was erased from every store by "
+            f"{record.completed_at.isoformat()}."
+        ),
+    }

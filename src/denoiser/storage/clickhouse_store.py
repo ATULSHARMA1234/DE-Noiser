@@ -431,28 +431,135 @@ class ClickHouseStore:
             logger.error(f"Failed to cleanup old data for tenant {tenant_id}: {e}")
             return False
 
-    def delete_tenant(self, tenant_id: str) -> bool:
-        """Delete every log and trace belonging to a tenant. For offboarding.
+    #: Tables a tenant purge has to clear. Named once so the delete and the
+    #: completion check cannot drift apart — a table missing from the second
+    #: list would be reported as erased while its parts were still being
+    #: rewritten.
+    TENANT_TABLES = ("semantic_logs", "semantic_traces")
 
-        Mutations in ClickHouse are asynchronous, so this returning True means
-        the delete was accepted, not that the parts have been rewritten yet.
-        `mutations_sync` is not set because a customer's final purge should not
-        hold an HTTP request open for however long a large table takes.
+    def delete_tenant(self, tenant_id: str) -> bool:
+        """Submit deletion of every log and trace belonging to a tenant.
+
+        Returns whether the mutations were *accepted*. Use
+        `submit_tenant_deletion` when the caller needs to certify the erasure
+        later — see that method for why the distinction matters.
         """
+        return bool(self.submit_tenant_deletion(tenant_id).get("submitted"))
+
+    def submit_tenant_deletion(self, tenant_id: str) -> dict[str, Any]:
+        """Submit the purge and return the mutations to track it by.
+
+        ClickHouse `ALTER TABLE … DELETE` is asynchronous: it returns once the
+        mutation is *queued*, not once the parts have been rewritten. So the
+        old boolean answered "was the request accepted", while the question a
+        GDPR Article 17 erasure certificate has to answer is "is the data
+        gone" — and on a large table those are minutes or hours apart.
+
+        `mutations_sync` is deliberately still not set: a final purge must not
+        hold an HTTP request open for the length of a table rewrite. Instead
+        the mutation ids come back here, and `mutation_status` turns them into
+        a completion check the certificate can be issued against.
+        """
+        result: dict[str, Any] = {"submitted": False, "mutations": [], "tables": []}
         if not self.client:
-            return False
+            result["error"] = "no ClickHouse client"
+            return result
+
         try:
-            params = {"tenant_id": _require_tenant(tenant_id)}
-            for table in ("semantic_logs", "semantic_traces"):
+            scoped = _require_tenant(tenant_id)
+            params = {"tenant_id": scoped}
+            for table in self.TENANT_TABLES:
                 self.client.command(
                     f"ALTER TABLE {table} DELETE WHERE tenant_id = {{tenant_id:String}}",
                     parameters=params,
                 )
+                result["tables"].append(table)
+            result["submitted"] = True
             logger.info("Submitted deletion of all ClickHouse data for tenant %s", tenant_id)
-            return True
         except Exception as e:
             logger.error(f"Failed to delete ClickHouse data for tenant {tenant_id}: {e}")
-            return False
+            result["error"] = str(e)
+            return result
+
+        # Look the mutations up rather than parsing them out of the command
+        # result: clickhouse_connect does not surface a mutation id, and
+        # system.mutations is the only authority on whether one has finished.
+        try:
+            rows = self.client.query(
+                "SELECT mutation_id, table, is_done FROM system.mutations "
+                "WHERE table IN {tables:Array(String)} "
+                "AND command LIKE {needle:String} "
+                "ORDER BY create_time DESC LIMIT {cap:UInt32}",
+                parameters={
+                    "tables": list(self.TENANT_TABLES),
+                    "needle": f"%{scoped}%",
+                    "cap": len(self.TENANT_TABLES),
+                },
+            ).result_rows
+            result["mutations"] = [
+                {"mutation_id": row[0], "table": row[1], "is_done": bool(row[2])}
+                for row in rows
+            ]
+        except Exception as e:
+            # The delete is submitted either way. What is lost is the ability to
+            # confirm it later, and saying so is better than implying the purge
+            # itself failed.
+            logger.warning("Could not record mutation ids for tenant %s: %s", tenant_id, e)
+            result["mutation_lookup_error"] = str(e)
+
+        return result
+
+    def mutation_status(self, mutation_ids: list[str]) -> dict[str, Any]:
+        """Whether the given mutations have finished rewriting their parts.
+
+        This is what an erasure certificate should be issued against — not the
+        response of the endpoint that submitted the delete.
+        """
+        status: dict[str, Any] = {"complete": False, "mutations": [], "pending": 0}
+        if not mutation_ids:
+            # Nothing to wait on. A purge that submitted no mutations because
+            # the tenant had no rows is complete, not indeterminate.
+            status["complete"] = True
+            return status
+        if not self.client:
+            status["error"] = "no ClickHouse client"
+            return status
+
+        try:
+            rows = self.client.query(
+                "SELECT mutation_id, table, is_done, latest_fail_reason "
+                "FROM system.mutations WHERE mutation_id IN {ids:Array(String)}",
+                parameters={"ids": list(mutation_ids)},
+            ).result_rows
+        except Exception as e:
+            logger.error("Could not read mutation status: %s", e)
+            status["error"] = str(e)
+            return status
+
+        seen = set()
+        for row in rows:
+            seen.add(row[0])
+            status["mutations"].append(
+                {
+                    "mutation_id": row[0],
+                    "table": row[1],
+                    "is_done": bool(row[2]),
+                    "failure": row[3] or None,
+                }
+            )
+
+        # A mutation that has left system.mutations has been applied and
+        # cleaned up; treating it as pending would leave a purge permanently
+        # uncertifiable.
+        missing = [m for m in mutation_ids if m not in seen]
+        for mutation_id in missing:
+            status["mutations"].append(
+                {"mutation_id": mutation_id, "table": None, "is_done": True, "failure": None}
+            )
+
+        status["pending"] = sum(1 for m in status["mutations"] if not m["is_done"])
+        status["complete"] = status["pending"] == 0
+        return status
 
     def insert_logs(self, logs: list[dict[str, Any]], tenant_id: str):
         """Dual-write logs to ClickHouse"""

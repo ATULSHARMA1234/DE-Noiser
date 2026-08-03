@@ -154,6 +154,11 @@ TENANT_SCOPED_MODELS = (
     "Span", "ServiceLevelObjective", "Dashboard", "MetricRule", "ExtractedMetric",
     "Runbook", "Monitor", "Notebook", "BillingMeter", "Integration",
     "DeploymentMarker", "LogIssue", "IssueComment", "IssueEvent", "SavedQuery",
+    # A departing customer's IdP configuration must go with them: it holds
+    # their client secret and their IdP certificate, and leaving the SAML
+    # issuer registered would keep routing assertions to a tenant that no
+    # longer exists.
+    "TenantIdentityProvider",
 )
 
 #: Tables that belong to a customer only through a parent row. They carry no
@@ -172,7 +177,14 @@ CHILD_MODELS = (
 #: Deliberately deployment-wide, not owned by any one customer: the tenant
 #: registry itself, operator settings, and the token denylist (which must
 #: outlive the user whose token it revoked).
-GLOBAL_MODELS = ("Tenant", "PlatformSetting", "RevokedToken")
+#: Deployment-wide, deliberately untouched by a purge.
+#:
+#: `ErasureRecord` is here for a specific reason: it is the evidence that a
+#: customer's data was deleted, so purging it along with the customer would
+#: destroy the only proof of the erasure it describes. It holds no customer
+#: data — an id, a name, timestamps and ClickHouse mutation ids — which is the
+#: minimum needed to answer a regulator asking whether the deletion completed.
+GLOBAL_MODELS = ("Tenant", "PlatformSetting", "RevokedToken", "ErasureRecord")
 
 
 def purge_tenant(db: Session, tenant: Tenant) -> dict:
@@ -234,11 +246,32 @@ def purge_tenant(db: Session, tenant: Tenant) -> dict:
         return report
 
     # 2. Log rows in ClickHouse.
+    #
+    #    Submitted, not completed. ClickHouse `ALTER … DELETE` is asynchronous,
+    #    so this step returning success means the mutations are queued — on a
+    #    large table the parts are still being rewritten for some time after.
+    #    The mutation ids are carried out with the report so the erasure can be
+    #    certified later against `system.mutations`, rather than against this
+    #    function having returned.
     try:
         from denoiser import runtime
 
         store = runtime.clickhouse_store()
-        report["deleted"]["clickhouse"] = store.delete_tenant(str(tenant_id))
+        submission = store.submit_tenant_deletion(str(tenant_id))
+        report["deleted"]["clickhouse"] = submission.get("submitted", False)
+        report["clickhouse_mutations"] = [
+            m["mutation_id"] for m in submission.get("mutations", [])
+        ]
+        if submission.get("error"):
+            report["errors"].append(f"clickhouse: {submission['error']}")
+        if submission.get("mutation_lookup_error"):
+            # The delete went in; what is missing is the ability to confirm it.
+            # Recorded distinctly so it is not read as the purge having failed.
+            report["warnings"] = report.get("warnings", []) + [
+                "clickhouse: deletion submitted but its mutation ids could not be "
+                f"recorded ({submission['mutation_lookup_error']}); completion "
+                "cannot be verified automatically"
+            ]
     except Exception as e:
         report["errors"].append(f"clickhouse: {e}")
         logger.error("Tenant %s purge failed at the ClickHouse step: %s", tenant_id, e)

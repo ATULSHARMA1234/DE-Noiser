@@ -123,6 +123,13 @@ NOT_ADDRESSABLE = {
     # Written by workers and read in aggregate; no per-id route exists.
     "ExtractedMetric", "MetricRule", "BillingMeter", "Span", "DeploymentMarker",
     "AnalysisRun", "Incident", "Webhook",
+    # An organisation's IdP configuration is reached only through the
+    # platform-operator router (/platform/tenants/{id}/idp), which is gated by
+    # the operator token rather than by tenant scope — a customer's own ADMIN
+    # must not be able to read or move it, because whoever controls the SAML
+    # issuer controls which organisation an assertion is routed to. Its
+    # isolation is asserted in tests/test_per_org_idp.py.
+    "TenantIdentityProvider",
 }
 
 

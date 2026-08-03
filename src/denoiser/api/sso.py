@@ -54,26 +54,37 @@ def _is_safe_redirect(uri: str) -> bool:
     return origin in _allowed_redirect_origins()
 
 
-def _provision_sso_user(db: Session, fields: dict, default_environments: list[str] | None = None) -> User:
+def _provision_sso_user(
+    db: Session,
+    fields: dict,
+    default_environments: list[str] | None = None,
+    tenant_id: int | None = None,
+) -> User:
     """Just-in-time provision/update an SSO user from mapped IdP claims.
 
     Matches on the IdP subject (``external_id``) first, then email, so a user
     whose email changes at the IdP is still recognised. Role and team membership
     are refreshed on every login, so IdP group changes take effect immediately.
 
-    Which organisation the user joins is decided by their email domain, not by
-    which tenant happens to sort first — see `denoiser.api.tenancy`. An address
-    from a domain no customer has registered is refused rather than guessed at,
-    because guessing seats one company's employee inside another's data.
+    Which organisation the user joins is decided, in order:
+
+    1. ``tenant_id``, when the assertion came from an organisation's *own*
+       registered IdP. That is a stronger signal than the email domain: the
+       organisation configured the certificate the assertion was verified
+       against, so they have already vouched for the identity.
+    2. Otherwise the email domain — see `denoiser.api.tenancy`. An address from
+       a domain no customer has registered is refused rather than guessed at,
+       because guessing seats one company's employee inside another's data.
     """
     from denoiser.api.auth import get_password_hash
     from denoiser.api.tenancy import TenantRoutingError, resolve_identity_tenant
 
-    try:
-        tenant_id = resolve_identity_tenant(db, fields.get("email"))
-    except TenantRoutingError as e:
-        logger.warning("Rejected SSO login: %s", e)
-        raise HTTPException(status_code=403, detail=str(e))
+    if tenant_id is None:
+        try:
+            tenant_id = resolve_identity_tenant(db, fields.get("email"))
+        except TenantRoutingError as e:
+            logger.warning("Rejected SSO login: %s", e)
+            raise HTTPException(status_code=403, detail=str(e))
 
     user = None
     if fields.get("external_id"):
@@ -245,11 +256,26 @@ def sso_callback(
 
 
 @router.get("/saml/login")
-def saml_login(relay_state: str | None = None):
-    """Start an SP-initiated SAML login by redirecting to the IdP."""
+def saml_login(
+    relay_state: str | None = None,
+    org: str | None = None,
+    db: Session = Depends(get_db),
+):
+    """Start an SP-initiated SAML login by redirecting to the IdP.
+
+    ``org`` is an organisation name, an email domain or a whole email address,
+    and selects whose IdP to redirect to. A hint is needed because nobody is
+    authenticated yet — and it is safe here in a way it would not be on the way
+    back in: the worst a forged hint achieves is a redirect to somebody else's
+    IdP, which will not authenticate the sender.
+    """
+    from denoiser.api.idp_registry import saml_config_for, tenant_for_hint
     from denoiser.api.saml import SAMLError, build_authn_request, saml_enabled
 
-    if not saml_enabled():
+    tenant = tenant_for_hint(db, org)
+    config = saml_config_for(db, tenant.id if tenant else None)
+
+    if not config.enabled and not saml_enabled():
         raise HTTPException(
             status_code=501,
             detail=(
@@ -260,7 +286,7 @@ def saml_login(relay_state: str | None = None):
     if relay_state and not _is_safe_redirect(relay_state):
         raise HTTPException(status_code=400, detail="Invalid relay_state")
     try:
-        url, _request_id = build_authn_request(relay_state)
+        url, _request_id = build_authn_request(relay_state, config=config)
     except SAMLError as e:
         raise HTTPException(status_code=500, detail=f"Cannot build SAML request: {e}")
     return RedirectResponse(url=url)
@@ -296,20 +322,32 @@ def saml_acs(
     When SAML is not configured this is fail-closed: 501, except under the
     explicitly enabled dev mock IdP, which issues the sandbox operator session.
     """
+    from denoiser.api.idp_registry import peek_saml_issuer, saml_config_for_issuer
     from denoiser.api.saml import SAMLError, parse_and_verify_response, saml_enabled
 
-    if saml_enabled():
+    # Which organisation's IdP is this? Resolved from the assertion's own
+    # Issuer, which is inside the signature, rather than from anything the
+    # poster controls — routing on a query parameter would let an attacker pick
+    # which certificate their assertion is checked against.
+    config, idp_tenant_id = saml_config_for_issuer(db, peek_saml_issuer(SAMLResponse))
+
+    if config.enabled or saml_enabled():
         if not SAMLResponse:
             raise HTTPException(status_code=400, detail="Missing SAMLResponse")
         try:
-            fields = parse_and_verify_response(SAMLResponse)
+            fields = parse_and_verify_response(SAMLResponse, config=config)
         except SAMLError as e:
             # The reason is logged in full; the client gets a generic failure so
             # a probing attacker learns nothing about which check tripped.
             logger.warning("SAML assertion rejected: %s", e)
             raise HTTPException(status_code=401, detail="SAML authentication failed")
 
-        user = _provision_sso_user(db, fields)
+        # An assertion verified against an organisation's *own* certificate
+        # seats the user in that organisation. That is a stronger signal than
+        # the email domain: the organisation configured the certificate, so
+        # they have already vouched for the identity. Domain routing still
+        # applies when the deployment-wide provider answered.
+        user = _provision_sso_user(db, fields, tenant_id=idp_tenant_id)
         if not user.is_active:
             raise HTTPException(status_code=401, detail="User account is deactivated")
         return {**issue_token_pair(user.email), "user": user}

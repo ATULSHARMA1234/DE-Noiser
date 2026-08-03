@@ -43,7 +43,7 @@ def _lag_ceiling() -> int:
     return int(os.getenv("INGESTION_LAG_CRITICAL", "500000"))
 
 
-async def publish_heartbeat(redis_client, *, lag: int | None, assigned: int) -> None:
+async def publish_heartbeat(redis_client: Any, *, lag: int | None, assigned: int) -> None:
     """Record that the consumer is alive and how far behind it is.
 
     Never raises: a Redis blip must not take down ingestion, which is the one
@@ -65,7 +65,7 @@ async def publish_heartbeat(redis_client, *, lag: int | None, assigned: int) -> 
         logger.warning(f"Could not publish ingestion heartbeat: {e}")
 
 
-async def read_heartbeat(redis_client) -> dict[str, Any] | None:
+async def read_heartbeat(redis_client: Any) -> dict[str, Any] | None:
     """Fetch the consumer's last heartbeat, or None if it never checked in."""
     try:
         raw = await redis_client.get(HEARTBEAT_KEY)
@@ -75,7 +75,10 @@ async def read_heartbeat(redis_client) -> dict[str, Any] | None:
     if not raw:
         return None
     try:
-        return json.loads(raw if isinstance(raw, str) else raw.decode("utf-8"))
+        decoded: dict[str, Any] = json.loads(
+            raw if isinstance(raw, str) else raw.decode("utf-8")
+        )
+        return decoded
     except (ValueError, AttributeError):
         return None
 

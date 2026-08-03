@@ -11,10 +11,13 @@ from denoiser import runtime
 from denoiser.api.auth import User, require_role
 from denoiser.api.pagination import MAX_PAGE_SIZE
 from denoiser.api.scope import TenantScope, tenant_scope
+from denoiser.logging import get_logger
 from denoiser.storage.db import get_db
 from denoiser.tracing.models import SpanSchema, TraceSchema
 from denoiser.tracing.otlp_collector import process_otlp_traces
 from denoiser.utils.time import iso_utc
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/traces", tags=["tracing"])
 
@@ -271,8 +274,8 @@ def list_traces(
             ))
             
         return filtered
-    except Exception as e:
-        print(f"SQLite fallback failed: {e}")
+    except Exception:
+        logger.exception("Trace listing fell back to SQLite and failed")
         return []
 
 @router.get("/{trace_id}", response_model=TraceSchema)
@@ -396,7 +399,7 @@ def get_trace(
         )
     except HTTPException:
         raise
-    except Exception as e:
-        print(f"SQLite fallback failed: {e}")
+    except Exception:
+        logger.exception("Trace lookup fell back to SQLite and failed")
         raise HTTPException(status_code=404, detail="Trace not found")
 

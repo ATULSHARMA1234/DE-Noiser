@@ -28,7 +28,8 @@ of its own; this middleware keeps ``/v1`` pinned to what shipped.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from fastapi import FastAPI, Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -42,7 +43,7 @@ _PREFIX = f"/{CURRENT_VERSION}"
 class VersionPrefixMiddleware(BaseHTTPMiddleware):
     """Routes ``/v1/<path>`` to ``<path>`` when nothing is registered at ``/v1/<path>``."""
 
-    def __init__(self, app, fastapi_app: FastAPI) -> None:
+    def __init__(self, app: Any, fastapi_app: FastAPI) -> None:
         """`app` is the next ASGI app in the chain, `fastapi_app` the application.
 
         They are not the same object, and the distinction is the whole
@@ -95,7 +96,9 @@ class VersionPrefixMiddleware(BaseHTTPMiddleware):
                 return True
         return False
 
-    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+    async def dispatch(
+        self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
         path = request.scope.get("path", "")
 
         versioned = path == _PREFIX or path.startswith(f"{_PREFIX}/")
@@ -111,7 +114,7 @@ class VersionPrefixMiddleware(BaseHTTPMiddleware):
                 if "raw_path" in request.scope:
                     request.scope["raw_path"] = stripped.encode("utf-8")
 
-        response = await call_next(request)
+        response: Response = await call_next(request)
         # Lets a client confirm which contract answered it, and gives support a
         # way to tell "called /v1" from "called the unversioned alias".
         response.headers["X-API-Version"] = CURRENT_VERSION

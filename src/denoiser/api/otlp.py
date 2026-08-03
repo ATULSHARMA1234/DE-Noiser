@@ -1,5 +1,6 @@
 import json
 from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
@@ -13,7 +14,7 @@ router = APIRouter(prefix="/v1", tags=["OTLP"])
 
 
 @router.post("/logs")
-async def ingest_otlp_logs(request: Request, tenant_id: str = Depends(verify_ingest_auth)):
+async def ingest_otlp_logs(request: Request, tenant_id: str = Depends(verify_ingest_auth)) -> dict[str, Any]:
     """
     OTLP logs ingestion. Accepts the OTLP/HTTP **protobuf** encoding (the OTel
     default) as well as JSON, decoding both to the standard log record shape and
@@ -65,7 +66,7 @@ async def ingest_otlp_logs(request: Request, tenant_id: str = Depends(verify_ing
 
 
 @router.post("/traces")
-async def ingest_otlp_traces(request: Request, db: Session = Depends(get_db), tenant_id: str = Depends(verify_ingest_auth)):
+async def ingest_otlp_traces(request: Request, db: Session = Depends(get_db), tenant_id: str = Depends(verify_ingest_auth)) -> dict[str, Any]:
     """
     Accepts OpenTelemetry standard JSON traces payload (resourceSpans) and ingestion.
     """

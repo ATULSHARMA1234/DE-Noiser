@@ -1,4 +1,6 @@
 
+from typing import Any
+
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
@@ -8,7 +10,7 @@ from denoiser.storage.db import AnalysisRun, Incident, User, get_db
 
 class ABACPolicyEngine:
     @staticmethod
-    def evaluate(user: User, action: str, resource_type: str, resource_attrs: dict) -> bool:
+    def evaluate(user: User, action: str, resource_type: str, resource_attrs: dict[str, Any]) -> bool:
         """
         Evaluate an Attribute-Based Access Control (ABAC) request.
         - Subject Attributes: user.role, user.department, user.environment_access

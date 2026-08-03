@@ -74,7 +74,7 @@ class LogClusterer:
             raise ClusteringError("Mismatch between templates and vectors.")
 
         n_samples = vectors.shape[0]
-        print(f"\n[NEURAL ENGINE] Analysis of {n_samples} unique semantic patterns starting...")
+        logger.info("Clustering %d unique semantic patterns", n_samples)
 
         if n_samples < 2:
             logger.info("Single template detected. Returning single cluster.")

@@ -240,15 +240,21 @@ def reset_replay_guard() -> None:
 
 # ── Request side (SP-initiated login) ───────────────────────────────────────
 
-def build_authn_request(relay_state: str | None = None) -> tuple[str, str]:
+def build_authn_request(
+    relay_state: str | None = None, config: SAMLConfig | None = None
+) -> tuple[str, str]:
     """Build a redirect URL for an ``AuthnRequest``. Returns ``(url, request_id)``.
 
     HTTP-Redirect binding: deflate, base64, urlencode. The request is not
     signed — signing is optional in SAML 2.0 and IdPs that require it are
     configured with our metadata instead; the response signature is what
     actually secures the flow.
+
+    ``config`` is passed in when the login belongs to an organisation with its
+    own IdP; it defaults to the deployment-wide configuration. See
+    ``denoiser.api.idp_registry``.
     """
-    config = get_saml_config()
+    config = config or get_saml_config()
     if not config.enabled:
         raise SAMLError("SAML is not configured")
 
@@ -522,15 +528,24 @@ def map_assertion(assertion) -> dict:
     }
 
 
-def parse_and_verify_response(saml_response_b64: str, request_id: str | None = None) -> dict:
+def parse_and_verify_response(
+    saml_response_b64: str,
+    request_id: str | None = None,
+    config: SAMLConfig | None = None,
+) -> dict:
     """Verify a base64 ``SAMLResponse`` and return the mapped user fields.
 
     Raises :class:`SAMLError` on anything that is not a cryptographically valid,
     in-window, correctly addressed, first-time-seen assertion from the
     configured IdP. There is no path through this function that trusts unsigned
     input.
+
+    ``config`` selects whose IdP certificate the signature is checked against.
+    The caller resolves it from the assertion's own signed ``Issuer`` — never
+    from a query parameter, which would let the presenter choose which
+    organisation's certificate their assertion is verified with.
     """
-    config = get_saml_config()
+    config = config or get_saml_config()
     if not config.enabled:
         raise SAMLError("SAML is not configured")
 

@@ -213,6 +213,83 @@ class SavedQuery(Base):
     created_at = Column(DateTime, default=utcnow)
     last_used = Column(DateTime, default=utcnow)
 
+class TenantIdentityProvider(Base):
+    """One organisation's own IdP.
+
+    OIDC and SAML settings were read from deployment-wide environment
+    variables, so a shared deployment offered exactly one identity provider.
+    Domain routing decided *which organisation* an assertion landed in; it did
+    not let two companies each bring their own Okta for interactive login,
+    which is table stakes for hosting more than one customer. SCIM was already
+    per-organisation and did not have this limitation.
+
+    A row per (tenant, protocol), so one organisation can run SAML while
+    another runs OIDC, and a single organisation can offer both.
+
+    The client secret and the IdP certificate are stored through the same
+    encryption used for the SCIM token. The certificate is a public key and not
+    strictly a secret, but it is the root of trust for every assertion that
+    organisation presents — anyone who can rewrite it can mint sessions as any
+    of their staff, so it is protected like one.
+    """
+
+    __tablename__ = "tenant_identity_providers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, index=True, nullable=False)
+    #: "oidc" or "saml".
+    protocol = Column(String, nullable=False, index=True)
+    enabled = Column(Boolean, default=True, nullable=False)
+
+    # ── OIDC ────────────────────────────────────────────────────────────────
+    oidc_issuer = Column(String, nullable=True)
+    oidc_client_id = Column(String, nullable=True)
+    oidc_client_secret = Column(String, nullable=True)
+
+    # ── SAML ────────────────────────────────────────────────────────────────
+    #: Also the routing key on the way back in: an assertion names its issuer,
+    #: so the ACS endpoint can find the right organisation without a hint from
+    #: the client — which is the one part of the flow the client cannot be
+    #: trusted to supply.
+    saml_idp_entity_id = Column(String, nullable=True, index=True)
+    saml_idp_sso_url = Column(String, nullable=True)
+    saml_idp_certificate = Column(String, nullable=True)
+
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class ErasureRecord(Base):
+    """The record of a customer offboarding, and whether it actually finished.
+
+    Deliberately outlives the tenant it describes — everything else about them
+    is deleted, so if this were tenant-scoped it would be purged by the very
+    operation it exists to certify.
+
+    It holds no customer data: an id, a name, timestamps and ClickHouse
+    mutation ids. That is the minimum needed to answer "was this erasure
+    completed, and when", which is the question a regulator asks and which the
+    purge endpoint's own response could not answer — ClickHouse deletes are
+    asynchronous, so that response only ever meant "accepted".
+    """
+
+    __tablename__ = "erasure_records"
+
+    id = Column(Integer, primary_key=True, index=True)
+    #: Not a foreign key: the tenant row is gone by the time this matters.
+    purged_tenant_id = Column(Integer, index=True, nullable=False)
+    tenant_name = Column(String, nullable=False)
+    requested_at = Column(DateTime, default=utcnow, nullable=False)
+    #: Set only when every ClickHouse mutation has finished. Until then the
+    #: erasure is submitted, not complete, and no certificate should be issued.
+    completed_at = Column(DateTime, nullable=True)
+    #: Mutation ids to check completion against.
+    clickhouse_mutations = Column(JSON, default=list)
+    #: Per-store outcome from the purge, including anything unreachable.
+    report = Column(JSON, default=dict)
+    requested_by = Column(String, nullable=True)
+
+
 class ServiceLevelObjective(Base):
     __tablename__ = "slos"
 
