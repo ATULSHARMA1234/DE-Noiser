@@ -196,6 +196,12 @@ config:
   autoMigrate: "0"                # migrations run via the pre-install/upgrade Job
   schedulerEnabled: "1"
   corsAllowedOrigins: "https://semanticos.local"
+  # Coarse per-IP DoS guard on /ingest. Size it for your shipper fleet: behind
+  # an ingress controller every shipper shares one bucket, so a hundred agents
+  # flushing once a second need at least 6,000/minute between them. Per-tenant
+  # fairness is the tier quota, which is a separate mechanism.
+  ingestRateLimitRequests: 6000
+  ingestRateLimitWindowSeconds: 60
   # Set to "1" on any deployment running more than one API replica. The API then
   # refuses to start unless shared storage is configured, instead of silently
   # keeping uploads on one pod's disk where the other replicas cannot see them.

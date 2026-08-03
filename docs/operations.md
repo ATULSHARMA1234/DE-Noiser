@@ -240,19 +240,56 @@ python scripts/loadtest.py --url https://api.your-host \
 
 Record results against the environment so the numbers are reproducible:
 
-| Field | Example | Notes |
-|-------|---------|-------|
-| API replicas / CPU·mem | 3 × (2 vCPU, 2 GiB) | from Helm `values.yaml` |
-| Broker | Redpanda 3-node | partitions per topic |
-| ClickHouse | 3 shards × 2 replicas | disk type matters |
+| Field | Reference run (2026-08-04) | Notes |
+|-------|---------------------------|-------|
+| Hardware | Apple M-series laptop, 2 uvicorn workers | **developer machine, not a server** |
+| Broker | none — direct path | measures the API's own request handling |
+| ClickHouse | not attached | ditto |
 | concurrency / batch | 16 / 200 | loadtest flags |
-| **Ingest throughput** | _measure_ | logs/sec sustained |
-| **p50 / p95 / p99 latency** | _measure_ | from loadtest output |
-| Error rate | _measure_ | should be ~0 at steady state |
+| **Ingest throughput** | **22,755 logs/s** (114 req/s) | 1,366,000 logs in 60 s |
+| **p50 / p95 / p99 latency** | **130 / 223 / 314 ms** | mean 140 ms |
+| Error rate | **0** (6,830/6,830 accepted) | |
+
+> That row is a **reference point for the harness, not a capacity commitment.**
+> It was measured on a laptop with no broker and no ClickHouse attached, so it
+> bounds the API's parse/redact/serialise path and nothing else. Do not quote it
+> to a customer. Measure on your own hardware, with your own datastores, before
+> any capacity commitment.
 
 Scale the API and ingestion/analysis workers horizontally (all stateless) until
 ingest latency and consumer lag are steady, then record the sustained rate as
 your supported ceiling for that configuration.
+
+### Two limits that will throttle a load test before the platform does
+
+Both were found by running the harness for the first time, and both silently
+turn a performance measurement into a measurement of rate limiting:
+
+* **The per-IP `/ingest` guard.** Previously hardcoded at 100 requests per
+  minute — a single Fluent Bit shipper flushing once a second exhausts that in
+  under two minutes, and behind a proxy every shipper shares one bucket. It is
+  now `INGEST_RATE_LIMIT_REQUESTS` (default 6,000/min). Raise it for a load
+  test, and size it for your shipper fleet in production.
+* **The per-tenant quota.** The seeded tenant is on the `free` tier: 600
+  requests per minute. Move the tenant you test with to `enterprise` (60,000)
+  or the run measures the quota.
+
+The first local run of the gate returned 100 successes and 5,052 rate-limited
+responses before either was addressed.
+
+### The regression gate
+
+`.github/workflows/perf.yml` runs this nightly and fails the build on a
+regression against a stored baseline: p95 latency up more than 50%, throughput
+down more than 30%, or any meaningful error rate under load.
+
+The baseline lives in the **Actions cache keyed by runner image**, not in the
+repository. A throughput figure is a property of the machine that produced it,
+so a baseline recorded on a laptop would fail every nightly run on a shared
+runner by a factor of several — and the first response to a gate that always
+fails is to switch it off. The first run on a new runner image records its own
+baseline and arms the gate with no human step; `workflow_dispatch` with
+`reset_baseline` re-records deliberately.
 
 ## Backup & restore
 

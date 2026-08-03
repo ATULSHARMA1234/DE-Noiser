@@ -114,6 +114,10 @@ the managed/created Secret; non-sensitive config comes straight from values.
   value: {{ .Values.config.autoMigrate | quote }}
 - name: SEMANTICOS_SCHEDULER_ENABLED
   value: {{ .Values.config.schedulerEnabled | quote }}
+- name: INGEST_RATE_LIMIT_REQUESTS
+  value: {{ .Values.config.ingestRateLimitRequests | quote }}
+- name: INGEST_RATE_LIMIT_WINDOW_SECONDS
+  value: {{ .Values.config.ingestRateLimitWindowSeconds | quote }}
 - name: METRICS_TOKEN
   valueFrom:
     secretKeyRef:

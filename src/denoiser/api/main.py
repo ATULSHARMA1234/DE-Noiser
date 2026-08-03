@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 
 from denoiser.logging import get_logger
@@ -56,7 +57,19 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["Authorization", "Content-Type", "X-API-Key", "Bypass-Tunnel-Reminder"],
 )
-app.add_middleware(RateLimitMiddleware, max_requests=100, window_seconds=60)
+# Coarse per-IP DoS guard on /ingest. Configurable, and much higher than the
+# 100/minute it was hardcoded to: a single Fluent Bit shipper flushing once a
+# second exhausts that budget in under two minutes, and behind a proxy every
+# shipper shares one bucket. Per-*tenant* fairness is the TenantQuotaMiddleware
+# below; this one only exists to stop a single address flooding the process.
+#
+# Found by load testing: at 100/minute the harness got 100 successes and 5,052
+# rate-limited responses, so nothing downstream was being measured at all.
+app.add_middleware(
+    RateLimitMiddleware,
+    max_requests=int(os.getenv("INGEST_RATE_LIMIT_REQUESTS", "6000")),
+    window_seconds=int(os.getenv("INGEST_RATE_LIMIT_WINDOW_SECONDS", "60")),
+)
 # Per-tenant ceiling across every route. The /ingest IP limiter above does not
 # bound a workspace (many pods, many IPs, one tenant), so without this a single
 # tenant can still saturate the platform for everyone else.
