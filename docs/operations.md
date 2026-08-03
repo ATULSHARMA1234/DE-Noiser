@@ -285,29 +285,52 @@ dashboard and no backup.
 | | Value | What sets it |
 |---|---|---|
 | **RPO** | 24 hours | The CronJob interval. Tighten by lowering `backup.schedule`, or properly with Postgres WAL archiving (PITR, ~seconds) and incremental ClickHouse snapshots. |
-| **RTO** | _measure it_ | Dominated by ClickHouse restore time, which scales with data volume. Run the drill below and record the number here. |
+| **RTO** | **~1.3 s per million rows**, plus fixed pod/scheduling time | Measured, see the drill record below. Dominated by the ClickHouse `Native` reload, which is linear in row count. |
 
 These are the defaults this chart establishes, not a recommendation. Both are
 policy decisions that belong to whoever owns the data.
 
+**Extrapolating the RTO.** The measured figure is data-restore time only. A real
+recovery adds provisioning, image pulls, the migration Job and readiness —
+budget 5–10 minutes of fixed cost on top, and re-measure at your own volume
+rather than scaling the number below by eye. Object-store bandwidth, not CPU,
+usually dominates once the dump is measured in gigabytes.
+
 ### The restore drill
 
-**A backup nobody has restored is a hypothesis.** Run this quarterly, against a
-scratch namespace, and record the result:
+**A backup nobody has restored is a hypothesis.** `scripts/restore_drill.py`
+runs the whole loop against live datastores — seed, back up with the CronJob's
+own commands, destroy both stores, restore, and verify:
 
-1. `helm install semanticos-dr …` into an empty namespace with empty datastores.
-2. Restore the most recent Postgres dump (`pg_restore`, below).
-3. Restore the ClickHouse tables from the same timestamp directory.
-4. `GET /health/ready` — every dependency must report `ok`.
-5. Sign in, open a run from before the backup, and run a `/v1/logs/query` that
-   returns rows. A restore that brings back the schema and no data passes every
-   check except this one.
-6. Record the date, the wall-clock time from step 1 to step 5, and the data
-   volume in the table below.
+```bash
+python scripts/restore_drill.py \
+  --postgres postgresql://user:pass@host:5432/semanticos \
+  --clickhouse http://clickhouse:8123 \
+  --rows 500000 --report drill.json
+```
 
-| Date | Restored from | Data volume | Measured RTO | By |
-|------|---------------|-------------|--------------|-----|
-| _(no drill has been run yet — the RTO above is unverified)_ | | | | |
+It verifies row counts, **content** (a known record must come back — a restore
+that recreates the schema and no rows passes a count check against an empty
+expectation) and **tenant attribution** (a restore that loses it deposits one
+customer's data into everybody's account). Exit code 1 means the backups do not
+restore.
+
+Run it quarterly and append the result. For a full disaster-recovery rehearsal,
+do the same against a scratch namespace: `helm install` into empty datastores,
+restore, then confirm `GET /health/ready` is green and a `/v1/logs/query`
+returns rows from before the backup.
+
+| Date | Postgres | ClickHouse | Backup size | Backup | **Restore (RTO)** | Result |
+|------|----------|------------|-------------|--------|-------------------|--------|
+| 2026-08-04 | 500,000 rows | 500,000 rows | 29 MB | 0.48 s | **1.34 s** | passed — counts, content and tenant attribution all verified |
+
+> The first run of this drill found two defects in the backup CronJob that
+> reading it had not: it dumped tables named `logs` and `spans`, which do not
+> exist (they are `semantic_logs` and `semantic_traces`), so **ClickHouse was
+> silently not being backed up at all**; and the schema dump used the default
+> TabSeparated format, which escapes the newlines inside `SHOW CREATE TABLE`
+> output, so the saved DDL was one unusable line. Both are fixed. This is what
+> the drill is for.
 
 ### PostgreSQL
 

@@ -105,9 +105,16 @@ spec:
 
                   echo "[backup] clickhouse -> ${STAMP}"
                   CH="clickhouse-client --host ${CLICKHOUSE_HOST} --user ${CLICKHOUSE_USER}"
-                  for table in logs spans; do
+                  # The table names are the ones the application creates.
+                  for table in semantic_logs semantic_traces; do
+                    # FORMAT TabSeparatedRaw is load-bearing. SHOW CREATE TABLE
+                    # returns a single String column, and the default
+                    # TabSeparated escapes the newlines inside it — so the saved
+                    # DDL is one line containing literal "\n" and ClickHouse
+                    # rejects it on restore with a syntax error. Found by
+                    # running scripts/restore_drill.py, not by reading this.
                     ${CH} --password "${CLICKHOUSE_PASSWORD}" \
-                      --query "SHOW CREATE TABLE ${table}" \
+                      --query "SHOW CREATE TABLE ${table} FORMAT TabSeparatedRaw" \
                       > "${WORK}/clickhouse-${table}-${STAMP}.schema.sql" || {
                         echo "[backup] table ${table} not present, skipping"; continue; }
                     ${CH} --password "${CLICKHOUSE_PASSWORD}" \
