@@ -1,12 +1,15 @@
+import contextlib
 import re
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi.concurrency import run_in_threadpool
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from denoiser.api.auth import require_role
 from denoiser.api.pagination import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from denoiser.api.scope import TenantScope, tenant_scope
+from denoiser.api.siem import forward, get_siem_config
 from denoiser.logging import get_logger
 from denoiser.storage.db import AuditLog, SessionLocal, User
 
@@ -90,6 +93,24 @@ class AuditMiddleware(BaseHTTPMiddleware):
             logger.error(f"Failed to write audit log: {e}")
         finally:
             db.close()
+
+        # Copy to the customer's SIEM, if one is configured. After the commit,
+        # because the database row is the system of record and must not depend
+        # on a collector being reachable — and off the event loop, because the
+        # send is a blocking socket write.
+        siem_config = get_siem_config()
+        if siem_config.enabled:
+            event = {
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+                "action": request.method,
+                "resource_type": request.url.path,
+                "ip_address": ip_address,
+                "status_code": response.status_code,
+                "changes": ",".join(changes) if isinstance(changes, dict) else None,
+            }
+            with contextlib.suppress(Exception):
+                await run_in_threadpool(forward, event)
 
         return response
 

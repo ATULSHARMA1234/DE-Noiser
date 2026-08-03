@@ -134,8 +134,13 @@ from denoiser.api.slo import router as slo_router
 from denoiser.api.sso import router as sso_router
 from denoiser.api.storage import router as storage_router
 from denoiser.api.tracing import router as tracing_router
+from denoiser.api.versioning import VersionPrefixMiddleware
 
 app.add_middleware(AuditMiddleware)
+# Above the audit and quota layers so they see the resolved path: a request to
+# /v1/users must be recorded, rate-limited and metered as /users, not as a
+# second, separate endpoint. See denoiser.api.versioning.
+app.add_middleware(VersionPrefixMiddleware, fastapi_app=app)
 # Outermost: time the full request (including every other middleware).
 app.add_middleware(MetricsMiddleware)
 app.include_router(audit_router)
@@ -870,13 +875,25 @@ async def internal_metrics(request: Request):
     # count only exists in Redis. Silent data loss with no series to alert on
     # is what makes it dangerous.
     from denoiser.workers.dead_letter import read_counters
+    from denoiser.workers.heartbeat import read_heartbeat
 
     try:
         counters = await read_counters(runtime.redis_client())
     except Exception:
         counters = {"total": 0, "by_topic": {}}
 
-    return metrics_response(dlq_counters=counters)
+    # Consumer liveness and lag, for the same reason: the consumer is another
+    # pod with no HTTP surface, so this is the only place a scraper can see it.
+    try:
+        heartbeat = await read_heartbeat(runtime.redis_client())
+    except Exception:
+        heartbeat = None
+
+    return metrics_response(
+        dlq_counters=counters,
+        consumer_heartbeat=heartbeat,
+        include_consumer=True,
+    )
 
 
 @app.get("/telemetry/kernel-events")

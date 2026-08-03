@@ -200,9 +200,50 @@ def render_dlq(counters: dict[str, Any]) -> list[str]:
     return lines
 
 
-def metrics_response(dlq_counters: dict[str, Any] | None = None) -> PlainTextResponse:
+def render_consumer(heartbeat: dict[str, Any] | None) -> list[str]:
+    """Ingestion consumer liveness and backlog as Prometheus series.
+
+    The consumer is a separate pod and exposes no HTTP surface of its own, so
+    its state reaches a scraper only through the heartbeat the API already
+    reads for readiness. Without this, "the consumer stopped" is visible on one
+    readiness probe and nowhere a dashboard or an alert can see it.
+
+    Lag is only emitted when it is actually known. Reporting an unknown lag as
+    zero would read as "fully caught up", which is the opposite of the truth.
+    """
+    lines = [
+        "# HELP semanticos_ingestion_consumer_up Whether the ingestion consumer has a fresh heartbeat.",
+        "# TYPE semanticos_ingestion_consumer_up gauge",
+    ]
+    if not heartbeat:
+        lines.append("semanticos_ingestion_consumer_up 0")
+        return lines
+
+    age = max(0.0, time.time() - float(heartbeat.get("at", 0)))
+    lines.append("semanticos_ingestion_consumer_up 1")
+    lines.append(
+        "# HELP semanticos_ingestion_heartbeat_age_seconds Age of the consumer's last heartbeat."
+    )
+    lines.append("# TYPE semanticos_ingestion_heartbeat_age_seconds gauge")
+    lines.append(f"semanticos_ingestion_heartbeat_age_seconds {age:.3f}")
+
+    lag = heartbeat.get("lag")
+    if isinstance(lag, int):
+        lines.append("# HELP semanticos_ingestion_consumer_lag Uncommitted records behind the log head.")
+        lines.append("# TYPE semanticos_ingestion_consumer_lag gauge")
+        lines.append(f"semanticos_ingestion_consumer_lag {lag}")
+    return lines
+
+
+def metrics_response(
+    dlq_counters: dict[str, Any] | None = None,
+    consumer_heartbeat: dict[str, Any] | None = None,
+    include_consumer: bool = False,
+) -> PlainTextResponse:
     """FastAPI handler body for GET /internal/metrics."""
     body = registry.render()
     if dlq_counters is not None:
         body = body + "\n".join(render_dlq(dlq_counters)) + "\n"
+    if include_consumer:
+        body = body + "\n".join(render_consumer(consumer_heartbeat)) + "\n"
     return PlainTextResponse(body, media_type="text/plain; version=0.0.4")

@@ -2,8 +2,17 @@
 image:
   apiRepository: ghcr.io/atulsharma1234/de-noiser/semanticos-api
   webRepository: ghcr.io/atulsharma1234/de-noiser/semanticos-web
-  # Pin to an immutable tag or digest in production, not "latest".
-  tag: "latest"
+  # Empty means "use the chart's appVersion", which is an immutable release
+  # tag. This used to default to "latest" while the comment beside it said to
+  # pin — and the default is what actually gets deployed. A moving tag means
+  # two clusters "running the same version" can be running different code, and
+  # a rollback has nothing to roll back to.
+  #
+  # CI publishes `:<git-sha>` for every build on main; deploy one of those, or
+  # a digest, for anything you need to reproduce.
+  tag: ""
+  # Never Always: with an immutable tag it only adds a registry round-trip to
+  # every pod start, and turns a registry outage into a scheduling failure.
   pullPolicy: IfNotPresent
 imagePullSecrets: []
 
@@ -68,6 +77,27 @@ autoscaling:
     minReplicas: 2
     maxReplicas: 6
     targetCPUUtilizationPercentage: 70
+
+# ── Backups ──────────────────────────────────────────────────────────────────
+# Nightly logical dump of Postgres and ClickHouse to object storage. Off by
+# default because it needs a bucket and credentials; turn it on for anything
+# holding real data. Establishes an RPO of one backup interval — tighter needs
+# WAL archiving and incremental ClickHouse snapshots (docs/operations.md).
+#
+# A backup nobody has restored is a hypothesis. Run the drill in
+# docs/operations.md and record the date and measured RTO there.
+backup:
+  enabled: false
+  schedule: "0 1 * * *"       # 01:00 UTC, before the 02:00 archival job
+  bucket: ""                  # REQUIRED when enabled
+  endpoint: ""                # set for MinIO or another S3-compatible store
+  retentionDays: 30
+  # Needs pg_dump, clickhouse-client and the aws CLI. Pin this to your own
+  # built image rather than a floating tag for anything you must reproduce.
+  image: "ghcr.io/atulsharma1234/de-noiser/semanticos-backup:1"
+  resources:
+    requests: { cpu: "100m", memory: "256Mi" }
+    limits:   { cpu: "1",    memory: "2Gi" }
 
 # ── Network segmentation ─────────────────────────────────────────────────────
 # Default-deny ingress plus explicit allows. Off by default because it needs a

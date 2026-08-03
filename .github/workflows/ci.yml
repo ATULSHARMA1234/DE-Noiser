@@ -94,15 +94,24 @@ jobs:
 
       # Blocking: tests + coverage floor. The floor is a ratchet — raise it as
       # coverage improves; it must never silently exceed real coverage again.
+      # Real coverage is 75%; the floor sits just under so an unrelated PR is
+      # not failed by a rounding change, and it moves up as coverage does.
       - name: Test with pytest
-        run: uv run pytest --cov=src tests/ --cov-fail-under=60
+        run: uv run pytest --cov=src tests/ --cov-fail-under=73
 
-      # Advisory: surface known-vulnerable dependencies on every PR.
-      - name: Dependency vulnerability scan (advisory)
-        continue-on-error: true
+      # Blocking. This was advisory, which meant a known-vulnerable dependency
+      # could not fail a release — the exact control a vendor-security
+      # questionnaire asks about by name. Accepted CVEs go in
+      # .github/pip-audit-ignore.txt with a date and a reason, so an exception
+      # is a reviewed decision with an owner rather than a permanently green
+      # `continue-on-error`.
+      - name: Dependency vulnerability scan
         run: |
           uv export --format requirements-txt --no-dev --no-emit-project > requirements.txt
-          uvx pip-audit -r requirements.txt
+          IGNORES=$(grep -vE '^\s*(#|$)' .github/pip-audit-ignore.txt \
+            | awk '{print "--ignore-vuln " $1}' | tr '\n' ' ')
+          # shellcheck disable=SC2086
+          uvx pip-audit -r requirements.txt $IGNORES
 
   frontend-test:
     runs-on: ubuntu-latest
@@ -122,9 +131,10 @@ jobs:
       - name: Install dependencies
         run: npm ci --legacy-peer-deps
 
-      # Advisory: surface known-vulnerable JS dependencies on every PR.
-      - name: Dependency vulnerability scan (advisory)
-        continue-on-error: true
+      # Blocking, matching the Python scan. High and critical advisories fail
+      # the build; moderate and below are reported by `npm audit` locally and
+      # are not release-blocking.
+      - name: Dependency vulnerability scan
         run: npm audit --audit-level=high
 
       # Blocking: type errors fail the build.
@@ -139,13 +149,75 @@ jobs:
       - name: Build
         run: npm run build
 
+  # The e2e suite existed and CI never ran it, so "it compiles" was the entire
+  # frontend quality bar and a broken route could ship. Its own job because it
+  # boots the API and the web server and is slower than the static checks.
+  frontend-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend dependencies
+        run: uv sync --frozen
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: './web/package-lock.json'
+
+      - name: Install frontend dependencies
+        working-directory: ./web
+        run: npm ci --legacy-peer-deps
+
+      - name: Install Playwright browsers
+        working-directory: ./web
+        run: npx playwright install --with-deps chromium
+
+      # playwright.config.ts starts both servers itself. SQLite and no external
+      # datastores: the suite exercises the UI against a real API, not the
+      # ingestion pipeline, so standing up Kafka and ClickHouse here would buy
+      # nothing but flakiness.
+      - name: Run Playwright
+        working-directory: ./web
+        env:
+          DATABASE_URL: sqlite:///./e2e.db
+          SEMANTICOS_ENV: development
+          SEMANTICOS_AUTO_MIGRATE: "1"
+          JWT_SECRET_KEY: e2e-only-not-a-real-secret-key-000000
+        run: npx playwright test --project=chromium
+
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: web/playwright-report/
+          retention-days: 7
+
   build-and-push:
-    needs: [backend-test, frontend-test]
+    needs: [backend-test, frontend-test, frontend-e2e]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+      # Required for keyless cosign signing and for the build provenance
+      # attestation: both exchange this token for a short-lived certificate,
+      # so there is no signing key to store or rotate.
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
 
@@ -156,24 +228,85 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
       # github.repository is "ATULSHARMA1234/DE-Noiser", and container registry
       # names must be lowercase — buildx rejects the tag outright. This job only
       # runs on main, so the failure stayed invisible for as long as main went
       # without a push, and no image was ever published.
+      #
+      # Emitted as a step output rather than into $GITHUB_ENV so it resolves
+      # statically: `env.` values written at runtime cannot be checked by the
+      # workflow linter, and a typo would surface as an empty image name at
+      # push time.
       - name: Compute lowercase image prefix
+        id: image
         run: |
-          echo "IMAGE_PREFIX=ghcr.io/$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+          echo "prefix=ghcr.io/$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
       - name: Build and push Backend
+        id: build-api
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          tags: ${{ env.IMAGE_PREFIX }}/semanticos-api:${{ github.sha }},${{ env.IMAGE_PREFIX }}/semanticos-api:latest
+          # No `:latest`. A moving tag means two clusters that "run the same
+          # version" can be running different code, and a rollback has nothing
+          # to roll back to. Consumers pin the SHA tag or the digest.
+          tags: ${{ steps.image.outputs.prefix }}/semanticos-api:${{ github.sha }}
+          # SBOM and provenance travel with the image, so a customer's scanner
+          # can enumerate what is inside it without unpacking layers.
+          sbom: true
+          provenance: mode=max
 
       - name: Build and push Frontend
+        id: build-web
         uses: docker/build-push-action@v5
         with:
           context: ./web
           push: true
-          tags: ${{ env.IMAGE_PREFIX }}/semanticos-web:${{ github.sha }},${{ env.IMAGE_PREFIX }}/semanticos-web:latest
+          tags: ${{ steps.image.outputs.prefix }}/semanticos-web:${{ github.sha }}
+          sbom: true
+          provenance: mode=max
+
+      # Keyless signing: the signature is bound to this workflow's identity and
+      # recorded in the public transparency log, so "was this image built by our
+      # pipeline from our source?" has a checkable answer.
+      #
+      #   cosign verify ghcr.io/…/semanticos-api@sha256:… \
+      #     --certificate-identity-regexp '^https://github\.com/ATULSHARMA1234/DE-Noiser/' \
+      #     --certificate-oidc-issuer https://token.actions.githubusercontent.com
+      - name: Sign the images
+        env:
+          COSIGN_YES: "true"
+        run: |
+          cosign sign "${{ steps.image.outputs.prefix }}/semanticos-api@${{ steps.build-api.outputs.digest }}"
+          cosign sign "${{ steps.image.outputs.prefix }}/semanticos-web@${{ steps.build-web.outputs.digest }}"
+
+      - name: Attest the backend build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ steps.image.outputs.prefix }}/semanticos-api
+          subject-digest: ${{ steps.build-api.outputs.digest }}
+          push-to-registry: true
+
+      - name: Attest the frontend build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ steps.image.outputs.prefix }}/semanticos-web
+          subject-digest: ${{ steps.build-web.outputs.digest }}
+          push-to-registry: true
+
+      - name: Record the published digests
+        run: |
+          {
+            echo "### Published images"
+            echo ""
+            echo "| image | digest |"
+            echo "| --- | --- |"
+            echo "| semanticos-api | \`${{ steps.build-api.outputs.digest }}\` |"
+            echo "| semanticos-web | \`${{ steps.build-web.outputs.digest }}\` |"
+            echo ""
+            echo "Deploy with \`--set image.tag=${{ github.sha }}\`."
+          } >> "$GITHUB_STEP_SUMMARY"

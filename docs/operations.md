@@ -257,9 +257,57 @@ your supported ceiling for that configuration.
 ## Backup & restore
 
 **What holds state:** PostgreSQL (users, tenants, runs, incidents, SLOs,
-runbooks, audit), ClickHouse (logs + traces), and the object store (archives).
-Redis and Redpanda are transient. The API's PVC holds only regenerable local
-files and does not need backup.
+runbooks, audit), ClickHouse (logs + traces), and the object store (archives,
+uploaded sources, the raw ingest copy). Redis and Redpanda are transient. The
+API's PVC holds only regenerable local files and does not need backup.
+
+### Automated backups
+
+The chart ships a nightly CronJob. It is **off by default** because it needs a
+bucket and credentials — turn it on for anything holding real data:
+
+```yaml
+backup:
+  enabled: true
+  schedule: "0 1 * * *"          # before the 02:00 archival job
+  bucket: "semanticos-backups"
+  endpoint: ""                   # set for MinIO
+  retentionDays: 30
+```
+
+It dumps Postgres (`pg_dump -Fc`) and the ClickHouse log and span tables,
+uploads both to the bucket, and **verifies the objects landed** before exiting
+zero. A backup job that exits successfully without checking is a green
+dashboard and no backup.
+
+### Recovery objectives
+
+| | Value | What sets it |
+|---|---|---|
+| **RPO** | 24 hours | The CronJob interval. Tighten by lowering `backup.schedule`, or properly with Postgres WAL archiving (PITR, ~seconds) and incremental ClickHouse snapshots. |
+| **RTO** | _measure it_ | Dominated by ClickHouse restore time, which scales with data volume. Run the drill below and record the number here. |
+
+These are the defaults this chart establishes, not a recommendation. Both are
+policy decisions that belong to whoever owns the data.
+
+### The restore drill
+
+**A backup nobody has restored is a hypothesis.** Run this quarterly, against a
+scratch namespace, and record the result:
+
+1. `helm install semanticos-dr …` into an empty namespace with empty datastores.
+2. Restore the most recent Postgres dump (`pg_restore`, below).
+3. Restore the ClickHouse tables from the same timestamp directory.
+4. `GET /health/ready` — every dependency must report `ok`.
+5. Sign in, open a run from before the backup, and run a `/v1/logs/query` that
+   returns rows. A restore that brings back the schema and no data passes every
+   check except this one.
+6. Record the date, the wall-clock time from step 1 to step 5, and the data
+   volume in the table below.
+
+| Date | Restored from | Data volume | Measured RTO | By |
+|------|---------------|-------------|--------------|-----|
+| _(no drill has been run yet — the RTO above is unverified)_ | | | | |
 
 ### PostgreSQL
 
@@ -307,5 +355,57 @@ mc mirror backup/semanticos-logs local/semanticos-logs      # restore
 
 - **Liveness:** `GET /health/live`
 - **Readiness (probes DB/Redis/ClickHouse/Kafka):** `GET /health/ready`
-- **Prometheus metrics:** `GET /internal/metrics` (request rate, errors, latency)
+- **Prometheus metrics:** `GET /internal/metrics` — **authenticated**, see below
+- **Alert rules:** [`deploy/prometheus/alerts.yaml`](../deploy/prometheus/alerts.yaml)
 - **Load testing:** `python scripts/loadtest.py --help`
+
+### Scraping the metrics endpoint
+
+The exposition names every route this deployment serves, with its traffic
+volume and error rate — a live map of the system. It requires a bearer token,
+and in production the API **refuses the scrape** when `METRICS_TOKEN` is unset
+rather than publishing that map because somebody forgot a variable. In
+development, an unset token leaves it open so `curl` still works.
+
+```yaml
+# prometheus.yml
+scrape_configs:
+  - job_name: semanticos
+    metrics_path: /internal/metrics
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/semanticos-metrics-token
+    static_configs:
+      - targets: ["semanticos-api:8000"]
+```
+
+Set the token via `secrets.metricsToken` (or the `metrics-token` key of your
+existing Secret).
+
+### What the metrics cover
+
+Beyond request rate, errors and latency, two series exist because nothing else
+in the system reports them:
+
+| Series | Why it matters |
+|---|---|
+| `semanticos_ingestion_dead_lettered_total` | Records the pipeline could not write. They were accepted with a `200` and will never be queryable. Silent data loss, previously with no signal at all. |
+| `semanticos_ingestion_consumer_up` / `_lag` | `/ingest` returns `200` as soon as a record reaches Kafka. If the consumer is down, writes succeed and nothing becomes queryable. The consumer is a separate pod with no HTTP surface, so this is the only place a scraper can see it. |
+
+### Forwarding audit events to a SIEM
+
+Audit records are written to Postgres and, when configured, copied to your SIEM.
+An audit trail that lives only inside the audited system is one an attacker with
+sufficient access can edit.
+
+```bash
+SIEM_HOST=siem.internal      # unset disables forwarding
+SIEM_PORT=514
+SIEM_PROTOCOL=udp            # udp | tcp | tls
+SIEM_FORMAT=cef              # cef (ArcSight, parsed natively by Splunk/Sentinel/QRadar) | syslog
+```
+
+Delivery is best-effort and never fails the request: the database row is the
+system of record, and an unreachable collector must not become a customer-facing
+outage. Failures are logged at warning level — alert on them if the SIEM copy is
+a compliance requirement rather than a convenience.

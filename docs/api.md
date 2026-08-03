@@ -3,6 +3,31 @@
 Base URL: `http://localhost:8000`. Interactive docs (OpenAPI/Swagger) are served
 at `/docs` when the API is running.
 
+## Versioning and deprecation policy
+
+Every endpoint in this document is available at two addresses:
+
+```
+GET /incidents          # unversioned alias
+GET /v1/incidents       # versioned — use this for new integrations
+```
+
+They are the same handler. Responses carry `X-API-Version: v1`.
+
+**The commitment.**
+
+| | |
+|---|---|
+| **`/v1` is frozen.** | No field is removed from a `/v1` response, no field changes type, and no request parameter becomes required. New optional fields may be added, so clients must ignore unknown fields rather than reject them. |
+| **The unversioned aliases are permanent.** | They are not a deprecation window. Existing integrations keep working indefinitely; `/v1` exists so that future ones are insulated from a future `/v2`. |
+| **Breaking changes get a new version.** | A change that would violate the `/v1` freeze ships as `/v2` instead. `/v1` and `/v2` then run side by side. |
+| **Minimum deprecation notice: 12 months.** | Measured from the announcement in [CHANGELOG.md](../CHANGELOG.md) to the removal, and no version is removed while a supported customer is still calling it. Deprecated endpoints return a `Deprecation` and `Sunset` header ([RFC 8594](https://www.rfc-editor.org/rfc/rfc8594)) for the whole window. |
+| **Security fixes are exempt.** | A change required to close a vulnerability may ship inside a version, on whatever timeline the severity demands. It will be called out in the changelog. |
+
+**Exception — OTLP.** `POST /v1/logs` and `POST /v1/traces` are the paths the
+OpenTelemetry specification defines, not ours. Their contract is OTLP's and
+follows that specification's versioning, not this policy.
+
 ## Authentication
 
 Most endpoints require a Bearer JWT. Obtain one from `/auth/login`, send it as
