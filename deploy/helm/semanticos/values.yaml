@@ -144,6 +144,9 @@ service:
 ingress:
   enabled: false
   className: "nginx"
+  annotations: {}
+  # `backend` picks the service a path routes to: "web" (the UI) or "api".
+  # One host can serve both — put the UI at / and the API under /api.
   hosts:
     - host: semanticos.local
       paths:

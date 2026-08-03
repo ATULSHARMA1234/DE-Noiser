@@ -38,10 +38,34 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}
 
 {{/*
+Refuse an install that the API would refuse to start under.
+
+`SEMANTICOS_MULTI_REPLICA=1` makes the API fail at boot when no shared storage
+is configured, because uploads held on one pod's disk are invisible to every
+other replica. Catching it here turns that into an error at `helm install`
+rather than a CrashLoopBackOff that an operator has to read pod logs to
+diagnose.
+*/}}
+{{- define "semanticos.validateSharedStorage" -}}
+{{- if .Values.config.multiReplica }}
+{{- if not .Values.sharedStorage.sourceBucket }}
+{{- fail "config.multiReplica is set but sharedStorage.sourceBucket is empty. Uploads held on one pod's disk are invisible to the other replicas; set the bucket, or unset config.multiReplica." }}
+{{- end }}
+{{- if not .Values.sharedStorage.rawLogBucket }}
+{{- fail "config.multiReplica is set but sharedStorage.rawLogBucket is empty. The raw ingest copy would be split across pods; set the bucket, or unset config.multiReplica." }}
+{{- end }}
+{{- end }}
+{{- if and .Values.backup.enabled (not .Values.backup.bucket) }}
+{{- fail "backup.enabled is true but backup.bucket is empty. The backup job would have nowhere to upload to." }}
+{{- end }}
+{{- end }}
+
+{{/*
 Common environment block for every application pod. Secrets are referenced from
 the managed/created Secret; non-sensitive config comes straight from values.
 */}}
 {{- define "semanticos.env" -}}
+{{- include "semanticos.validateSharedStorage" . -}}
 - name: DATABASE_URL
   valueFrom:
     secretKeyRef:

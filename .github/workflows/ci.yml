@@ -217,8 +217,87 @@ jobs:
           path: web/playwright-report/
           retention-days: 7
 
+  # The chart was never rendered by anything. `helm lint` passes on a chart
+  # whose values are wired to nothing, which is how `ingress.enabled=true`
+  # spent the chart's whole life producing no object at all and reporting
+  # success. Rendering it — and validating the output against real Kubernetes
+  # schemas — is what catches that class of bug.
+  helm-chart:
+    runs-on: ubuntu-latest
+    env:
+      # Not a real secret. The chart requires a >=32-character key to render at
+      # all, and this exists only so the template can be exercised.
+      RENDER_KEY: ci-render-only-not-a-real-signing-key
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+
+      - name: Install kubeconform
+        run: |
+          curl -sSL -o kubeconform.tar.gz \
+            https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
+          tar xf kubeconform.tar.gz kubeconform
+          sudo mv kubeconform /usr/local/bin/
+
+      - name: Lint
+        run: |
+          helm lint deploy/helm/semanticos \
+            --set secrets.jwtSecretKey="$RENDER_KEY" --set postgres.password=pw
+
+      # The shape most installs actually use.
+      - name: Render and validate — defaults
+        run: |
+          helm template semanticos deploy/helm/semanticos \
+            --set secrets.jwtSecretKey="$RENDER_KEY" --set postgres.password=pw \
+            | kubeconform -summary -strict -kubernetes-version 1.29.0 -
+
+      # Every optional feature at once. Templates guarded by an `if` are the
+      # ones nobody renders, which is exactly where they rot.
+      - name: Render and validate — every feature enabled
+        run: |
+          helm template semanticos deploy/helm/semanticos \
+            --set secrets.jwtSecretKey="$RENDER_KEY" --set postgres.password=pw \
+            --set networkPolicy.enabled=true \
+            --set autoscaling.api.enabled=true \
+            --set autoscaling.ingestion.enabled=true \
+            --set autoscaling.web.enabled=true \
+            --set backup.enabled=true --set backup.bucket=semanticos-backups \
+            --set sharedStorage.sourceBucket=semanticos-sources \
+            --set sharedStorage.rawLogBucket=semanticos-raw \
+            --set config.multiReplica=1 \
+            --set ingress.enabled=true \
+            | kubeconform -summary -strict -kubernetes-version 1.29.0 -
+
+      # The guards must actually refuse. A `fail` that never fires is decoration.
+      - name: The misconfiguration guards refuse
+        run: |
+          set +e
+          helm template semanticos deploy/helm/semanticos \
+            --set secrets.jwtSecretKey="$RENDER_KEY" --set postgres.password=pw \
+            --set config.multiReplica=1 > /dev/null 2>&1
+          if [ $? -eq 0 ]; then
+            echo "multiReplica without shared storage should have failed"; exit 1
+          fi
+
+          helm template semanticos deploy/helm/semanticos \
+            --set secrets.jwtSecretKey="$RENDER_KEY" --set postgres.password=pw \
+            --set backup.enabled=true > /dev/null 2>&1
+          if [ $? -eq 0 ]; then
+            echo "backup without a bucket should have failed"; exit 1
+          fi
+
+          helm template semanticos deploy/helm/semanticos \
+            --set postgres.password=pw > /dev/null 2>&1
+          if [ $? -eq 0 ]; then
+            echo "a missing JWT signing key should have failed"; exit 1
+          fi
+          echo "all guards refused as expected"
+
   build-and-push:
-    needs: [backend-test, frontend-test, frontend-e2e]
+    needs: [backend-test, frontend-test, frontend-e2e, helm-chart]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
