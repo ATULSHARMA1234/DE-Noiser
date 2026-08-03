@@ -497,11 +497,10 @@ def _lookup_tenant(api_key: str | None, subject: str | None) -> tuple[str, str] 
             # Honours a key mid-rotation, so a shipper still on the superseded
             # key is billed to its own tenant's quota rather than escaping it.
             tenant = tenant_for_api_key(db, api_key)
-            if tenant is None:
-                # Static ingest key (unattended shippers) maps to the first tenant,
-                # matching verify_ingest_auth.
-                if matches_static_secret(api_key, "INGEST_API_KEY"):
-                    tenant = db.query(Tenant).order_by(Tenant.id).first()
+            # Static ingest key (unattended shippers) maps to the first tenant,
+            # matching verify_ingest_auth.
+            if tenant is None and matches_static_secret(api_key, "INGEST_API_KEY"):
+                tenant = db.query(Tenant).order_by(Tenant.id).first()
         elif subject:
             user = db.query(User).filter(User.email == subject).first()
             if user is not None and user.tenant_id is not None:

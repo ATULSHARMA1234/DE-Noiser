@@ -279,8 +279,11 @@ def saml_metadata():
 
 @router.post("/saml/acs", response_model=TokenResponse)
 def saml_acs(
-    SAMLResponse: str | None = Form(default=None),
-    RelayState: str | None = Form(default=None),
+    # These are wire field names fixed by the SAML 2.0 HTTP-POST binding, not
+    # names we get to choose: FastAPI reads the form key from the parameter, so
+    # renaming them to snake_case stops the IdP's POST from binding at all.
+    SAMLResponse: str | None = Form(default=None),  # noqa: N803
+    RelayState: str | None = Form(default=None),  # noqa: N803
     db: Session = Depends(get_db),
 ):
     """SAML Assertion Consumer Service.

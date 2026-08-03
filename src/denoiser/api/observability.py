@@ -14,14 +14,18 @@ incident ids do not become a million time series.
 
 from __future__ import annotations
 
+import os
+import secrets
 import threading
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from fastapi import Request, Response
+from fastapi import HTTPException, Request, Response
 from fastapi.responses import PlainTextResponse
 from starlette.middleware.base import BaseHTTPMiddleware
+
+from denoiser.settings import get_settings
 
 # Histogram buckets in seconds (Prometheus convention, "+Inf" implied).
 _BUCKETS: tuple[float, ...] = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0)
@@ -125,6 +129,80 @@ class MetricsMiddleware(BaseHTTPMiddleware):
             registry.observe(request.method, _route_template(request), status, duration)
 
 
-def metrics_response() -> PlainTextResponse:
+def metrics_token() -> str:
+    """The bearer token a scraper must present, or "" if none is configured."""
+    return os.getenv("METRICS_TOKEN", "").strip()
+
+
+def authorize_scrape(request: Request) -> None:
+    """Gate the scrape endpoint. Raises 401 when the caller cannot scrape.
+
+    The rendered series name every route this deployment serves, its traffic
+    volume and its error rate — a live map of the system for anyone who can
+    reach the pod, which without a NetworkPolicy is every pod in the namespace.
+
+    Policy is deliberately asymmetric, and matches how the rest of the platform
+    treats unsafe configuration:
+
+      METRICS_TOKEN set            -> require it, on every environment
+      unset, non-production        -> open, so `curl :8000/internal/metrics`
+                                      still works while developing
+      unset, production            -> refuse, rather than serve the map because
+                                      an operator forgot one variable
+
+    The comparison is constant-time: a token checked with ``==`` leaks its
+    prefix to anyone willing to time the responses.
+    """
+    expected = metrics_token()
+
+    if not expected:
+        if get_settings().is_production:
+            raise HTTPException(
+                status_code=401,
+                detail=(
+                    "Metrics scraping requires METRICS_TOKEN in production. "
+                    "Set it and configure the scraper's bearer token to match."
+                ),
+            )
+        return
+
+    header = request.headers.get("authorization", "")
+    scheme, _, presented = header.partition(" ")
+    if scheme.lower() != "bearer" or not secrets.compare_digest(presented.strip(), expected):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or missing metrics scrape token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
+def render_dlq(counters: dict[str, Any]) -> list[str]:
+    """Dead-letter counters as Prometheus series.
+
+    A counter, not a gauge: the alertable signal is `increase(...) > 0` over a
+    window — any record the ingestion pipeline could not write is a record the
+    customer will never be able to query, and nothing else in the system says so.
+    """
+    total = int(counters.get("total") or 0)
+    lines = [
+        "# HELP semanticos_ingestion_dead_lettered_total Records quarantined by the ingestion worker.",
+        "# TYPE semanticos_ingestion_dead_lettered_total counter",
+        f"semanticos_ingestion_dead_lettered_total {total}",
+    ]
+    by_topic = counters.get("by_topic") or {}
+    if by_topic:
+        lines.append("# HELP semanticos_ingestion_dead_lettered_by_topic_total Quarantined records by source topic.")
+        lines.append("# TYPE semanticos_ingestion_dead_lettered_by_topic_total counter")
+        for topic, count in sorted(by_topic.items()):
+            lines.append(
+                f'semanticos_ingestion_dead_lettered_by_topic_total{{topic="{_esc(topic)}"}} {int(count)}'
+            )
+    return lines
+
+
+def metrics_response(dlq_counters: dict[str, Any] | None = None) -> PlainTextResponse:
     """FastAPI handler body for GET /internal/metrics."""
-    return PlainTextResponse(registry.render(), media_type="text/plain; version=0.0.4")
+    body = registry.render()
+    if dlq_counters is not None:
+        body = body + "\n".join(render_dlq(dlq_counters)) + "\n"
+    return PlainTextResponse(body, media_type="text/plain; version=0.0.4")

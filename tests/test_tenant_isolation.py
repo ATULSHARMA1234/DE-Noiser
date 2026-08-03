@@ -1,3 +1,9 @@
+# SQLite database setup for isolation tests. Kept beside the session's other
+# throwaway state rather than in the working tree, which is where the old
+# relative path dropped a stray test_tenant_isolation.db on every run.
+import os
+import tempfile
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -13,12 +19,6 @@ from denoiser.storage.db import (
     User,
     get_db,
 )
-
-# SQLite database setup for isolation tests. Kept beside the session's other
-# throwaway state rather than in the working tree, which is where the old
-# relative path dropped a stray test_tenant_isolation.db on every run.
-import os
-import tempfile
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///" + os.path.join(
     tempfile.gettempdir(), "semanticos-tenant-isolation.db"

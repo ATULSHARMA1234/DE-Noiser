@@ -38,6 +38,7 @@ import time
 import zlib
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from urllib.parse import urlencode
 
 from denoiser.logging import get_logger
@@ -122,13 +123,66 @@ def saml_enabled() -> bool:
 
 # ── Replay protection ───────────────────────────────────────────────────────
 
+#: Namespace for the shared claim keys. Changing it invalidates every
+#: outstanding claim, which is safe: the worst case is that an assertion still
+#: inside its validity window can be presented once more.
+REPLAY_KEY_PREFIX = "saml_assertion:"
+
+_redis_sync: Any = None
+_redis_lock = threading.Lock()
+
+
+def replay_redis() -> Any:
+    """Synchronous Redis client for the replay guard, or ``None`` if unavailable.
+
+    Synchronous on purpose. ``parse_and_verify_response`` is called from the
+    ACS route, which FastAPI runs in the threadpool, so a blocking client is
+    the correct shape here — making the guard async would force the whole
+    verification chain async for one SET per interactive login.
+    """
+    global _redis_sync
+    if _redis_sync is None:
+        with _redis_lock:
+            if _redis_sync is None:
+                try:
+                    import redis as redis_sync_lib
+
+                    _redis_sync = redis_sync_lib.Redis.from_url(
+                        os.getenv("REDIS_URL", "redis://localhost:6379/0"),
+                        decode_responses=True,
+                        socket_connect_timeout=2,
+                        socket_timeout=2,
+                    )
+                except Exception as exc:  # pragma: no cover - import/config failure
+                    logger.warning("SAML replay guard has no Redis client: %s", exc)
+                    return None
+    return _redis_sync
+
+
+def set_replay_redis(client: Any) -> None:
+    """Swap the client (tests, or a deployment with its own connection pool)."""
+    global _redis_sync
+    _redis_sync = client
+
+
 class _AssertionReplayGuard:
     """Single-use assertion ids, for as long as the assertion stays valid.
 
-    Process-local: with several replicas an assertion could in principle be
-    replayed once per replica inside its (short) validity window. Redis-backed
-    storage would close that; the window is minutes and the id must still pass
-    every other check, so the local guard is the meaningful 90%.
+    Redis-backed, so a claim is shared by every uvicorn worker and every API
+    replica. This matters more than replica count alone suggests: the image
+    runs uvicorn with several workers, so even a single-pod deployment is
+    several processes, and a process-local guard would let one assertion be
+    spent once in each of them.
+
+    The claim is a single ``SET NX EX``: the first caller to set the key wins,
+    and the key expires with the assertion's own validity window, so nothing
+    accumulates and a replay after expiry is refused by the window check
+    instead.
+
+    When Redis is unreachable the guard degrades to a process-local set rather
+    than failing the login — the same availability trade the rate limiter
+    makes. That degradation is logged, because it is a real (if narrow)
+    weakening of a security control.
     """
 
     def __init__(self) -> None:
@@ -138,6 +192,24 @@ class _AssertionReplayGuard:
     def claim(self, assertion_id: str, expires_at: float) -> bool:
         """Register an id. Returns False if it was already used."""
         now = time.time()
+        # Never below 1s: SET EX rejects a non-positive TTL, and an assertion
+        # this close to expiry is about to be refused by the window check.
+        ttl = max(1, int(expires_at - now) + 1)
+
+        client = replay_redis()
+        if client is not None:
+            try:
+                claimed = client.set(
+                    f"{REPLAY_KEY_PREFIX}{assertion_id}", "1", nx=True, ex=ttl
+                )
+                return bool(claimed)
+            except Exception as exc:
+                logger.warning(
+                    "SAML replay guard falling back to process-local state; "
+                    "an assertion could be replayed once per worker: %s",
+                    exc,
+                )
+
         with self._lock:
             if len(self._seen) > 10_000:
                 self._seen = {k: v for k, v in self._seen.items() if v > now}
@@ -149,6 +221,13 @@ class _AssertionReplayGuard:
     def reset(self) -> None:
         with self._lock:
             self._seen.clear()
+        client = replay_redis()
+        if client is not None:
+            try:
+                for key in client.scan_iter(match=f"{REPLAY_KEY_PREFIX}*"):
+                    client.delete(key)
+            except Exception:
+                pass
 
 
 _replay_guard = _AssertionReplayGuard()

@@ -76,6 +76,33 @@ def _within(child: Path, parent: Path) -> bool:
         return False
 
 
+def hydrate(name: str, tenant_id: int | str | None) -> None:
+    """Pull a tenant's uploaded source from shared storage into the local cache.
+
+    Called before resolution so a replica that never handled the upload can
+    still read the file. Deliberately confined to *this tenant's* directory and
+    to a bare filename: hydration must not become a second, weaker path for
+    reaching a file, so it can only ever materialise something the caller was
+    already entitled to.
+
+    Silent on failure — the caller then gets the ordinary "not found", which is
+    the correct answer for a source that exists nowhere.
+    """
+    safe_name = os.path.basename(str(name or "").strip())
+    if not safe_name or safe_name.startswith("."):
+        return
+
+    destination = tenant_dir(tenant_id) / safe_name
+    if destination.exists():
+        return
+
+    from denoiser import runtime
+
+    store = runtime.source_store()
+    if store.enabled():
+        store.fetch(tenant_id, safe_name, destination)
+
+
 def resolve_source(raw: str, tenant_id: int | str | None) -> Path:
     """Resolve a caller-supplied source string to a readable file.
 
@@ -98,6 +125,11 @@ def resolve_source(raw: str, tenant_id: int | str | None) -> Path:
     generic_error = SourceNotAllowed(
         f"Source '{os.path.basename(candidate)}' was not found in this workspace"
     )
+
+    # Make sure the bytes are local before the confinement checks run. The
+    # checks below are unchanged and still decide what may be read; this only
+    # removes "the upload landed on a different pod" as a reason to fail.
+    hydrate(candidate, tenant_id)
 
     tenant_root = tenant_dir(tenant_id)
     data_root = DATA_DIR.resolve()
@@ -142,8 +174,40 @@ def resolve_source(raw: str, tenant_id: int | str | None) -> Path:
     raise generic_error
 
 
+def remote_source_names(tenant_id: int | str | None) -> list[str]:
+    """Names this tenant has in shared storage but not (yet) on this pod's disk.
+
+    Listing has to consult the bucket as well as the directory, or an upload
+    made through one replica is simply missing from every other one's `/sources`
+    until something happens to hydrate it.
+    """
+    from denoiser import runtime
+
+    store = runtime.source_store()
+    if not store.enabled():
+        return []
+
+    local = {f.name for f in tenant_dir(tenant_id).iterdir() if f.is_file()}
+    names = []
+    for remote in store.list(tenant_id):
+        if remote.name in local or _is_excluded(Path(remote.name)):
+            continue
+        if not any(Path(remote.name).match(pattern) for pattern in SOURCE_GLOBS):
+            continue
+        names.append(remote.name)
+    return names
+
+
 def list_sources(tenant_id: int | str | None) -> list[Path]:
-    """Every source file this tenant may analyse: their own, plus shared samples."""
+    """Every source file this tenant may analyse: their own, plus shared samples.
+
+    Sources held only in shared storage are hydrated first, so the listing is
+    the same on every replica rather than a function of which pod served the
+    upload.
+    """
+    for name in remote_source_names(tenant_id):
+        hydrate(name, tenant_id)
+
     seen: dict[str, Path] = {}
 
     for pattern in SOURCE_GLOBS:

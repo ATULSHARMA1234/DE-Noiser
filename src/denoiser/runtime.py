@@ -36,6 +36,8 @@ _redis_client: Any = None
 _clickhouse_store: Any = None
 _kafka_producer: Any = None
 _data_dir: Path | None = None
+_raw_log_sink: Any = None
+_source_store: Any = None
 
 
 # ── Log data directory ───────────────────────────────────────────────────────
@@ -114,12 +116,57 @@ def set_kafka_producer(producer: Any) -> None:
     _kafka_producer = producer
 
 
+# ── Raw log copy ─────────────────────────────────────────────────────────────
+
+def raw_log_sink() -> Any:
+    """Where the redundant on-disk copy of an ingested batch is written.
+
+    One seam for all three ingest paths, which previously each opened
+    `data/live_stream.log` themselves — the single fact that pinned the API to
+    one replica. See `denoiser.storage.raw_log_sink`.
+    """
+    global _raw_log_sink
+    if _raw_log_sink is None:
+        from denoiser.storage.raw_log_sink import build_raw_log_sink
+
+        _raw_log_sink = build_raw_log_sink()
+    return _raw_log_sink
+
+
+def set_raw_log_sink(sink: Any) -> None:
+    global _raw_log_sink
+    _raw_log_sink = sink
+
+
+# ── Uploaded sources ─────────────────────────────────────────────────────────
+
+def source_store() -> Any:
+    """Shared storage for uploaded log sources.
+
+    Local disk alone made an upload visible only on the pod that received it.
+    See `denoiser.storage.source_store`.
+    """
+    global _source_store
+    if _source_store is None:
+        from denoiser.storage.source_store import build_source_store
+
+        _source_store = build_source_store()
+    return _source_store
+
+
+def set_source_store(store: Any) -> None:
+    global _source_store
+    _source_store = store
+
+
 # ── Testing ──────────────────────────────────────────────────────────────────
 
 def reset() -> None:
     """Drop every cached handle. For tests that change the environment."""
-    global _redis_client, _clickhouse_store, _kafka_producer, _data_dir
+    global _redis_client, _clickhouse_store, _kafka_producer, _data_dir, _raw_log_sink, _source_store
     _redis_client = None
     _clickhouse_store = None
     _kafka_producer = None
     _data_dir = None
+    _raw_log_sink = None
+    _source_store = None

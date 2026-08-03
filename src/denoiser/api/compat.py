@@ -20,6 +20,7 @@ import os
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
 from denoiser import runtime
@@ -38,12 +39,15 @@ router = APIRouter(tags=["Compat"])
 async def _persist(records: list[dict[str, Any]], tenant_id: str) -> int:
     if not records:
         return 0
-    stream_file = runtime.data_dir() / "live_stream.log"
-    try:
-        with open(stream_file, "a") as f:
-            f.write("".join(json.dumps(r) + "\n" for r in records))
-    except Exception as e:
-        logger.warning(f"compat: failed to append live_stream.log: {e}")
+
+    # Through the shared sink, not a local file: see denoiser.storage.raw_log_sink.
+    # Off the event loop because both implementations block (disk or a PUT).
+    from denoiser.api.platform_settings import raw_log_storage_enabled
+
+    if raw_log_storage_enabled():
+        await run_in_threadpool(
+            runtime.raw_log_sink().write, tenant_id, [json.dumps(r) for r in records]
+        )
 
     if runtime.clickhouse_store().client:
         runtime.clickhouse_store().insert_logs(records, tenant_id=tenant_id)

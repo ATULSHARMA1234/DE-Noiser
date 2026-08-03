@@ -44,7 +44,7 @@ os.environ.setdefault(
     "hooks.slack.com,events.pagerduty.com,api.github.com,github.com",
 )
 
-import pytest  # noqa: E402
+import pytest
 
 
 @pytest.fixture(scope="session")

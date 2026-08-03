@@ -18,8 +18,9 @@ users?" — no, 403) and never for *tenant* boundaries, so it looked covered.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient

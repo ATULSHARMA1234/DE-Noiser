@@ -33,6 +33,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -43,6 +44,7 @@ from denoiser.api import incidents as incidents_router
 from denoiser.api import runs as runs_router
 from denoiser.api import sources as source_registry
 from denoiser.api import webhooks as webhooks_router
+from denoiser.api.auth import DUMMY_PASSWORD_HASH as _DUMMY_PASSWORD_HASH
 from denoiser.api.auth import get_current_user, issue_token_pair, oauth2_scheme, require_role, revoke_token, rotate_refresh_token, verify_ingest_auth, verify_password
 from denoiser.api.cookies import set_session_cookies
 from denoiser.api.middleware import (
@@ -122,7 +124,7 @@ from denoiser.api.issues import router as issues_router
 from denoiser.api.metrics import router as metrics_router
 from denoiser.api.monitors import router as monitors_router
 from denoiser.api.notebooks import router as notebooks_router
-from denoiser.api.observability import MetricsMiddleware, metrics_response
+from denoiser.api.observability import MetricsMiddleware, authorize_scrape, metrics_response
 from denoiser.api.otlp import router as otlp_router
 from denoiser.api.platform_admin import router as platform_router
 from denoiser.api.query import router as query_router
@@ -381,8 +383,27 @@ async def login(payload: UserLogin, request: Request, response: Response, db: Se
             headers={"Retry-After": str(retry_after)},
         )
 
-    user = db.query(User).filter(User.email == payload.email).first()
-    if not user or not verify_password(payload.password, user.hashed_password):
+    # Both halves of this are blocking, and both are slow enough to matter: a
+    # synchronous SQLAlchemy query, then a bcrypt verify that is ~100ms of pure
+    # CPU by design. Run inline in this coroutine they stall the event loop for
+    # the whole worker — no health check, no ingest, no websocket fan-out — so a
+    # burst of sign-ins (Monday morning, or an IdP-initiated re-auth) degrades
+    # every other endpoint. The threadpool is where the rest of this app's
+    # blocking routes already run; the difference is only that they are `def`.
+    #
+    # A missing user still runs a verify against a dummy hash, so the response
+    # time does not reveal whether an address is registered.
+    def _authenticate() -> User | None:
+        found = db.query(User).filter(User.email == payload.email).first()
+        if not found:
+            verify_password(payload.password, _DUMMY_PASSWORD_HASH)
+            return None
+        if not verify_password(payload.password, found.hashed_password):
+            return None
+        return found
+
+    user = await run_in_threadpool(_authenticate)
+    if not user:
         await _record_login_failure(throttle_key)
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
@@ -836,9 +857,26 @@ def revoke_previous_tenant_key(
 
 
 @app.get("/internal/metrics")
-def internal_metrics():
-    """Prometheus exposition of SemanticOS's own request rate, errors and latency."""
-    return metrics_response()
+async def internal_metrics(request: Request):
+    """Prometheus exposition of SemanticOS's own request rate, errors and latency.
+
+    Gated on METRICS_TOKEN — see `authorize_scrape`. Left unauthenticated this
+    hands out the deployment's route inventory and traffic profile.
+    """
+    authorize_scrape(request)
+
+    # Dead-letter depth is read here rather than tracked in-process: the
+    # records are quarantined by the ingestion worker, a different pod, so the
+    # count only exists in Redis. Silent data loss with no series to alert on
+    # is what makes it dangerous.
+    from denoiser.workers.dead_letter import read_counters
+
+    try:
+        counters = await read_counters(runtime.redis_client())
+    except Exception:
+        counters = {"total": 0, "by_topic": {}}
+
+    return metrics_response(dlq_counters=counters)
 
 
 @app.get("/telemetry/kernel-events")
@@ -1015,6 +1053,22 @@ async def upload_source(file: UploadFile = File(...), current_user: User = Depen
         dest.unlink(missing_ok=True)
         raise HTTPException(status_code=500, detail=f"Failed to store upload: {e}")
 
+    # Mirror to shared storage so every replica can see it, not just this pod.
+    # A failure here fails the upload: reporting success for a file that only
+    # one of N pods can read is worse than reporting the failure, because the
+    # user finds out later, as an intermittently missing source.
+    store = runtime.source_store()
+    if store.enabled():
+        try:
+            await run_in_threadpool(store.put, current_user.tenant_id, safe_name, dest)
+        except Exception as e:
+            dest.unlink(missing_ok=True)
+            logger.exception("Failed to mirror upload %s to shared storage", safe_name)
+            raise HTTPException(
+                status_code=503,
+                detail=f"Upload could not be stored in shared storage: {e}",
+            )
+
     return {
         "name": safe_name,
         "path": safe_name,
@@ -1032,15 +1086,28 @@ def delete_source(filename: str, current_user: User = Depends(require_role(["ADM
 
     # Only ever this tenant's own directory: the shared sample files are not
     # any one tenant's to remove, and another tenant's uploads are not visible.
+    # Hydrated first so a delete issued against a replica that never cached the
+    # file still finds it, rather than 404-ing on a file the user can see.
+    source_registry.hydrate(filename, current_user.tenant_id)
+
     file_path = (source_registry.tenant_dir(current_user.tenant_id) / filename).resolve()
     if not file_path.is_file() or file_path.parent != source_registry.tenant_dir(current_user.tenant_id).resolve():
         raise HTTPException(status_code=404, detail="File not found or protected")
 
     try:
         file_path.unlink()
-        return {"status": "deleted", "filename": filename}
     except OSError as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+    # Shared copy last: deleting it while the local copy survives would leave
+    # the file resurrectable on this pod but gone everywhere else. The other
+    # replicas' caches are stale until they next hydrate, which is acceptable —
+    # they hold no copy the bucket can restore.
+    store = runtime.source_store()
+    if store.enabled():
+        store.delete(current_user.tenant_id, filename)
+
+    return {"status": "deleted", "filename": filename}
 
 
 # verify_ingest_auth is now imported from denoiser.api.auth
@@ -1078,20 +1145,15 @@ async def ingest_logs(payload: IngestPayload, tenant_id: str = Depends(verify_in
             for e in body
         ]
 
-        # `store_raw_logs` now actually governs the local copy. When it is off,
-        # the streaming and search paths still work; only the on-disk forensic
-        # copy is skipped.
+        # `store_raw_logs` governs the redundant copy. When it is off, the
+        # streaming and search paths still work; only the forensic copy is
+        # skipped.
+        #
+        # The copy goes through the sink rather than straight to a local file:
+        # a per-pod `data/live_stream.log` is what forced the API to a single
+        # replica. See denoiser.storage.raw_log_sink.
         if raw_log_storage_enabled():
-            stream_file = DATA_DIR / "live_stream.log"
-
-            # Auto-rotate if > 100MB
-            if stream_file.exists() and stream_file.stat().st_size > 100 * 1024 * 1024:
-                rotated_name = f"live_stream_{int(time.time())}.log"
-                stream_file.rename(DATA_DIR / rotated_name)
-                logger.info(f"Rotated live_stream.log to {rotated_name}")
-
-            with open(stream_file, "a") as f:
-                f.write("".join(f"{line}\n" for line in serialized))
+            await run_in_threadpool(runtime.raw_log_sink().write, tenant_id, serialized)
 
         # Hyperscale ingestion (Phase 24): Push to Redpanda/Kafka instead of ClickHouse directly.
         # send() enqueues without blocking on the broker ack; awaiting the futures

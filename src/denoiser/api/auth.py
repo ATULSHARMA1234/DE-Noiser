@@ -1,4 +1,5 @@
 import os
+import secrets
 
 # Secret key and algorithm for JWT
 import sys
@@ -82,6 +83,13 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 def get_password_hash(password: str) -> str:
     """Generate bcrypt hash for a plain text password."""
     return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+
+#: A hash of a value nobody knows, verified against when the submitted email
+#: matches no account. Without it, "no such user" returns in microseconds while
+#: a real address costs a full bcrypt verify, and the difference enumerates the
+#: user directory. Generated per process so it cannot be set as a password.
+DUMMY_PASSWORD_HASH = get_password_hash(secrets.token_urlsafe(32))
 
 
 def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:

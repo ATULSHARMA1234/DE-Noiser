@@ -90,4 +90,21 @@ the managed/created Secret; non-sensitive config comes straight from values.
   value: {{ .Values.config.autoMigrate | quote }}
 - name: SEMANTICOS_SCHEDULER_ENABLED
   value: {{ .Values.config.schedulerEnabled | quote }}
+- name: METRICS_TOKEN
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "semanticos.secretName" . }}
+      key: metrics-token
+{{- if .Values.sharedStorage.sourceBucket }}
+- name: SOURCE_BUCKET
+  value: {{ .Values.sharedStorage.sourceBucket | quote }}
+{{- end }}
+{{- if .Values.sharedStorage.rawLogBucket }}
+- name: RAW_LOG_BUCKET
+  value: {{ .Values.sharedStorage.rawLogBucket | quote }}
+{{- end }}
+{{- if .Values.config.multiReplica }}
+- name: SEMANTICOS_MULTI_REPLICA
+  value: {{ .Values.config.multiReplica | quote }}
+{{- end }}
 {{- end }}

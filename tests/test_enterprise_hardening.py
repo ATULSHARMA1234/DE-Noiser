@@ -584,13 +584,13 @@ class TestOrganisationBoundaryAndInternalCollaboration:
         assert email in acme_client.get("/users").text
 
     def test_admin_cannot_delete_another_companys_employee(self, acme_client, globex_client):
-        victim = [u for u in globex_client.get("/users").json() if u["email"] == GLOBEX][0]
+        victim = next(u for u in globex_client.get("/users").json() if u["email"] == GLOBEX)
         assert acme_client.delete(f"/users/{victim['id']}").status_code == 404
         # The account is untouched.
         assert globex_client.get("/auth/me").status_code == 200
 
     def test_admin_cannot_deactivate_another_companys_employee(self, acme_client, globex_client):
-        victim = [u for u in globex_client.get("/users").json() if u["email"] == GLOBEX][0]
+        victim = next(u for u in globex_client.get("/users").json() if u["email"] == GLOBEX)
         assert acme_client.put(f"/users/{victim['id']}/deactivate").status_code == 404
         assert globex_client.get("/auth/me").json()["is_active"] is True
 

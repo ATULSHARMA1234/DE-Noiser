@@ -2,6 +2,7 @@ import json
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
 from denoiser import runtime
@@ -34,11 +35,15 @@ async def ingest_otlp_logs(request: Request, tenant_id: str = Depends(verify_ing
     if not extracted_logs:
         return {"status": "success", "ingested": 0}
 
-    # Write logs to standard live_stream.log file (fallback)
-    stream_file = runtime.data_dir() / "live_stream.log"
-    with open(stream_file, "a") as f:
-        for log in extracted_logs:
-            f.write(json.dumps(log) + "\n")
+    # The redundant raw copy, through the shared sink rather than a per-pod
+    # file — see denoiser.storage.raw_log_sink. Both implementations block, so
+    # it runs off the event loop.
+    from denoiser.api.platform_settings import raw_log_storage_enabled
+
+    if raw_log_storage_enabled():
+        await run_in_threadpool(
+            runtime.raw_log_sink().write, tenant_id, [json.dumps(log) for log in extracted_logs]
+        )
 
     # Insert to ClickHouse
     clickhouse_inserted = False

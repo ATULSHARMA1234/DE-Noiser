@@ -11,17 +11,91 @@ nameOverride: ""
 fullnameOverride: ""
 
 # ── Component replicas ───────────────────────────────────────────────────────
-# NOTE: the API writes some local state (settings.json, live_stream.log) to its
-# data volume, so running >1 API replica needs a ReadWriteMany volume. Scale the
-# stateless workers freely.
+# The API no longer keeps request-serving state on its own filesystem: platform
+# settings live in the database, the raw-log copy goes to object storage
+# (`sharedStorage.rawLogBucket`), and uploaded sources go to
+# `sharedStorage.sourceBucket` with the local disk demoted to a cache. Two
+# replicas is therefore the default, and a rolling update no longer drops the
+# tier to zero.
+#
+# Configure sharedStorage below before scaling past one replica. Setting
+# `config.multiReplica: "1"` makes the API refuse to start without it, rather
+# than serving uploads that only one pod out of N can see.
 api:
-  replicaCount: 1
+  replicaCount: 2
 worker:
   replicaCount: 1
 ingestion:
   replicaCount: 1
 web:
-  replicaCount: 1
+  replicaCount: 2
+
+# ── Disruption budgets ───────────────────────────────────────────────────────
+# Without these a node drain — a cluster upgrade, a spot reclaim, a rebalance —
+# can evict every replica of a component at once. This is the difference
+# between routine maintenance and an outage.
+podDisruptionBudget:
+  enabled: true
+  api:
+    minAvailable: 1
+  web:
+    minAvailable: 1
+  ingestion:
+    minAvailable: 1
+  syslog:
+    minAvailable: 1
+  # The analysis worker takes a distributed lock per job occurrence, so losing
+  # it briefly delays analysis rather than dropping data. No budget by default.
+  worker:
+    minAvailable: 0
+
+# ── Autoscaling ──────────────────────────────────────────────────────────────
+# Off by default: an HPA needs metrics-server, and a chart that assumes it is
+# installed fails confusingly on clusters that do not have it.
+autoscaling:
+  api:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+  ingestion:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+  web:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 70
+
+# ── Network segmentation ─────────────────────────────────────────────────────
+# Default-deny ingress plus explicit allows. Off by default because it needs a
+# CNI that enforces NetworkPolicy — on one that does not, these objects are
+# inert and would give false assurance. Turn it on for any real deployment.
+networkPolicy:
+  enabled: false
+  # Namespace labels of the ingress controller allowed to reach web and api.
+  ingressControllerSelector:
+    kubernetes.io/metadata.name: ingress-nginx
+  # Namespace labels of the monitoring stack allowed to scrape the API. It must
+  # still present METRICS_TOKEN.
+  monitoringNamespaceSelector:
+    kubernetes.io/metadata.name: monitoring
+  # Networks permitted to send syslog. Senders are outside the cluster, so this
+  # cannot be a pod selector — narrow it to your estate.
+  syslogSourceCIDRs:
+    - "10.0.0.0/8"
+  # Extra ingress rules for the API, e.g. in-cluster shippers posting to /ingest.
+  extraApiIngress: []
+
+# ── Shared storage (required for more than one API replica) ──────────────────
+# Uploaded sources and the raw ingest copy go here instead of a pod's local
+# disk. Leave the buckets empty for a single-replica or evaluation install and
+# both fall back to local files, exactly as before.
+sharedStorage:
+  sourceBucket: ""      # SOURCE_BUCKET   — uploaded log sources
+  rawLogBucket: ""      # RAW_LOG_BUCKET  — the redundant raw copy of ingest
 
 # ── Syslog connector ─────────────────────────────────────────────────────────
 syslog:
@@ -78,6 +152,10 @@ secrets:
   adminPassword: ""
   ingestApiKey: ""
   scimBearerToken: ""
+  # Bearer token for scraping /internal/metrics. In production the API refuses
+  # the scrape when this is unset — those series name every route the
+  # deployment serves, with its traffic and error rates.
+  metricsToken: ""
 
 # ── App configuration ────────────────────────────────────────────────────────
 config:
@@ -85,6 +163,10 @@ config:
   autoMigrate: "0"                # migrations run via the pre-install/upgrade Job
   schedulerEnabled: "1"
   corsAllowedOrigins: "https://semanticos.local"
+  # Set to "1" on any deployment running more than one API replica. The API then
+  # refuses to start unless shared storage is configured, instead of silently
+  # keeping uploads on one pod's disk where the other replicas cannot see them.
+  multiReplica: ""
 
 # ── ServiceAccount + RBAC (for the in-cluster Kubernetes log connector) ──────
 serviceAccount:

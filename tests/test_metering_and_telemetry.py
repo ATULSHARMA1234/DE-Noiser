@@ -77,7 +77,7 @@ class TestBillingIsScheduled:
 
         assert RETENTION_DAYS_BY_TIER["enterprise"] > RETENTION_DAYS_BY_TIER["pro"]
         assert RETENTION_DAYS_BY_TIER["pro"] > RETENTION_DAYS_BY_TIER["free"]
-        assert DEFAULT_RETENTION_DAYS == RETENTION_DAYS_BY_TIER["free"]
+        assert RETENTION_DAYS_BY_TIER["free"] == DEFAULT_RETENTION_DAYS
 
 
 class TestUsageEndpoint:

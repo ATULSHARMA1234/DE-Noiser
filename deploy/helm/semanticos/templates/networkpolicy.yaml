@@ -1,0 +1,134 @@
+{{- /*
+Network segmentation for the application pods.
+
+Kubernetes namespaces are flat by default: every pod can open a socket to every
+other pod, so anything running in this namespace could talk straight to
+ClickHouse and Postgres, or scrape the API's metrics endpoint, without passing
+through the application at all. That is the specific control a modern
+network-segmentation review asks about, and "we have RBAC" is not an answer to
+it.
+
+These policies are additive allow-lists on top of a default deny for ingress.
+Egress is deliberately left unrestricted: the platform legitimately calls out to
+customer-configured destinations — IdPs, Slack, PagerDuty, GitHub, webhooks —
+and an egress allow-list that has to enumerate those is one that gets disabled
+the first time an integration silently stops working.
+
+Requires a CNI that enforces NetworkPolicy (Calico, Cilium, Antrea…). On a CNI
+that ignores them these objects are inert, which is why this is opt-in rather
+than assumed.
+*/}}
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "semanticos.fullname" . }}-default-deny
+  labels:
+    {{- include "semanticos.labels" . | nindent 4 }}
+spec:
+  # Applies to this release's pods only, so the policy cannot accidentally
+  # blackhole something else sharing the namespace.
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Ingress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "semanticos.fullname" . }}-api
+  labels:
+    {{- include "semanticos.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "semanticos.name" . }}-api
+  policyTypes:
+    - Ingress
+  ingress:
+    # The web tier, and the ingress controller in front of it.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "semanticos.name" . }}-web
+        {{- with .Values.networkPolicy.ingressControllerSelector }}
+        - namespaceSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: 8000
+    {{- with .Values.networkPolicy.monitoringNamespaceSelector }}
+    # Prometheus. Still has to present METRICS_TOKEN — the policy narrows who
+    # can reach the port, the token decides who may read it. Neither alone is
+    # the control.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 8000
+    {{- end }}
+    {{- with .Values.networkPolicy.extraApiIngress }}
+    # Shippers and anything else that posts to /ingest from inside the cluster.
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "semanticos.fullname" . }}-web
+  labels:
+    {{- include "semanticos.labels" . | nindent 4 }}
+    app.kubernetes.io/component: web
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "semanticos.name" . }}-web
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        {{- with .Values.networkPolicy.ingressControllerSelector }}
+        - namespaceSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: 3000
+{{- if .Values.syslog.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "semanticos.fullname" . }}-syslog
+  labels:
+    {{- include "semanticos.labels" . | nindent 4 }}
+    app.kubernetes.io/component: syslog
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "semanticos.name" . }}-syslog
+  policyTypes:
+    - Ingress
+  ingress:
+    # Syslog senders are network appliances and hosts outside the cluster, so
+    # this one cannot be expressed as a pod selector. Narrow it with
+    # networkPolicy.syslogSourceCIDRs rather than leaving it open.
+    - from:
+        {{- range .Values.networkPolicy.syslogSourceCIDRs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+      ports:
+        - protocol: UDP
+          port: {{ .Values.syslog.containerPort }}
+        - protocol: TCP
+          port: {{ .Values.syslog.containerPort }}
+{{- end }}
+{{- end }}

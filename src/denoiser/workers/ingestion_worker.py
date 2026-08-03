@@ -2,16 +2,15 @@ import asyncio
 import json
 import os
 import time
-from datetime import UTC, datetime
-from pathlib import Path
 
-from aiokafka import AIOKafkaConsumer
+from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from redis import asyncio as redis_asyncio
 
 from denoiser import runtime
 from denoiser.logging import get_logger
 from denoiser.storage.db import SessionLocal
 from denoiser.tracing.otlp_collector import process_otlp_traces
+from denoiser.workers import dead_letter as dlq
 from denoiser.workers.heartbeat import (
     HEARTBEAT_INTERVAL_SECONDS,
     HEARTBEAT_KEY,
@@ -20,27 +19,11 @@ from denoiser.workers.heartbeat import (
 
 logger = get_logger(__name__)
 
-# Dead-letter sink. Messages we cannot parse, and batches we cannot write after
-# repeated retries, are appended here (one JSON record per line) so they are
-# quarantined for inspection instead of being silently dropped or wedging the
-# partition forever.
-DLQ_PATH = Path(os.getenv("SEMANTICOS_DLQ_PATH", "data/dlq/ingestion_dlq.jsonl"))
+#: Re-exported so existing callers and tests keep their import path. The record
+#: itself now goes to a Kafka topic first — see denoiser.workers.dead_letter for
+#: why a local file was not a quarantine at all on Kubernetes.
+DLQ_PATH = dlq.DLQ_PATH
 
-
-def dead_letter(topic: str, reason: str, payload) -> None:
-    """Append a failed record to the dead-letter queue. Never raises."""
-    try:
-        DLQ_PATH.parent.mkdir(parents=True, exist_ok=True)
-        record = {
-            "dead_lettered_at": datetime.now(UTC).isoformat(),
-            "topic": topic,
-            "reason": reason,
-            "payload": payload if isinstance(payload, (dict, list, str, int, float, bool, type(None))) else str(payload),
-        }
-        with open(DLQ_PATH, "a") as f:
-            f.write(json.dumps(record, default=str) + "\n")
-    except Exception as e:
-        logger.error(f"Failed to write to DLQ ({topic}): {e}")
 
 async def run_ingestion_worker():
     logger.info("Starting Hyperscale Ingestion Worker (Kafka Consumer)...")
@@ -55,6 +38,25 @@ async def run_ingestion_worker():
         os.getenv("REDIS_URL", "redis://localhost:6379/0"), decode_responses=True
     )
     last_heartbeat = 0.0
+
+    # Producer for the dead-letter topic. Started alongside the consumer so a
+    # quarantine never has to build a connection at the moment things are
+    # already going wrong. If it cannot start, the DLQ degrades to the local
+    # file and says so.
+    dlq_producer = AIOKafkaProducer(bootstrap_servers=kafka_broker)
+    try:
+        await dlq_producer.start()
+    except Exception as e:
+        logger.error(
+            "Dead-letter producer could not start; quarantined records will go "
+            "to the local file and will not survive a restart: %s", e
+        )
+        dlq_producer = None
+
+    async def dead_letter(topic: str, reason: str, payload) -> None:
+        await dlq.dead_letter(
+            topic, reason, payload, producer=dlq_producer, redis_client=heartbeat_redis
+        )
 
     consumer = AIOKafkaConsumer(
         "logs_topic",
@@ -93,7 +95,10 @@ async def run_ingestion_worker():
             "logs_topic": {"batch": [], "offsets": {}, "last": time.monotonic(), "fails": 0},
             "traces_topic": {"batch": [], "offsets": {}, "last": time.monotonic(), "fails": 0},
         }
-        flushers = {"logs_topic": lambda b: _flush_logs(ch_store, b), "traces_topic": _flush_traces}
+        flushers = {
+            "logs_topic": lambda b: _flush_logs(ch_store, b, dead_letter),
+            "traces_topic": _flush_traces,
+        }
 
         while True:
             records = await consumer.getmany(timeout_ms=int(LINGER_SECONDS * 1000))
@@ -122,7 +127,7 @@ async def run_ingestion_worker():
                         # it in the DLQ and acknowledge it so we don't spin forever.
                         logger.error(f"Dead-lettering unparseable message from {tp.topic}: {e}")
                         raw = msg.value.decode("utf-8", errors="replace") if msg.value else None
-                        dead_letter(tp.topic, f"unparseable: {e}", raw)
+                        await dead_letter(tp.topic, f"unparseable: {e}", raw)
                     # Track the highest offset we've taken responsibility for.
                     st["offsets"][tp] = max(st["offsets"].get(tp, -1), msg.offset)
 
@@ -134,7 +139,7 @@ async def run_ingestion_worker():
                 if not due:
                     continue
 
-                if flushers[topic](st["batch"]):
+                if await flushers[topic](st["batch"]):
                     # Durably written -- commit exactly these partitions/offsets.
                     if st["offsets"]:
                         await consumer.commit(
@@ -152,7 +157,7 @@ async def run_ingestion_worker():
                         f"{len(st['batch'])} records and advancing"
                     )
                     for payload, t_id in st["batch"]:
-                        dead_letter(topic, f"flush failed {MAX_FLUSH_RETRIES}x", {"tenant_id": t_id, "record": payload})
+                        await dead_letter(topic, f"flush failed {MAX_FLUSH_RETRIES}x", {"tenant_id": t_id, "record": payload})
                     if st["offsets"]:
                         await consumer.commit({tp: off + 1 for tp, off in st["offsets"].items()})
                     # Resume anything we paused for this topic; its backlog is cleared.
@@ -191,11 +196,18 @@ async def run_ingestion_worker():
         # (and duplicates) the last uncommitted window.
         try:
             for topic, st in state.items():
-                if st["batch"] and flushers[topic](st["batch"]) and st["offsets"]:
+                if st["batch"] and await flushers[topic](st["batch"]) and st["offsets"]:
                     await consumer.commit({tp: off + 1 for tp, off in st["offsets"].items()})
         except Exception as e:
             logger.error(f"Failed to flush/commit on shutdown: {e}")
         await consumer.stop()
+        # After the consumer, so anything quarantined during the final flush has
+        # already been sent.
+        if dlq_producer is not None:
+            try:
+                await dlq_producer.stop()
+            except Exception as e:
+                logger.warning(f"Could not stop the dead-letter producer: {e}")
         # Drop the heartbeat immediately so a deliberate shutdown fails readiness
         # now rather than after the stale window elapses.
         try:
@@ -204,8 +216,18 @@ async def run_ingestion_worker():
         except Exception as e:
             logger.warning(f"Could not clear ingestion heartbeat on shutdown: {e}")
 
-def _flush_logs(ch_store, batch_logs) -> bool:
-    """Write a batch to ClickHouse. Returns True only if every tenant's rows landed."""
+async def _flush_logs(ch_store, batch_logs, dead_letter=None) -> bool:
+    """Write a batch to ClickHouse. Returns True only if every tenant's rows landed.
+
+    Async because quarantining an unscoped record now publishes to the DLQ
+    topic. `dead_letter` is injected rather than imported so a test can observe
+    what was quarantined without a broker; it defaults to the local-file write,
+    which is the honest behaviour for a caller that supplied no producer.
+    """
+    if dead_letter is None:
+        async def dead_letter(topic, reason, payload):
+            dlq.write_local(dlq.build_record(topic, reason, payload))
+
     # Group by tenant_id
     by_tenant = {}
     for log, t_id in batch_logs:
@@ -223,7 +245,7 @@ def _flush_logs(ch_store, batch_logs) -> bool:
         if t_id is None or str(t_id).strip() == "":
             logger.error(f"Dead-lettering {len(logs)} unscoped log(s) with no tenant_id")
             for log in logs:
-                dead_letter("logs_topic", "missing tenant_id", log)
+                await dead_letter("logs_topic", "missing tenant_id", log)
             continue
         try:
             # insert_logs returns False (rather than raising) when the client is
@@ -238,8 +260,12 @@ def _flush_logs(ch_store, batch_logs) -> bool:
             logger.error(f"Failed to flush logs for tenant {t_id}: {e}")
     return ok
 
-def _flush_traces(batch_traces) -> bool:
-    """Persist a batch of traces. Returns True only if every trace was stored."""
+async def _flush_traces(batch_traces) -> bool:
+    """Persist a batch of traces. Returns True only if every trace was stored.
+
+    Async purely to match `_flush_logs`, so the consumer can await both through
+    the same `flushers` mapping.
+    """
     db = SessionLocal()
     failed = 0
     try:

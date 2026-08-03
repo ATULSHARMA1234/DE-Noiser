@@ -24,7 +24,6 @@ from denoiser.api.saml import (
     SAMLError,
     build_authn_request,
     build_sp_metadata,
-    get_saml_config,
     parse_and_verify_response,
     reset_replay_guard,
     saml_enabled,

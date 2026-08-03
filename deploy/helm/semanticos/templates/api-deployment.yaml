@@ -6,7 +6,16 @@ metadata:
     {{- include "semanticos.labels" . | nindent 4 }}
     app.kubernetes.io/component: api
 spec:
+  {{- if not .Values.autoscaling.api.enabled }}
   replicas: {{ .Values.api.replicaCount }}
+  {{- end }}
+  # Never take the tier below full capacity to roll it. With one replica and the
+  # default 25% maxUnavailable, an upgrade *was* an outage.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ include "semanticos.name" . }}-api
@@ -17,6 +26,18 @@ spec:
         app.kubernetes.io/component: api
     spec:
       serviceAccountName: {{ include "semanticos.serviceAccountName" . }}
+      # Spread replicas across nodes so a single node failure or drain cannot
+      # take out the whole tier. Preferred, not required, so the chart still
+      # installs on a single-node cluster (kind, k3s, an evaluation box).
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: {{ include "semanticos.name" . }}-api
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
