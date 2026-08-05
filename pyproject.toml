@@ -6,9 +6,10 @@ version = "2.0.0"
 description = "Privacy-first on-premise log analysis and observability platform"
 readme = "README.md"
 requires-python = ">=3.12"
-license = { text = "MIT" }
+license = { text = "Elastic-2.0" }
 authors = [
-    { name = "Atul" },
+    { name = "Atul Sharma" },
+    { name = "Esha Sharma" },
 ]
 keywords = ["logs", "sre", "devops", "anomaly-detection", "clustering", "observability"]
 classifiers = [

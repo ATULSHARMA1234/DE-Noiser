@@ -2,7 +2,13 @@
 
 SemanticOS is a privacy-first, hyperscale, on-premise log analysis and observability platform. It uses semantic clustering (HDBSCAN), a causal proximity scorer, and a local LLM to automatically denoise millions of logs, find root causes, and trigger automated runbooks — all without your data ever leaving your infrastructure.
 
-![Command Center Dashboard](assets/semanticos_dashboard_mockup.png)
+| Raw ingest | After semantic clustering |
+|---|---|
+| ![Raw logs](assets/raw_logs.png) | ![Denoised output](assets/denoised_output.png) |
+
+*The file this previously pointed at (`semanticos_dashboard_mockup.png`) was never
+in the repository, so the first thing anyone saw on GitHub was a broken image.
+These two are real output, and they show the thing the product is for.*
 
 ## Why SemanticOS?
 Modern enterprise observability tools (like Datadog, Splunk, or New Relic) are expensive and require you to send sensitive PII and infrastructure data to third-party clouds. SemanticOS provides the same advanced AIOps features for free, running entirely on your own hardware.
@@ -76,4 +82,12 @@ The Command Center will be available at [http://localhost:3000/app](http://local
 - Load testing: `python scripts/loadtest.py --help`
 
 ## License
-SemanticOS is licensed under the [MIT License](LICENSE).
+SemanticOS is source-available under the [Elastic License 2.0](LICENSE). Read it,
+modify it, and run it in production on your own infrastructure — including
+commercially — at no cost. The limits are that you may not offer it to third
+parties as a managed service, circumvent the licence key, or strip the notices.
+
+The core — clustering, issue tracking, RCA, ingest, the UI — is free and stays
+free. Enterprise identity, automation, distributed tracing and extended retention
+are the commercial tier. See [LICENSING.md](LICENSING.md) for the full boundary,
+and for why commits up to `97ad799` remain MIT.
