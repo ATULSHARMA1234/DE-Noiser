@@ -1,7 +1,7 @@
 # Deploying SemanticOS
 
 SemanticOS is a multi-service stack (FastAPI API + Celery worker + Next.js UI +
-Postgres + Redis + ClickHouse + Redpanda + MinIO). Because of the stateful
+Postgres + Redis + ClickHouse + Apache Kafka + MinIO). Because of the stateful
 services and the ML libraries, the **backend must run on a real machine/VM** —
 it cannot run on serverless platforms (Vercel, Lambda, etc.).
 
@@ -36,7 +36,7 @@ cert in `nginx/certs/` for a real one (see "Real TLS" below).
 OCI's **Ampere A1 (ARM)** Always Free shape gives **4 OCPU / 24 GB RAM free
 forever** — enough to run the whole stack at no cost. The entire stack is already
 arm64-compatible (the app images build native arm64, and all infra images —
-Postgres, Redis, nginx, MinIO, ClickHouse, Redpanda — plus CPU-only torch have
+Postgres, Redis, nginx, MinIO, ClickHouse, Kafka — plus CPU-only torch have
 aarch64 builds), so `deploy/bootstrap.sh` works unchanged.
 
 **1. Create the instance**
@@ -147,7 +147,7 @@ for your domain and set `server_name` in `nginx/nginx.conf`.
 | `worker` | Celery analysis/SLO worker | **required** — `/analyze` jobs complete here |
 | `web` | Next.js UI | only used in Option A (Vercel replaces it in Option B) |
 | `nginx` | TLS + reverse proxy | `/` → web, `/api/*` → api, `/stream` → api (WS) |
-| `db` / `redis` / `clickhouse` / `redpanda` / `minio` | stateful backends | data in named volumes |
+| `db` / `redis` / `clickhouse` / `kafka` / `minio` | stateful backends | data in named volumes |
 
 ## Operating notes
 
@@ -159,3 +159,45 @@ for your domain and set `server_name` in `nginx/nginx.conf`.
   `clickhouse_data`, `minio_data`). Snapshot these for DR.
 - **Image tags** are currently `:latest` for infra images — pin them before you
   rely on this in production.
+
+---
+
+## The broker: Apache Kafka by default, Redpanda by choice
+
+The stack ships **Apache Kafka** (`apache/kafka:3.9.0`, Apache-2.0), single-node
+KRaft, no ZooKeeper. It used to ship Redpanda, which is BSL 1.1 — permitted to
+run yourself, not permitted to offer to third parties as a service. That is a
+licensing decision belonging to whoever deploys this, and a default should not
+make it for them.
+
+Nothing in the application changed: the broker is spoken to through `aiokafka`,
+which is the same protocol either way. Only `KAFKA_BROKER` and the image differ.
+
+To keep Redpanda — it is a single binary, starts faster, and uses less memory:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.redpanda.yml up -d
+```
+
+**Switching an existing install.** The broker is a transit buffer between
+`/ingest` and the ingestion worker, not a store of record — anything already
+consumed is in ClickHouse. But anything still queued is lost when the broker
+changes, so drain before you switch:
+
+```bash
+docker compose stop api syslog          # stop producing
+docker compose logs -f ingestion        # wait until it stops reporting new batches
+docker compose up -d                    # brings up kafka; the old redpanda container is now an orphan
+```
+
+Compose will not remove the Redpanda container for you — it is no longer a
+service in the base file, so `docker compose rm redpanda` has nothing to act on.
+Once you are satisfied the new broker is carrying traffic:
+
+```bash
+docker rm -f semanticos-redpanda
+docker volume ls | grep redpanda_data   # then `docker volume rm` the one you find
+```
+
+Helm installs point `kafka.broker` at whatever broker you already run; the chart
+does not deploy one. The default value is `kafka:9092`.

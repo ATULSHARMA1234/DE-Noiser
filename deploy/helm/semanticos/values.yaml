@@ -173,7 +173,10 @@ clickhouse:
   password: ""
 
 kafka:
-  broker: "redpanda:9092"
+  # Any Kafka-protocol broker you already run. The chart deploys none; the
+  # compose stack's default is Apache Kafka (Apache-2.0) rather than Redpanda
+  # (BSL 1.1) — see DEPLOY.md § Licensing constraints.
+  broker: "kafka:9092"
 
 # ── Secrets ──────────────────────────────────────────────────────────────────
 # In production, set secrets.existingSecret to a Secret managed by your secrets

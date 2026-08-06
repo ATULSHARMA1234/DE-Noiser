@@ -4,7 +4,7 @@ x-backend-env: &id001
   REDIS_URL: redis://redis:6379/0
   CLICKHOUSE_HOST: clickhouse
   CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?CLICKHOUSE_PASSWORD is required}
-  KAFKA_BROKER: redpanda:29092
+  KAFKA_BROKER: kafka:29092
   MINIO_ENDPOINT: minio:9000
   S3_ENDPOINT: http://minio:9000
   S3_ACCESS_KEY: ${MINIO_ROOT_USER:-admin}
@@ -112,8 +112,8 @@ services:
     depends_on:
       clickhouse:
         condition: service_healthy
-      redpanda:
-        condition: service_started
+      kafka:
+        condition: service_healthy
       db:
         condition: service_healthy
     deploy:
@@ -169,24 +169,65 @@ services:
       resources:
         limits:
           memory: 1G
-  redpanda:
-    image: docker.redpanda.com/redpandadata/redpanda:latest
-    container_name: semanticos-redpanda
-    command:
-    - redpanda
-    - start
-    - --smp 1
-    - --memory 1G
-    - --reserve-memory 0M
-    - --overprovisioned
-    - --node-id 0
-    - --kafka-addr PLAINTEXT://0.0.0.0:29092,OUTSIDE://0.0.0.0:9092
-    - --advertise-kafka-addr PLAINTEXT://redpanda:29092,OUTSIDE://localhost:9092
+  # Apache Kafka, not Redpanda. Redpanda is BSL 1.1: fine to run yourself,
+  # not fine to offer to third parties as a managed service — which means the
+  # default stack decided a licensing question that belongs to whoever deploys
+  # it. The broker is spoken to through `aiokafka`, so this is the same
+  # protocol either way; only the image changes.
+  #
+  # Single-node KRaft (no ZooKeeper). To go back to Redpanda:
+  #   docker compose -f docker-compose.yml -f docker-compose.redpanda.yml up -d
+  kafka:
+    image: apache/kafka:3.9.0
+    container_name: semanticos-kafka
+    environment:
+      KAFKA_NODE_ID: '1'
+      KAFKA_PROCESS_ROLES: broker,controller
+      # `://:port`, not `://0.0.0.0:port`. On a combined broker+controller node
+      # 3.9 derives the advertised address from this and then refuses to start
+      # against "the nonroutable meta-address 0.0.0.0".
+      KAFKA_LISTENERS: PLAINTEXT://:29092,CONTROLLER://:9093,OUTSIDE://:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,OUTSIDE://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,OUTSIDE:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      # Single broker: the internal topics cannot be replicated onto nodes that
+      # do not exist, and the defaults (3) leave the cluster unable to create
+      # __consumer_offsets at all, which fails the consumer, not the broker.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: '1'
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: '1'
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: '1'
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: '0'
+      # Nothing creates `logs_topic` up front — the producer's first send does.
+      # This is the default, set explicitly because the ingest path depends on it.
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      # The image's entrypoint formats the log directory on first boot and needs
+      # a stable cluster id to do it, or every restart formats a new cluster and
+      # abandons the volume it wrote last time.
+      CLUSTER_ID: semanticos-single-node-1
+    # The image runs as uid 1000 and Docker creates a named volume's mountpoint
+    # root-owned, so without this the broker cannot write its own log dir.
+    user: root
     ports:
     - 127.0.0.1:9092:9092
     - 127.0.0.1:29092:29092
     volumes:
-    - redpanda_data:/var/lib/redpanda/data
+    - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:29092
+        >/dev/null 2>&1
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
   redis:
     image: redis:7-alpine
     container_name: semanticos-redis
@@ -268,6 +309,9 @@ volumes:
   redis_data: null
   minio_data: null
   clickhouse_data: null
+  kafka_data: null
+  # Kept declared so `docker compose -f … -f docker-compose.redpanda.yml` works
+  # and so an existing install's broker volume is not orphaned by the switch.
   redpanda_data: null
   caddy_data: null
   caddy_config: null

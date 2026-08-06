@@ -22,7 +22,7 @@ helm install semanticos deploy/helm/semanticos \
   --set postgres.host=pg.internal --set postgres.password="$PGPASS" \
   --set clickhouse.host=clickhouse.internal --set clickhouse.password="$CHPASS" \
   --set redis.url=redis://redis.internal:6379/0 \
-  --set kafka.broker=redpanda.internal:9092
+  --set kafka.broker=kafka.internal:9092
 ```
 
 Prefer a **pre-created Secret** managed by Vault / Sealed Secrets / External
