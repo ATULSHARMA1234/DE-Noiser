@@ -20,6 +20,7 @@ from fastapi import (
 )
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from denoiser import runtime
@@ -43,7 +44,7 @@ from denoiser.api.schemas import (
 )
 from denoiser.logging import get_logger
 from denoiser.settings import get_settings as get_infra_settings
-from denoiser.storage.db import User, get_db
+from denoiser.storage.db import Tenant, User, get_db
 
 logger = get_logger(__name__)
 
@@ -143,6 +144,13 @@ async def _clear_login_failures_for_email(email: str) -> int:
 
     An operator locked out from an address they are no longer at cannot clear it
     themselves by waiting from a different IP, so an admin needs a way in.
+
+    The throttle is keyed on the address alone because it has to work before
+    anyone is authenticated, and which organisation a sign-in was aimed at is
+    not known until the password has been checked. So on the rare deployment
+    where two customers employ the same person, both share one backoff — and
+    clearing it here clears it for both. That is the cost of throttling
+    pre-authentication, not something the tenant scoping above can fix.
     """
     cleared = 0
     suffix = f":{email.lower()}"
@@ -157,6 +165,26 @@ async def _clear_login_failures_for_email(email: str) -> int:
         _login_attempts.pop(key, None)
         cleared += 1
     return cleared
+
+
+def _tenant_named(db: Session, name: str) -> Tenant | None:
+    """The organisation a caller named at sign-in, matched case-insensitively.
+
+    Nobody types "Acme Corp" with the capitalisation the row happens to hold,
+    and a login that fails on capitalisation is indistinguishable from a wrong
+    password to the person on the other end of it.
+    """
+    cleaned = name.strip()
+    if not cleaned:
+        return None
+    return db.query(Tenant).filter(func.lower(Tenant.name) == cleaned.lower()).first()
+
+
+def _tenant_name(db: Session, tenant_id: int | None) -> str | None:
+    if tenant_id is None:
+        return None
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    return tenant.name if tenant else None
 
 
 @router.post("/auth/login", response_model=TokenResponse)
@@ -190,16 +218,38 @@ async def login(payload: UserLogin, request: Request, response: Response, db: Se
     #
     # A missing user still runs a verify against a dummy hash, so the response
     # time does not reveal whether an address is registered.
-    def _authenticate() -> User | None:
-        found = db.query(User).filter(User.email == payload.email).first()
-        if not found:
+    #
+    # An address can now belong to one account per organisation, so this may
+    # start from more than one candidate row. The password decides between them:
+    # every candidate is verified, and a single match signs in. Nothing about
+    # the common case changes — one candidate, one verify, same answer.
+    def _authenticate() -> tuple[User | None, list[User]]:
+        candidates = db.query(User).filter(User.email == payload.email).all()
+        if payload.tenant:
+            wanted = _tenant_named(db, payload.tenant)
+            candidates = [u for u in candidates if wanted and u.tenant_id == wanted.id]
+        if not candidates:
             verify_password(payload.password, _DUMMY_PASSWORD_HASH)
-            return None
-        if not verify_password(payload.password, found.hashed_password):
-            return None
-        return found
+            return None, []
+        matched = [u for u in candidates if verify_password(payload.password, u.hashed_password)]
+        if len(matched) == 1:
+            return matched[0], []
+        # Zero matches is a wrong password. More than one means the same address
+        # *and* the same password in two organisations — only reachable by
+        # someone who already holds a working credential, so naming the
+        # organisations discloses nothing they could not already confirm.
+        return None, matched
 
-    user = await run_in_threadpool(_authenticate)
+    user, ambiguous = await run_in_threadpool(_authenticate)
+    if ambiguous:
+        names = sorted(filter(None, (_tenant_name(db, u.tenant_id) for u in ambiguous)))
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "That address is registered with more than one organisation. "
+                "Sign in again with `tenant` set to one of: " + ", ".join(names)
+            ),
+        )
     if not user:
         await _record_login_failure(throttle_key)
         raise HTTPException(status_code=401, detail="Invalid email or password")
@@ -211,7 +261,7 @@ async def login(payload: UserLogin, request: Request, response: Response, db: Se
     # penalty hanging over the next attempt.
     await _clear_login_failures(throttle_key)
 
-    tokens = issue_token_pair(user.email)
+    tokens = issue_token_pair(user.email, user.tenant_id)
     # Set as httpOnly cookies for browsers, and still returned in the body for
     # programmatic clients (the CLI, shippers, CI) that cannot use a cookie jar.
     # The web client reads neither: it relies on the cookies alone, so an XSS

@@ -126,9 +126,13 @@ def create_tenant(
 
     # Checked before the tenant is written, so a rejected admin address does not
     # leave a half-onboarded organisation behind.
+    #
+    # There is no longer a check that the address is unused deployment-wide: an
+    # address belongs to a person per organisation, and the new organisation has
+    # no users yet, so nothing it could collide with exists. Onboarding a
+    # customer whose first admin already consults for another customer used to
+    # fail here for no reason that survived examination.
     if payload.admin_email:
-        if db.query(User).filter(User.email == payload.admin_email).first():
-            raise HTTPException(status_code=409, detail="That admin email is already in use")
         owner = tenant_claiming(db, domain_of(payload.admin_email))
         if owner is not None:
             raise HTTPException(

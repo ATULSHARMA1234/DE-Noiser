@@ -468,6 +468,32 @@ class TenantQuotaMiddleware(BaseHTTPMiddleware):
 
 
 def _jwt_subject(token: str) -> str | None:
+    """Read the identity from a JWT without hitting the database.
+
+    Signature verification is the route dependency's job — this only needs a
+    stable bucket key, and an unverifiable token gets rejected downstream
+    anyway. Claims from it are never treated as authorisation.
+
+    Returns ``"<tenant>/<email>"`` when the token names an organisation. An
+    address alone stopped identifying one account when uniqueness became
+    per-tenant, so without the prefix two people sharing an address at two
+    customers would share one quota bucket — and the lookup below would resolve
+    whichever row came back first.
+    """
+    try:
+        from jose import jwt
+
+        claims = jwt.get_unverified_claims(token)
+    except Exception:
+        return None
+    sub = claims.get("sub")
+    if not sub:
+        return None
+    tid = claims.get("tid")
+    return f"{tid}/{sub}" if tid is not None else str(sub)
+
+
+
     """Read ``sub`` from a JWT without hitting the database.
 
     Signature verification is the route dependency's job — this only needs a
@@ -502,7 +528,17 @@ def _lookup_tenant(api_key: str | None, subject: str | None) -> tuple[str, str] 
             if tenant is None and matches_static_secret(api_key, "INGEST_API_KEY"):
                 tenant = db.query(Tenant).order_by(Tenant.id).first()
         elif subject:
-            user = db.query(User).filter(User.email == subject).first()
+            # `_jwt_subject` hands back "<tenant>/<email>" when the token says
+            # which organisation it was issued for; the tenant is then all this
+            # needs, and the user row is only consulted for the tokens that
+            # predate the claim.
+            tid, _, email = subject.partition("/")
+            if not tid.isdigit():
+                tid, email = "", subject
+            if tid:
+                tenant = db.query(Tenant).filter(Tenant.id == int(tid)).first()
+                return (tid, (tenant.tier if tenant else "free") or "free")
+            user = db.query(User).filter(User.email == email).first()
             if user is not None and user.tenant_id is not None:
                 tenant = db.query(Tenant).filter(Tenant.id == user.tenant_id).first()
                 if tenant is None:

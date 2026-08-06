@@ -9,7 +9,19 @@ from __future__ import annotations
 
 import os
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, Float, Integer, String, create_engine
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+    create_engine,
+    text,
+)
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
@@ -113,9 +125,31 @@ class AnalysisRun(Base):
 class User(Base):
     __tablename__ = "users"
 
+    # An address identifies a person *within one organisation*, not across the
+    # deployment. Globally unique emails meant the first customer to hire a
+    # consultant took their address for everyone: the second customer's admin
+    # got "User with this email already exists" for a person who had no account
+    # with them at all, and no way to create one. Two companies can now each
+    # have the same contractor on staff, as separate accounts with separate
+    # passwords and separate data.
+    #
+    # The partial index keeps the old guarantee for rows with no organisation —
+    # the seeded platform accounts — where the composite constraint cannot: SQL
+    # treats NULLs as distinct, so (NULL, 'a@b') never collides with itself.
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "email", name="uq_users_tenant_email"),
+        Index(
+            "uq_users_email_unassigned",
+            "email",
+            unique=True,
+            sqlite_where=text("tenant_id IS NULL"),
+            postgresql_where=text("tenant_id IS NULL"),
+        ),
+    )
+
     id = Column(Integer, primary_key=True, index=True)
     tenant_id = Column(Integer, index=True, nullable=True)
-    email = Column(String, unique=True, index=True, nullable=False)
+    email = Column(String, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
     role = Column(String, default="VIEWER", nullable=False)  # ADMIN, ANALYST, VIEWER
     is_active = Column(Boolean, default=True)
@@ -580,7 +614,6 @@ def init_db():
     db = SessionLocal()
     try:
         admin_email = "admin@semanticos.io"
-        exists = db.query(User).filter(User.email == admin_email).first()
 
         # Create default tenant if not exists
         default_tenant = db.query(Tenant).filter(Tenant.name == "Default Workspace").first()
@@ -589,6 +622,16 @@ def init_db():
             db.add(default_tenant)
             db.commit()
             db.refresh(default_tenant)
+
+        # Scoped to the default workspace, and resolved after it exists rather
+        # than before. Unscoped, a customer who happens to employ someone at
+        # admin@semanticos.io would suppress the seed for the whole deployment
+        # and leave a fresh install with no way in.
+        exists = (
+            db.query(User)
+            .filter(User.email == admin_email, User.tenant_id == default_tenant.id)
+            .first()
+        )
 
         if not exists:
             import secrets
@@ -626,7 +669,11 @@ def init_db():
 
         # Seed system-audit user
         system_email = "system-audit@semanticos.io"
-        system_exists = db.query(User).filter(User.email == system_email).first()
+        system_exists = (
+            db.query(User)
+            .filter(User.email == system_email, User.tenant_id == default_tenant.id)
+            .first()
+        )
         if not system_exists:
             import secrets
 

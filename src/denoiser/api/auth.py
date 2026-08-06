@@ -111,13 +111,52 @@ def create_refresh_token(data: dict, expires_delta: timedelta | None = None) -> 
     return encode_token(to_encode)
 
 
-def issue_token_pair(sub: str) -> dict:
-    """The standard login/refresh payload: a fresh access + refresh token."""
+def issue_token_pair(sub: str, tenant_id: int | None = None) -> dict:
+    """The standard login/refresh payload: a fresh access + refresh token.
+
+    ``tenant_id`` becomes a ``tid`` claim. An address is only unique inside one
+    organisation, so the subject alone no longer names a single account — the
+    token has to carry which one it was issued for, or two people who share an
+    address across two customers resolve to whichever row the database returns
+    first.
+
+    It is optional so that tokens for the seeded platform accounts (no
+    organisation) still work, and so an already-issued token from before this
+    change keeps working until it expires — see `user_for_claims`.
+    """
+    claims: dict = {"sub": sub}
+    if tenant_id is not None:
+        claims["tid"] = tenant_id
     return {
-        "access_token": create_access_token(data={"sub": sub}),
-        "refresh_token": create_refresh_token(data={"sub": sub}),
+        "access_token": create_access_token(data=claims),
+        "refresh_token": create_refresh_token(data=claims),
         "token_type": "bearer",
     }
+
+
+def user_for_claims(db: Session, payload: dict) -> User | None:
+    """Resolve the one account a token names, or None.
+
+    With a ``tid`` claim this is exact: `(tenant_id, email)` is unique. Without
+    one — a token issued before `tid` existed, or an account with no
+    organisation — it falls back to the address alone and accepts the result
+    only if it is unambiguous. Returning None for an ambiguous subject rather
+    than picking a row is the whole point: the wrong pick would sign the caller
+    in to another customer's data.
+    """
+    email = payload.get("sub")
+    if not email:
+        return None
+
+    query = db.query(User).filter(User.email == email)
+    tenant_id = payload.get("tid")
+    if tenant_id is not None:
+        query = query.filter(User.tenant_id == tenant_id)
+
+    matches = query.limit(2).all()
+    return matches[0] if len(matches) == 1 else None
+
+
 
 
 def rotate_refresh_token(refresh_token: str, db: Session) -> tuple[dict, User]:
@@ -150,14 +189,17 @@ def rotate_refresh_token(refresh_token: str, db: Session) -> tuple[dict, User]:
     if db.query(RevokedToken).filter(RevokedToken.jti == jti).first():
         raise invalid
 
-    user = db.query(User).filter(User.email == sub).first()
+    user = user_for_claims(db, payload)
     if user is None or not getattr(user, "is_active", True):
         raise invalid
 
     # Revoke the presented refresh token before issuing the next one.
     db.add(RevokedToken(jti=jti, expires_at=datetime.fromtimestamp(exp, UTC)))
     db.commit()
-    return issue_token_pair(sub), user
+    # The new pair carries `tid` even if the presented one did not, so a session
+    # that predates the claim acquires it on its next rotation rather than
+    # staying ambiguous for as long as the user keeps refreshing.
+    return issue_token_pair(user.email, user.tenant_id), user
 
 
 def revoke_token(token: str, db: Session) -> bool:
@@ -225,7 +267,7 @@ def get_current_user(
         if db.query(RevokedToken).filter(RevokedToken.jti == jti).first():
             raise credentials_exception
 
-    user = db.query(User).filter(User.email == email).first()
+    user = user_for_claims(db, payload)
     if user is None:
         raise credentials_exception
     if not getattr(user, "is_active", True):

@@ -35,7 +35,7 @@ Most endpoints require a Bearer JWT. Obtain one from `/auth/login`, send it as
 
 | Method | Path | Role | Description |
 |--------|------|------|-------------|
-| POST | `/auth/login` | — | Exchange email/password for a JWT. Rate-limited (5 failures / 5 min per IP+email). |
+| POST | `/auth/login` | — | Exchange email/password for a JWT. Rate-limited (5 failures / 5 min per IP+email). Accepts an optional `tenant` (organisation name) — see below. |
 | GET | `/auth/me` | any | Current user profile. |
 | POST | `/auth/logout` | any | Revoke the caller's token (cannot be reused before expiry). |
 | GET | `/auth/sso/providers` | — | Which sign-in flows this deployment offers (OIDC / SAML / mock), so the login page renders only reachable buttons. |
@@ -48,6 +48,23 @@ Most endpoints require a Bearer JWT. Obtain one from `/auth/login`, send it as
 | GET | `/admin/credentials` | ADMIN | Rotation state of every long-lived credential. Never returns a secret's value. |
 | POST | `/admin/tenant/api-key/rotate` | ADMIN | Issue a new tenant API key; the superseded one stays valid for `overlap_hours` (0 = revoke now). Returned once. |
 | POST | `/admin/tenant/api-key/revoke-previous` | ADMIN | End the overlap early, once every shipper carries the new key. |
+
+#### One address, two organisations
+
+An email address identifies a person **within one organisation**, not across the
+deployment: two customers can each employ the same consultant, as two accounts
+with separate passwords and separate data. Three consequences:
+
+- **Sign-in** normally needs nothing extra — the password decides which account
+  it is. Only when the same address *and* the same password authenticate in more
+  than one organisation does `/auth/login` return **409** naming them; repeat the
+  request with `{"email": ..., "password": ..., "tenant": "Acme Corp"}`.
+- **Tokens** carry a `tid` claim naming the organisation they were issued for.
+  Tokens issued before this existed keep working while their subject is
+  unambiguous, and acquire the claim on their next refresh.
+- **SCIM and SSO** provision into the organisation their credential or assertion
+  resolves to. A `409` from `POST /scim/v2/Users` now means the address is taken
+  *in that organisation*, never somewhere else on the deployment.
 
 #### SAML 2.0 configuration
 

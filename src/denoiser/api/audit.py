@@ -73,9 +73,13 @@ class AuditMiddleware(BaseHTTPMiddleware):
         db = SessionLocal()
         try:
             if user_id is None:
+                # Oldest first: the seeded service account predates every
+                # customer, and an address is only unique within one
+                # organisation now — a customer employing someone at this
+                # address must not become the actor on unattributed rows.
                 sys_user = db.query(User).filter(
                     User.email == "system-audit@semanticos.io"
-                ).first()
+                ).order_by(User.id).first()
                 user_id = sys_user.id if sys_user else None
 
             db.add(AuditLog(

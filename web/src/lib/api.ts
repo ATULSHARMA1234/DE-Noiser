@@ -145,7 +145,12 @@ export async function apiFetch(path: string, options: RequestInit = {}) {
   } else if (err.detail) {
    message = JSON.stringify(err.detail);
   }
-  throw new Error(message);
+  // The status rides along on the error: a caller that needs to tell one
+  // failure from another (login's "which organisation?" 409 from a plain wrong
+  // password 401) would otherwise have to match on the message text.
+  const failure = new Error(message) as Error & { status?: number };
+  failure.status = res.status;
+  throw failure;
  }
  return res.json();
 }

@@ -86,11 +86,35 @@ def _provision_sso_user(
             logger.warning("Rejected SSO login: %s", e)
             raise HTTPException(status_code=403, detail=str(e))
 
+    # Both lookups are scoped to the organisation the assertion resolved to. An
+    # address, and an IdP subject, are unique inside one organisation and not
+    # across the deployment — unscoped, a consultant signing in to their second
+    # customer would be matched to their first customer's account and handed
+    # that company's data.
+    from denoiser.api.scope import tenant_predicate
+
+    scope = tenant_predicate(User, tenant_id)
     user = None
     if fields.get("external_id"):
-        user = db.query(User).filter(User.external_id == fields["external_id"]).first()
+        user = (
+            db.query(User)
+            .filter(User.external_id == fields["external_id"], scope)
+            .first()
+        )
     if user is None:
-        user = db.query(User).filter(User.email == fields["email"]).first()
+        user = db.query(User).filter(User.email == fields["email"], scope).first()
+    if user is None and tenant_id is not None:
+        # One deliberate exception to the scoping: an account that belongs to no
+        # organisation at all. Those are pre-tenancy rows, and this login is the
+        # moment their organisation becomes known. Adopting one is safe in a way
+        # that matching another tenant's row is not — it takes nothing from
+        # anybody, and the alternative is a second account beside the first with
+        # the same person's history stranded behind it.
+        user = (
+            db.query(User)
+            .filter(User.email == fields["email"], User.tenant_id.is_(None))
+            .first()
+        )
 
     if user is None:
         import uuid
@@ -113,18 +137,13 @@ def _provision_sso_user(
         if fields.get("external_id"):
             user.external_id = fields["external_id"]
         user.is_active = True
-        # An existing account's organisation is left alone. Re-homing a user
-        # because a domain claim changed would move their work between two
-        # customers as a side effect of them logging in; that is a deliberate
-        # migration, not something a login should do quietly.
+        # The only account that can reach here without already belonging to this
+        # organisation is an unassigned one, adopted just above. A user who
+        # belongs somewhere else is never matched at all now, so there is no
+        # re-homing decision left to make: they get their own account here, and
+        # their work at the other customer stays where it is.
         if user.tenant_id is None:
             user.tenant_id = tenant_id
-        elif tenant_id is not None and user.tenant_id != tenant_id:
-            logger.warning(
-                "SSO user %s belongs to tenant %s but their domain is registered to "
-                "tenant %s; leaving the existing membership in place.",
-                user.email, user.tenant_id, tenant_id,
-            )
 
     db.commit()
     db.refresh(user)
@@ -228,7 +247,7 @@ def sso_callback(
         user = _provision_sso_user(db, fields)
         if not user.is_active:
             raise HTTPException(status_code=401, detail="User account is deactivated")
-        return {**issue_token_pair(user.email), "user": user}
+        return {**issue_token_pair(user.email, user.tenant_id), "user": user}
 
     # ── Mock IdP fallback (dev/sandbox only) ─────────────────────────────
     if not _mock_sso_enabled():
@@ -252,7 +271,7 @@ def sso_callback(
     )
     if not user.is_active:
         raise HTTPException(status_code=401, detail="User account is deactivated")
-    return {**issue_token_pair(user.email), "user": user}
+    return {**issue_token_pair(user.email, user.tenant_id), "user": user}
 
 
 @router.get("/saml/login")
@@ -350,7 +369,7 @@ def saml_acs(
         user = _provision_sso_user(db, fields, tenant_id=idp_tenant_id)
         if not user.is_active:
             raise HTTPException(status_code=401, detail="User account is deactivated")
-        return {**issue_token_pair(user.email), "user": user}
+        return {**issue_token_pair(user.email, user.tenant_id), "user": user}
 
     if not _mock_sso_enabled():
         raise HTTPException(

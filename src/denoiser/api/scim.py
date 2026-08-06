@@ -202,10 +202,12 @@ def create_user(payload: dict, tenant_id: int | None = Depends(scim_tenant), db:
     primary_email = next((e.get("value") for e in emails if e.get("primary")), None)
     email = primary_email or email
 
-    # Checked across the whole deployment, not just this organisation, because
-    # email is globally unique — a tenant-scoped check would pass and then fail
-    # on insert. The 409 says only that the address is taken, never by whom.
-    existing = db.query(User).filter(User.email == email).first()
+    # Scoped to the organisation whose token authenticated this call. An address
+    # is unique inside one organisation, so a person already provisioned by
+    # another customer's IdP is not a conflict here — they are a different
+    # account, and refusing to create it used to leave that customer unable to
+    # provision their own employee.
+    existing = _scoped(db.query(User).filter(User.email == email), User, tenant_id).first()
     if existing:
         # SCIM: return 409 so the IdP switches to update instead of duplicating.
         raise HTTPException(status_code=409, detail="User already exists")

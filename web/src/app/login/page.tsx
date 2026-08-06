@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Cpu, Mail, Lock, ShieldAlert, Loader2 } from 'lucide-react';
+import { Cpu, Mail, Lock, ShieldAlert, Loader2, Building2 } from 'lucide-react';
 import { apiPost, apiFetch, setSessionToken } from '@/lib/api';
 
 export default function LoginPage() {
@@ -11,6 +11,12 @@ export default function LoginPage() {
  const [password, setPassword] = useState('');
  const [error, setError] = useState<string | null>(null);
  const [isLoading, setIsLoading] = useState(false);
+ // An address belongs to a person within one organisation, so on a deployment
+ // hosting several customers the same consultant can hold two accounts. The
+ // field only appears when the server says it cannot tell them apart — which
+ // needs the same password in both places, and never happens to anyone else.
+ const [tenant, setTenant] = useState('');
+ const [needsTenant, setNeedsTenant] = useState(false);
 
  React.useEffect(() => {
  const params = new URLSearchParams(window.location.search);
@@ -42,7 +48,11 @@ export default function LoginPage() {
  setError(null);
 
  try {
- const data = await apiPost('/auth/login', { email, password });
+ const data = await apiPost('/auth/login', {
+ email,
+ password,
+ ...(tenant.trim() ? { tenant: tenant.trim() } : {}),
+ });
 
  // The server set httpOnly session cookies on this response. Only the
  // non-sensitive user profile is persisted, so there is nothing in
@@ -53,6 +63,11 @@ export default function LoginPage() {
  // Redirect to main command center
  router.push('/app');
  } catch (err: any) {
+ // 409: the address signs in to more than one organisation. The message names
+ // them, so the field below is all that is missing.
+ if (err?.status === 409) {
+ setNeedsTenant(true);
+ }
  setError(err.message || 'Login failed. Please check your credentials.');
  } finally {
  setIsLoading(false);
@@ -142,6 +157,25 @@ export default function LoginPage() {
  />
  </div>
  </div>
+
+ {/* Organisation — only shown once the server asks for it */}
+ {needsTenant && (
+ <div className="space-y-1.5">
+ <label className="text-[11px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider block">Organization</label>
+ <div className="relative flex items-center">
+ <Building2 size={15} className="absolute left-3 text-[var(--text-muted)] pointer-events-none" />
+ <input
+ type="text"
+ required
+ autoFocus
+ value={tenant}
+ onChange={(e) => setTenant(e.target.value)}
+ placeholder="Acme Corp"
+ className="w-full h-10 bg-[var(--bg-input)] border border-[var(--border)] rounded pl-10 pr-4 text-[13px] text-[var(--text-primary)] placeholder-[var(--text-dimmed)] outline-none transition-all focus:border-[var(--primary)]/50 focus:ring-1 focus:ring-[var(--primary)]/20"
+ />
+ </div>
+ </div>
+ )}
 
  {/* Submit Action */}
  <button

@@ -188,6 +188,10 @@ class DockerFetchRequest(BaseModel):
 class UserLogin(BaseModel):
     email: str
     password: str
+    # Only needed when one address and password authenticate in more than one
+    # organisation — a consultant working for two customers on the same
+    # deployment. Everyone else omits it and nothing about signing in changes.
+    tenant: str | None = None
 
 
 class UserResponse(BaseModel):
