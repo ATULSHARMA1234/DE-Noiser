@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import sys
 import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -41,10 +42,6 @@ from denoiser.preprocessing.deduplication import Deduplicator
 from denoiser.preprocessing.normalization import Normalizer
 from denoiser.preprocessing.redaction import Redactor
 from denoiser.reporting.formatters import Reporter
-from denoiser.storage.database import init_db, save_analysis
-
-# Initialize the persistent database
-init_db()
 
 app = typer.Typer(
     name="semantic-log",
@@ -55,6 +52,59 @@ app = typer.Typer(
 
 console = Console(stderr=True)
 logger = get_logger("cli")
+
+
+def _record_cli_run(source, started_at, deduper, clusters, anomalies, llm_payload) -> None:
+    """Write one terminal run into the platform's run history.
+
+    Best-effort: a terminal user asked for an analysis, and they have already
+    been shown it by the time this runs. Failing to file the history is worth a
+    warning, not a non-zero exit — but it is worth *filing*, which the CLI's
+    private database never achieved because nothing queried it.
+    """
+    from denoiser.storage.db import SessionLocal, init_db
+    from denoiser.storage.runs import format_clusters, record_intelligence, record_run
+
+    try:
+        init_db()
+        db = SessionLocal()
+    except Exception as e:  # pragma: no cover - depends on the local database
+        logger.warning(f"Could not open the run history; this run was not recorded: {e}")
+        return
+
+    try:
+        snapshot = format_clusters(
+            clusters,
+            anomalies,
+            (llm_payload or {}).get("cluster_summaries", []),
+        )
+        run_id = f"cli_{uuid.uuid4().hex[:8]}"
+        record_run(
+            db,
+            run_id=run_id,
+            tenant_id=None,
+            source=source,
+            raw_lines=deduper.total_count,
+            clusters_snapshot=snapshot,
+            duration_sec=time.time() - started_at,
+        )
+        if llm_payload:
+            record_intelligence(
+                db,
+                run_id=run_id,
+                tenant_id=None,
+                source=source,
+                raw_lines=deduper.total_count,
+                cluster_count=len(snapshot),
+                clusters_snapshot=snapshot,
+                intelligence=llm_payload,
+            )
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.warning(f"Could not record this run in the history: {e}")
+    finally:
+        db.close()
 
 
 # ── analyze ──────────────────────────────────────────────────────────────────
@@ -126,6 +176,8 @@ def analyze(
     # Override config if intelligence flag passed
     if intelligence:
         settings.llm_enabled = True
+
+    started_at = time.time()
 
     # 2. Ingestion
     if source == "-":
@@ -242,8 +294,12 @@ def analyze(
         )
         notifier.notify(slack_report)
 
-    # 10. Exit logic
-    save_analysis(source, deduper.total_count, llm_payload or {}, clusters, anomalies)
+    # 10. Persist the run
+    #
+    # Into `AnalysisRun` — the same history the API serves — rather than the
+    # separate `data/cli_history.db` this used to write, which nothing ever read
+    # back. A terminal run has no organisation, so it lands unassigned.
+    _record_cli_run(source, started_at, deduper, clusters, anomalies, llm_payload)
 
     if fail_on_anomaly and max_severity:
         fail_level = AnomalyLabel(fail_on_anomaly.lower())

@@ -4,6 +4,8 @@ API middleware for SemanticOS enterprise hardening.
 Task 1: Correlation ID middleware — attaches a unique request_id to every request.
 Task 3: Global exception handler — catches unhandled errors and returns clean JSON.
 Task 4: Rate limiting — prevents abuse of the /ingest endpoint.
+Task 5: Tenant quotas — a per-tenant ceiling across the whole API, so one
+        workspace cannot exhaust the platform for every other workspace.
 """
 
 from __future__ import annotations
@@ -14,10 +16,12 @@ import time
 import uuid
 from collections.abc import Callable
 from contextvars import ContextVar
+from typing import Any
 
 import redis.asyncio as redis_asyncio
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import BaseHTTPMiddleware
 
 # ── Task 1: Correlation ID Context ──────────────────────────────────────────
@@ -26,6 +30,90 @@ from starlette.middleware.base import BaseHTTPMiddleware
 request_id_ctx: ContextVar[str] = ContextVar("request_id", default="no-request")
 
 logger = logging.getLogger("denoiser.api")
+
+
+#: Sent on every response. Values are fixed rather than configurable because a
+#: security header that can be weakened per deployment mostly gets weakened.
+#:
+#: `Content-Security-Policy` is deliberately absent here — it is assembled in
+#: `SecurityHeadersMiddleware` because it has a report-only mode and the others
+#: do not.
+_SECURITY_HEADERS = {
+    # A year, subdomains included. The API is credentialed; a single plaintext
+    # request is enough to strip a session cookie in transit.
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+    # Log content is echoed back in error bodies and query results. Without
+    # this, a browser may sniff a JSON response containing attacker-chosen text
+    # as HTML and execute it.
+    "X-Content-Type-Options": "nosniff",
+    # The dashboard and the API share an origin behind the proxy, so a framed
+    # dashboard is a clickjack onto real ADMIN actions — deleting a user,
+    # running a runbook. Neither has a legitimate reason to be embedded.
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    # Nothing here uses the camera, microphone or location, and saying so keeps
+    # an injected script from asking on our behalf.
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
+}
+
+#: Next.js needs inline styles, and inline scripts unless nonces are threaded
+#: through the app. `connect-src 'self'` keeps an injected script from posting
+#: what it reads to somewhere else, which is the control that matters most for a
+#: console displaying customer log content.
+_CONTENT_SECURITY_POLICY = "; ".join([
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "font-src 'self' data:",
+    "connect-src 'self'",
+    "frame-ancestors 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "object-src 'none'",
+])
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Attach the standard security response headers.
+
+    There were none — not in the application, not in `nginx.conf`, not in the
+    `Caddyfile` — on an API that authenticates with cookies and serves a
+    dashboard from the same origin. These are the headers an enterprise buyer
+    checks with a single curl before they read anything else.
+
+    The policy starts in report-only mode. An enforcing CSP that nobody has
+    watched reports for breaks the console on the day it ships, and a broken
+    console gets the header removed rather than fixed. Set
+    ``CONTENT_SECURITY_POLICY_ENFORCE=1`` once the reports are clean; the
+    intent is that this becomes the default and the flag disappears.
+    """
+
+    def __init__(self, app, *, enforce_csp: bool | None = None) -> None:
+        super().__init__(app)
+        self.enforce_csp = (
+            os.getenv("CONTENT_SECURITY_POLICY_ENFORCE", "").lower() in ("1", "true", "yes")
+            if enforce_csp is None
+            else enforce_csp
+        )
+
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        response = await call_next(request)
+
+        for header, value in _SECURITY_HEADERS.items():
+            # setdefault semantics: a route that has deliberately set its own
+            # (an embeddable status badge, say) keeps it.
+            if header not in response.headers:
+                response.headers[header] = value
+
+        csp_header = (
+            "Content-Security-Policy" if self.enforce_csp
+            else "Content-Security-Policy-Report-Only"
+        )
+        if csp_header not in response.headers:
+            response.headers[csp_header] = _CONTENT_SECURITY_POLICY
+
+        return response
 
 
 class CorrelationIDMiddleware(BaseHTTPMiddleware):
@@ -39,6 +127,13 @@ class CorrelationIDMiddleware(BaseHTTPMiddleware):
         # Use client-provided ID if present, otherwise generate one
         rid = request.headers.get("X-Request-ID", str(uuid.uuid4())[:12])
         request_id_ctx.set(rid)
+        # Also stamped on request.state. BaseHTTPMiddleware runs the downstream
+        # app in a separate task, so a ContextVar set here is not guaranteed to
+        # be visible to the exception handlers — which is why every 500 used to
+        # come back with "request_id": "no-request", leaving a customer-reported
+        # error with no way to find the matching server log. request.state is
+        # the same object throughout, so it always resolves.
+        request.state.request_id = rid
 
         start = time.perf_counter()
         response = await call_next(request)
@@ -58,12 +153,94 @@ class CorrelationIDMiddleware(BaseHTTPMiddleware):
 
 # ── Task 3: Global Exception Handler ────────────────────────────────────────
 
+def _cors_headers(request: Request) -> dict[str, str]:
+    """CORS headers for an error response, when the origin is allowlisted.
+
+    An unhandled exception is turned into a response *above* CORSMiddleware in
+    the stack, so it goes out with no CORS headers at all. The browser then
+    reports "blocked by CORS policy" and the real status is invisible — a 500
+    looks like a misconfigured API, and the actual bug stays hidden. Echoing the
+    allowlisted origin here keeps errors legible in the UI without widening what
+    is allowed.
+    """
+    origin = request.headers.get("origin")
+    if not origin:
+        return {}
+    from denoiser.settings import get_settings
+
+    allowed = get_settings().cors_origin_list
+    if origin.rstrip("/") not in [o.rstrip("/") for o in allowed]:
+        return {}
+    return {
+        "Access-Control-Allow-Origin": origin,
+        "Access-Control-Allow-Credentials": "true",
+        "Vary": "Origin",
+    }
+
+
+def _resolve_request_id(request: Request) -> str:
+    """The correlation id for this request, preferring the per-request value.
+
+    Falls back to the ContextVar, then to a literal, so a handler invoked
+    outside a request scope still returns something printable.
+    """
+    rid = getattr(request.state, "request_id", None)
+    if rid:
+        return str(rid)
+    return request_id_ctx.get("no-request")
+
+
+#: Largest request body accepted on any route. Log shippers post batches, not
+#: gigabytes; without a ceiling a single request can be read into memory until
+#: the process dies. Uploads have their own, larger, streamed limit.
+MAX_REQUEST_BODY_BYTES = int(os.getenv("SEMANTICOS_MAX_BODY_BYTES", str(32 * 1024 * 1024)))
+
+#: Paths exempt from the body cap because they stream to disk with their own
+#: limit rather than buffering.
+_BODY_LIMIT_EXEMPT = ("/sources/upload",)
+
+
+class BodySizeLimitMiddleware(BaseHTTPMiddleware):
+    """Reject oversized request bodies with 413 before they are buffered.
+
+    Checks Content-Length, which every real client sends. A chunked request
+    without one is passed through: the per-route validators (ingest batch size,
+    upload streaming cap) bound those.
+    """
+
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        if request.url.path in _BODY_LIMIT_EXEMPT:
+            return await call_next(request)
+
+        content_length = request.headers.get("content-length")
+        if content_length:
+            try:
+                declared = int(content_length)
+            except ValueError:
+                declared = 0
+            if declared > MAX_REQUEST_BODY_BYTES:
+                return JSONResponse(
+                    status_code=413,
+                    content={
+                        "error": "Request body too large",
+                        "detail": (
+                            f"Body of {declared} bytes exceeds the "
+                            f"{MAX_REQUEST_BODY_BYTES} byte limit"
+                        ),
+                        "request_id": _resolve_request_id(request),
+                    },
+                    headers=_cors_headers(request),
+                )
+
+        return await call_next(request)
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     """Register global exception handlers that return clean JSON errors."""
 
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-        rid = request_id_ctx.get("no-request")
+        rid = _resolve_request_id(request)
         logger.error(
             "[%s] Unhandled exception on %s %s: %s",
             rid, request.method, request.url.path, str(exc),
@@ -76,11 +253,12 @@ def register_exception_handlers(app: FastAPI) -> None:
                 "detail": str(exc) if logger.isEnabledFor(logging.DEBUG) else "An unexpected error occurred",
                 "request_id": rid,
             },
+            headers=_cors_headers(request),
         )
 
     @app.exception_handler(ValueError)
     async def value_error_handler(request: Request, exc: ValueError) -> JSONResponse:
-        rid = request_id_ctx.get("no-request")
+        rid = _resolve_request_id(request)
         return JSONResponse(
             status_code=422,
             content={
@@ -88,7 +266,72 @@ def register_exception_handlers(app: FastAPI) -> None:
                 "detail": str(exc),
                 "request_id": rid,
             },
+            headers=_cors_headers(request),
         )
+
+
+# ── Sliding window counter (shared by the IP limiter and tenant quotas) ─────
+
+class SlidingWindowCounter:
+    """Counts hits per key over a sliding window.
+
+    Redis-backed so the window is shared across API replicas; falls back to a
+    process-local dict when Redis is unreachable, which degrades the limit to
+    per-replica rather than dropping it entirely.
+    """
+
+    def __init__(self, redis, window_seconds: int, max_tracked_keys: int = 10_000):
+        self.redis = redis
+        self.window_seconds = window_seconds
+        self.max_tracked_keys = max_tracked_keys
+        self._hits: dict[str, list[float]] = {}
+
+    async def hit(self, key: str, now: float) -> tuple[int, bool]:
+        """Record a hit and return ``(hits_in_window_including_this_one, used_fallback)``."""
+        cutoff = now - self.window_seconds
+        try:
+            async with self.redis.pipeline(transaction=True) as pipe:
+                # Add current request using timestamp as score and value
+                pipe.zadd(key, {str(now): now})
+                # Remove elements older than the cutoff window
+                pipe.zremrangebyscore(key, 0, cutoff)
+                # Count current requests in this sliding window
+                pipe.zcard(key)
+                # Set dynamic TTL on the sliding window
+                pipe.expire(key, self.window_seconds)
+
+                results = await pipe.execute()
+            return int(results[2]), False
+        except Exception as e:
+            logger.warning(f"Redis rate limiter failed, falling back to in-memory: {e}")
+
+        # Bound memory: drop keys whose entire window has expired. Without this,
+        # every key ever seen while Redis was down lingers forever.
+        if len(self._hits) > self.max_tracked_keys:
+            self._hits = {
+                k: recent
+                for k, ts in self._hits.items()
+                if (recent := [t for t in ts if t > cutoff])
+            }
+
+        recent = [t for t in self._hits.get(key, []) if t > cutoff]
+        recent.append(now)
+        self._hits[key] = recent
+        return len(recent), True
+
+
+def _limit_exceeded_response(detail: str, retry_after: int, limit: int, window: int) -> JSONResponse:
+    rid = request_id_ctx.get("no-request")
+    return JSONResponse(
+        status_code=429,
+        content={"error": "Rate limit exceeded", "detail": detail, "request_id": rid},
+        headers={
+            "Retry-After": str(retry_after),
+            "X-RateLimit-Limit": str(limit),
+            "X-RateLimit-Remaining": "0",
+            "X-RateLimit-Window": str(window),
+        },
+    )
 
 
 # ── Task 4: Simple Rate Limiter ─────────────────────────────────────────────
@@ -103,71 +346,325 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self.max_requests = max_requests
         self.window_seconds = window_seconds
-        self._requests: dict[str, list[float]] = {}
         redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
         self.redis = redis_asyncio.from_url(redis_url, decode_responses=True)
+        self._window = SlidingWindowCounter(self.redis, window_seconds)
+
+    @property
+    def _requests(self) -> dict[str, list[float]]:
+        """Back-compat view of the in-memory fallback buckets."""
+        return self._window._hits
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         # Only rate-limit the /ingest endpoint
         if request.url.path != "/ingest":
             return await call_next(request)
 
-        client_ip = request.client.host if request.client else "unknown"
+        # `self.redis` may be replaced after construction (tests, reconfiguration).
+        self._window.redis = self.redis
+
+        # Prefer the proxy-set X-Forwarded-For client hop. Behind Caddy/nginx
+        # request.client.host is the proxy, so without this every client shares
+        # a single bucket and one abuser rate-limits everyone. (Trusts the first
+        # XFF hop; correct behind exactly one trusted proxy.)
+        xff = request.headers.get("x-forwarded-for", "")
+        if xff:
+            client_ip = xff.split(",")[0].strip()
+        else:
+            client_ip = request.client.host if request.client else "unknown"
         now = time.time()
-        cutoff = now - self.window_seconds
+        count, used_fallback = await self._window.hit(f"rate_limit:{client_ip}", now)
 
-        use_fallback = False
-        try:
-            key = f"rate_limit:{client_ip}"
-            async with self.redis.pipeline(transaction=True) as pipe:
-                # Add current request using timestamp as score and value
-                pipe.zadd(key, {str(now): now})
-                # Remove elements older than the cutoff window
-                pipe.zremrangebyscore(key, 0, cutoff)
-                # Count current requests in this sliding window
-                pipe.zcard(key)
-                # Set dynamic TTL on the sliding window
-                pipe.expire(key, self.window_seconds)
-                
-                results = await pipe.execute()
-                recent_requests_count = results[2]
+        if count > self.max_requests:
+            rid = request_id_ctx.get("no-request")
+            logger.warning(
+                "[%s] %s rate limit exceeded for IP %s on /ingest",
+                rid, "In-memory" if used_fallback else "Redis", client_ip,
+            )
+            return _limit_exceeded_response(
+                f"Maximum {self.max_requests} requests per {self.window_seconds}s",
+                retry_after=self.window_seconds,
+                limit=self.max_requests,
+                window=self.window_seconds,
+            )
 
-            if recent_requests_count > self.max_requests:
-                rid = request_id_ctx.get("no-request")
-                logger.warning("[%s] Redis rate limit exceeded for IP %s on /ingest", rid, client_ip)
-                return JSONResponse(
-                    status_code=429,
-                    content={
-                        "error": "Rate limit exceeded",
-                        "detail": f"Maximum {self.max_requests} requests per {self.window_seconds}s",
-                        "request_id": rid,
-                    },
-                )
-        except Exception as e:
-            logger.warning(f"Redis rate limiter failed, falling back to in-memory: {e}")
-            use_fallback = True
+        return await call_next(request)
 
-        if use_fallback:
-            # Clean old entries and count recent ones locally
-            if client_ip not in self._requests:
-                self._requests[client_ip] = []
 
-            self._requests[client_ip] = [
-                t for t in self._requests[client_ip] if t > cutoff
-            ]
+# ── Task 5: Per-tenant API quota ────────────────────────────────────────────
 
-            if len(self._requests[client_ip]) >= self.max_requests:
-                rid = request_id_ctx.get("no-request")
-                logger.warning("[%s] In-memory rate limit exceeded for IP %s on /ingest", rid, client_ip)
-                return JSONResponse(
-                    status_code=429,
-                    content={
-                        "error": "Rate limit exceeded",
-                        "detail": f"Maximum {self.max_requests} requests per {self.window_seconds}s",
-                        "request_id": rid,
-                    },
-                )
+# Tenant tiers and their default request ceilings per window. A per-IP limit
+# does not bound a tenant: one workspace with a hundred pods ingesting from a
+# hundred IPs is a hundred separate buckets. The quota below is keyed on the
+# tenant itself, so a noisy or compromised workspace degrades only its own
+# service.
+DEFAULT_TENANT_QUOTAS: dict[str, int] = {
+    "free": 600,
+    "pro": 6_000,
+    "enterprise": 60_000,
+}
 
-            self._requests[client_ip].append(now)
+# Paths that must stay reachable even for a tenant that is over quota:
+# liveness/readiness probes, the Prometheus scrape endpoint and the auth routes
+# (which carry their own brute-force throttle) — a 429 there would lock an
+# operator out of the workspace they are trying to fix, and would blind
+# monitoring at the exact moment it matters.
+#
+# These are the routes the app actually serves; see test_quota_exempt_paths_exist,
+# which fails if a path here stops existing. An exemption for a route that does
+# not exist protects nothing, and the probes it was meant to cover
+# (/health/live, /health/ready) and the scrape endpoint (/internal/metrics) were
+# not on the list.
+QUOTA_EXEMPT_PATHS = frozenset({
+    "/", "/health", "/health/live", "/health/ready", "/internal/metrics",
+    "/docs", "/redoc", "/openapi.json",
+    "/auth/login", "/auth/refresh", "/auth/logout",
+})
+
+
+class _TTLCache:
+    """Tiny TTL cache so tenant resolution costs one query per key per period."""
+
+    def __init__(self, ttl_seconds: float = 60.0, max_entries: int = 5_000):
+        self.ttl = ttl_seconds
+        self.max_entries = max_entries
+        self._entries: dict[str, tuple[float, Any]] = {}
+
+    def get(self, key: str, now: float) -> Any | None:
+        entry = self._entries.get(key)
+        if entry is None or entry[0] <= now:
+            return None
+        return entry[1]
+
+    def set(self, key: str, value: Any, now: float) -> None:
+        if len(self._entries) >= self.max_entries:
+            self._entries = {k: v for k, v in self._entries.items() if v[0] > now}
+            if len(self._entries) >= self.max_entries:
+                self._entries.clear()
+        self._entries[key] = (now + self.ttl, value)
+
+
+class TenantQuotaMiddleware(BaseHTTPMiddleware):
+    """Sliding-window request quota applied per tenant across the whole API.
+
+    The tenant is resolved from whichever credential the request carries — the
+    ``X-API-Key`` of a tenant, or the subject of a Bearer JWT — and the ceiling
+    comes from that tenant's tier. Requests that carry no resolvable tenant are
+    passed through: they are either unauthenticated (and will be rejected by the
+    route's own dependency) or covered by the per-IP limiter.
+
+    Enabled by default outside tests; set ``TENANT_QUOTA_ENABLED=false`` to turn
+    it off, or ``TENANT_QUOTA_FREE`` / ``_PRO`` / ``_ENTERPRISE`` to retune the
+    per-tier ceilings without a code change.
+    """
+
+    def __init__(
+        self,
+        app,
+        quotas: dict[str, int] | None = None,
+        window_seconds: int | None = None,
+        enabled: bool | None = None,
+    ):
+        super().__init__(app)
+        self.window_seconds = window_seconds or int(os.getenv("TENANT_QUOTA_WINDOW_SECONDS", "60"))
+        self.quotas = dict(quotas or DEFAULT_TENANT_QUOTAS)
+        if quotas is None:
+            for tier in list(self.quotas):
+                override = os.getenv(f"TENANT_QUOTA_{tier.upper()}")
+                if override and override.isdigit():
+                    self.quotas[tier] = int(override)
+        self.enabled = self._resolve_enabled(enabled)
+        redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+        self.redis = redis_asyncio.from_url(redis_url, decode_responses=True)
+        self._window = SlidingWindowCounter(self.redis, self.window_seconds)
+        self._tenants = _TTLCache()
+
+    @staticmethod
+    def _resolve_enabled(enabled: bool | None) -> bool:
+        if enabled is not None:
+            return enabled
+        explicit = os.getenv("TENANT_QUOTA_ENABLED")
+        if explicit is not None:
+            return explicit.lower() in ("1", "true", "yes")
+        from denoiser.settings import is_testing
+
+        # Off under pytest so suites that fire hundreds of requests through a
+        # single tenant are not throttled; on everywhere else.
+        return not is_testing()
+
+    def quota_for(self, tier: str | None) -> int:
+        return self.quotas.get((tier or "free").lower(), self.quotas.get("free", 600))
+
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        if not self.enabled or request.url.path in QUOTA_EXEMPT_PATHS:
+            return await call_next(request)
+
+        self._window.redis = self.redis
+        now = time.time()
+        resolved = await self._resolve_tenant(request, now)
+        if resolved is None:
+            return await call_next(request)
+
+        tenant_id, tier = resolved
+        limit = self.quota_for(tier)
+        count, used_fallback = await self._window.hit(f"tenant_quota:{tenant_id}", now)
+
+        if count > limit:
+            rid = request_id_ctx.get("no-request")
+            logger.warning(
+                "[%s] %s tenant quota exceeded for tenant %s (tier=%s) on %s",
+                rid, "In-memory" if used_fallback else "Redis", tenant_id, tier, request.url.path,
+            )
+            return _limit_exceeded_response(
+                f"Tenant quota of {limit} requests per {self.window_seconds}s exceeded "
+                f"for the '{tier}' tier",
+                retry_after=self.window_seconds,
+                limit=limit,
+                window=self.window_seconds,
+            )
+
+        response = await call_next(request)
+        response.headers["X-RateLimit-Limit"] = str(limit)
+        response.headers["X-RateLimit-Remaining"] = str(max(0, limit - count))
+        response.headers["X-RateLimit-Window"] = str(self.window_seconds)
+        return response
+
+    async def _resolve_tenant(self, request: Request, now: float) -> tuple[str, str] | None:
+        """Map the request's credential to ``(tenant_id, tier)``, or None."""
+        api_key = request.headers.get("x-api-key")
+        subject: str | None = None
+        if not api_key:
+            authorization = request.headers.get("authorization", "")
+            if not authorization.lower().startswith("bearer "):
+                return None
+            subject = _jwt_subject(authorization.split(" ", 1)[1].strip())
+            if not subject:
+                return None
+
+        cache_key = f"key:{api_key}" if api_key else f"sub:{subject}"
+        cached = self._tenants.get(cache_key, now)
+        if cached is not None:
+            return cached or None  # a cached miss is stored as False
+
+        resolved = await run_in_threadpool(_lookup_tenant, api_key, subject)
+        self._tenants.set(cache_key, resolved or False, now)
+        return resolved
+
+
+def _jwt_subject(token: str) -> str | None:
+    """Read the identity from a JWT without hitting the database.
+
+    Signature verification is the route dependency's job — this only needs a
+    stable bucket key, and an unverifiable token gets rejected downstream
+    anyway. Claims from it are never treated as authorisation.
+
+    Returns ``"<tenant>/<email>"`` when the token names an organisation. An
+    address alone stopped identifying one account when uniqueness became
+    per-tenant, so without the prefix two people sharing an address at two
+    customers would share one quota bucket — and the lookup below would resolve
+    whichever row came back first.
+    """
+    try:
+        from jose import jwt
+
+        claims = jwt.get_unverified_claims(token)
+    except Exception:
+        return None
+    sub = claims.get("sub")
+    if not sub:
+        return None
+    tid = claims.get("tid")
+    return f"{tid}/{sub}" if tid is not None else str(sub)
+
+
+def _lookup_tenant(api_key: str | None, subject: str | None) -> tuple[str, str] | None:
+    """Blocking tenant lookup, run in a worker thread."""
+    from denoiser.storage.db import SessionLocal, Tenant, User
+
+    db = SessionLocal()
+    try:
+        tenant = None
+        if api_key:
+            from denoiser.api.credentials import matches_static_secret, tenant_for_api_key
+
+            # Honours a key mid-rotation, so a shipper still on the superseded
+            # key is billed to its own tenant's quota rather than escaping it.
+            tenant = tenant_for_api_key(db, api_key)
+            # Static ingest key (unattended shippers) maps to the first tenant,
+            # matching verify_ingest_auth.
+            if tenant is None and matches_static_secret(api_key, "INGEST_API_KEY"):
+                tenant = db.query(Tenant).order_by(Tenant.id).first()
+        elif subject:
+            # `_jwt_subject` hands back "<tenant>/<email>" when the token says
+            # which organisation it was issued for; the tenant is then all this
+            # needs, and the user row is only consulted for the tokens that
+            # predate the claim.
+            tid, _, email = subject.partition("/")
+            if not tid.isdigit():
+                tid, email = "", subject
+            if tid:
+                tenant = db.query(Tenant).filter(Tenant.id == int(tid)).first()
+                return (tid, (tenant.tier if tenant else "free") or "free")
+            user = db.query(User).filter(User.email == email).first()
+            if user is not None and user.tenant_id is not None:
+                tenant = db.query(Tenant).filter(Tenant.id == user.tenant_id).first()
+                if tenant is None:
+                    # A tenant row can be absent on legacy installs; still bucket
+                    # the user's workspace rather than leaving it unbounded.
+                    return (str(user.tenant_id), "free")
+        if tenant is None:
+            return None
+        return (str(tenant.id), (tenant.tier or "free"))
+    except Exception as e:
+        logger.warning("Tenant quota lookup failed, request not counted: %s", e)
+        return None
+    finally:
+        db.close()
+
+
+class CSRFMiddleware(BaseHTTPMiddleware):
+    """Reject cookie-authenticated state changes that lack a CSRF token.
+
+    Only applies when the request authenticated by cookie *and* carries no
+    ``Authorization`` header. A browser attaches cookies to cross-site requests
+    automatically but never attaches an Authorization header, so bearer-token
+    clients — the CLI, log shippers, CI — are not exposed to CSRF and are not
+    burdened by the check.
+    """
+
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        from denoiser.api.cookies import (
+            ACCESS_COOKIE,
+            CSRF_EXEMPT_PATHS,
+            UNSAFE_METHODS,
+            csrf_is_valid,
+        )
+
+        if request.method not in UNSAFE_METHODS:
+            return await call_next(request)
+        if request.url.path in CSRF_EXEMPT_PATHS:
+            return await call_next(request)
+        if request.headers.get("authorization"):
+            return await call_next(request)
+        if request.headers.get("x-api-key"):
+            return await call_next(request)
+        if ACCESS_COOKIE not in request.cookies:
+            # Unauthenticated, or authenticated some other way; the route's own
+            # dependency decides. Nothing to forge.
+            return await call_next(request)
+
+        if not csrf_is_valid(request):
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "error": "CSRF validation failed",
+                    "detail": (
+                        "This request changed state using a cookie session but did "
+                        "not present a matching CSRF token."
+                    ),
+                    "request_id": _resolve_request_id(request),
+                },
+                headers=_cors_headers(request),
+            )
 
         return await call_next(request)

@@ -20,3 +20,10 @@ Modules
 
 __version__ = "0.1.0"
 __app_name__ = "semantic-log-denoiser"
+
+# Export .env before anything reads os.getenv, so a checkout-local run reaches
+# the same datastores as a compose deployment. Real environment variables win;
+# under pytest this is a no-op. See denoiser.settings.load_dotenv_into_environ.
+from denoiser.settings import load_dotenv_into_environ as _load_dotenv
+
+_load_dotenv()

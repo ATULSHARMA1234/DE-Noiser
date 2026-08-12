@@ -74,7 +74,7 @@ class LogClusterer:
             raise ClusteringError("Mismatch between templates and vectors.")
 
         n_samples = vectors.shape[0]
-        print(f"\n[NEURAL ENGINE] Analysis of {n_samples} unique semantic patterns starting...")
+        logger.info("Clustering %d unique semantic patterns", n_samples)
 
         if n_samples < 2:
             logger.info("Single template detected. Returning single cluster.")
@@ -84,18 +84,65 @@ class LogClusterer:
         else:
             labels = self._hdbscan_cluster(vectors, n_samples)
 
-        try:
-            import umap
-            logger.info("Computing UMAP 2D projections for Neural Topology...")
-            reducer = umap.UMAP(n_components=2, n_neighbors=15, min_dist=0.1, random_state=42)
-            projections = reducer.fit_transform(vectors)
-        except Exception as e:
-            logger.warning(f"Failed to compute UMAP projections: {e}")
-            projections = np.zeros((n_samples, 2))
+        projections = self._project_2d(vectors, n_samples)
 
         return self._build_clusters(
             labels, unique_templates, vectors, template_to_records, template_to_counts, projections
         )
+
+    # ------------------------------------------------------------------
+    # 2D projection (the "Neural Topology" scatter)
+    # ------------------------------------------------------------------
+
+    def _project_2d(self, vectors: np.ndarray, n_samples: int) -> np.ndarray:
+        """Project embeddings to 2D for the topology chart.
+
+        UMAP needs a neighbourhood to build a manifold from, and on a handful of
+        templates it either raises or disconnects every vertex — the old code
+        caught that and returned ``np.zeros``, so every point landed on the
+        origin and the chart showed one dot no matter how the logs clustered.
+
+        So the projector now picks a method the data can actually support: UMAP
+        once there are enough neighbours, PCA below that (a real linear
+        projection of the same embeddings, just without manifold structure), and
+        the origin only for a single template, where a 2D layout is meaningless.
+        """
+        if n_samples < 2:
+            return np.zeros((n_samples, 2))
+
+        # UMAP's n_neighbors must be < n_samples; below ~5 points the manifold
+        # estimate is meaningless anyway, so PCA is the honest choice.
+        if n_samples >= 5:
+            try:
+                import umap
+
+                neighbours = min(15, n_samples - 1)
+                logger.info(
+                    "Computing UMAP 2D projections for Neural Topology (n=%d, n_neighbors=%d)",
+                    n_samples, neighbours,
+                )
+                reducer = umap.UMAP(
+                    n_components=2, n_neighbors=neighbours, min_dist=0.1, random_state=42
+                )
+                projections = np.asarray(reducer.fit_transform(vectors), dtype=float)
+                if np.isfinite(projections).all() and not np.allclose(projections, projections[0]):
+                    return projections
+                logger.warning("UMAP returned a degenerate projection; falling back to PCA")
+            except Exception as e:
+                logger.warning(f"UMAP projection failed ({e}); falling back to PCA")
+
+        try:
+            from sklearn.decomposition import PCA
+
+            logger.info("Computing PCA 2D projections for Neural Topology (n=%d)", n_samples)
+            components = PCA(n_components=min(2, n_samples, vectors.shape[1]), random_state=42)
+            reduced = np.asarray(components.fit_transform(vectors), dtype=float)
+            if reduced.shape[1] == 1:  # only one component available
+                reduced = np.hstack([reduced, np.zeros((n_samples, 1))])
+            return reduced
+        except Exception as e:
+            logger.warning(f"PCA projection failed ({e}); topology chart will have no coordinates")
+            return np.zeros((n_samples, 2))
 
     # ------------------------------------------------------------------
     # Clustering strategies

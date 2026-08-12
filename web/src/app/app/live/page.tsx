@@ -41,9 +41,10 @@ export default function LivePulsePage() {
  return;
  }
 
- const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
- const url = token ? `${WS_BASE}/stream?token=${encodeURIComponent(token)}` : `${WS_BASE}/stream`;
- const ws = new WebSocket(url);
+ // No token in the URL: the session cookie is sent with the handshake, and
+ // the server reads it from there. A token in a query string ends up in proxy
+ // and access logs, which is why it is not put there even when available.
+ const ws = new WebSocket(`${WS_BASE}/stream`);
  wsRef.current = ws;
 
  ws.onopen = () => {

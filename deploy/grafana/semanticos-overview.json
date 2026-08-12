@@ -1,0 +1,315 @@
+{
+  "__comment": "SemanticOS platform health. The product computes SLOs and error budgets for the customer's services; this is the one for the platform itself, which it did not have. Import into Grafana and select your Prometheus datasource. The scrape must present METRICS_TOKEN — see docs/operations.md.",
+  "title": "SemanticOS — Platform Health",
+  "uid": "semanticos-overview",
+  "tags": ["semanticos", "platform"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {},
+        "hide": 0,
+        "label": "Datasource"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "row",
+      "title": "Data loss — check this first",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false
+    },
+    {
+      "type": "stat",
+      "title": "Records dead-lettered (24h)",
+      "description": "Log lines the ingestion pipeline could not write. They were accepted with a 200 and will never be queryable. Anything above zero is silent data loss.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 1 },
+      "targets": [
+        {
+          "expr": "increase(semanticos_ingestion_dead_lettered_total[24h])",
+          "legendFormat": "dead-lettered",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Ingestion consumer",
+      "description": "/ingest returns 200 as soon as a record reaches Kafka. If the consumer is down, writes succeed and nothing becomes queryable.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 1 },
+      "targets": [
+        { "expr": "semanticos_ingestion_consumer_up", "legendFormat": "up", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "DOWN", "color": "red", "index": 0 },
+                "1": { "text": "UP", "color": "green", "index": 1 }
+              }
+            }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "text", "value": null }] }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Consumer backlog",
+      "description": "Uncommitted records behind the log head. A large number during a replay is fine; a number that keeps climbing is not.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 1 },
+      "targets": [
+        { "expr": "semanticos_ingestion_consumer_lag", "legendFormat": "lag", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "fillOpacity": 10, "lineWidth": 2 },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 100000 },
+              { "color": "red", "value": 500000 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "row",
+      "title": "Availability SLO — 99.9% over 30 days",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 7 },
+      "collapsed": false
+    },
+    {
+      "type": "stat",
+      "title": "30-day availability",
+      "description": "Objective: 99.9%. That is roughly 43 minutes of unavailability per 30 days.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "expr": "1 - (sum(increase(semanticos_http_requests_total{status=~\"5..\"}[30d])) / clamp_min(sum(increase(semanticos_http_requests_total[30d])), 1))",
+          "legendFormat": "availability",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 3,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 0.999 },
+              { "color": "green", "value": 0.9995 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      }
+    },
+    {
+      "type": "gauge",
+      "title": "Error budget remaining",
+      "description": "Fraction of the 30-day budget left. At zero the objective is missed for the period; the response is to stop shipping features, not to change the objective.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 8 },
+      "targets": [
+        {
+          "expr": "clamp_min(1 - ((sum(increase(semanticos_http_requests_total{status=~\"5..\"}[30d])) / clamp_min(sum(increase(semanticos_http_requests_total[30d])), 1)) / 0.001), 0)",
+          "legendFormat": "budget left",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 0.25 },
+              { "color": "green", "value": 0.5 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Error budget burn rate",
+      "description": "Multiples of the sustainable rate. Above 14.4x the whole month's budget is gone in two days; above 6x, in five.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        {
+          "expr": "(sum(rate(semanticos_http_requests_total{status=~\"5..\"}[1h])) / clamp_min(sum(rate(semanticos_http_requests_total[1h])), 0.001)) / 0.001",
+          "legendFormat": "1h burn",
+          "refId": "A"
+        },
+        {
+          "expr": "(sum(rate(semanticos_http_requests_total{status=~\"5..\"}[6h])) / clamp_min(sum(rate(semanticos_http_requests_total[6h])), 0.001)) / 0.001",
+          "legendFormat": "6h burn",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "fillOpacity": 5, "lineWidth": 2 },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 6 },
+              { "color": "red", "value": 14.4 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "row",
+      "title": "Traffic and latency",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 },
+      "collapsed": false
+    },
+    {
+      "type": "timeseries",
+      "title": "Request rate by status",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 15 },
+      "targets": [
+        {
+          "expr": "sum by (status) (rate(semanticos_http_requests_total[5m]))",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "custom": { "fillOpacity": 15, "lineWidth": 1, "stacking": { "mode": "normal" } } },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Latency percentiles",
+      "description": "Whole-request, measured outside every other middleware.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 15 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(semanticos_http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(semanticos_http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(semanticos_http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "s", "custom": { "fillOpacity": 0, "lineWidth": 2 } },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Slowest endpoints (p95)",
+      "description": "Labelled on the route template, not the resolved path, so a million incident ids do not become a million series.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 23 },
+      "targets": [
+        {
+          "expr": "topk(10, histogram_quantile(0.95, sum by (le, path) (rate(semanticos_http_request_duration_seconds_bucket[5m]))))",
+          "legendFormat": "{{path}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "type": "timeseries",
+      "title": "Errors by endpoint",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 23 },
+      "targets": [
+        {
+          "expr": "topk(10, sum by (path) (rate(semanticos_http_requests_total{status=~\"5..\"}[5m])))",
+          "legendFormat": "{{path}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] }
+    },
+    {
+      "type": "timeseries",
+      "title": "In-flight requests",
+      "description": "A climbing floor here with flat throughput means requests are piling up — most often something blocking the event loop.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 31 },
+      "targets": [
+        {
+          "expr": "sum(semanticos_http_requests_in_progress)",
+          "legendFormat": "in flight",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    }
+  ]
+}

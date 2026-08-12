@@ -1,0 +1,35 @@
+{{- /*
+Disruption budgets for every component that serves or ingests traffic.
+
+Without a PDB, `kubectl drain` — the ordinary mechanism behind a cluster
+upgrade, a node repair or a spot reclaim — evicts pods with no regard for how
+many of a component are left. With the chart's previous default of one API
+replica, a routine node drain was a guaranteed outage rather than a risk.
+
+minAvailable is used rather than maxUnavailable so the guarantee is expressed
+in terms of what keeps serving, which is what the budget is actually for. A
+component whose budget is set to 0 is opting out deliberately (see the analysis
+worker in values.yaml).
+*/}}
+{{- if .Values.podDisruptionBudget.enabled }}
+{{- range $component := (list "api" "web" "ingestion" "syslog" "worker") }}
+{{- $budget := index $.Values.podDisruptionBudget $component }}
+{{- if and $budget (gt (int $budget.minAvailable) 0) }}
+{{- if or (ne $component "syslog") $.Values.syslog.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "semanticos.fullname" $ }}-{{ $component }}
+  labels:
+    {{- include "semanticos.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $component }}
+spec:
+  minAvailable: {{ $budget.minAvailable }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "semanticos.name" $ }}-{{ $component }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

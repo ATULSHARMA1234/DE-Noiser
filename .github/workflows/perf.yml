@@ -1,0 +1,178 @@
+name: Performance
+
+# Nightly rather than per-PR, deliberately. A load test on a shared CI runner is
+# noisy: run it on every pull request and it fails often enough to be ignored,
+# which is worse than not having it. Nightly on main, with generous tolerances,
+# catches the regression that matters — the one that halves throughput — without
+# training anyone to skip a red check.
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+    inputs:
+      reset_baseline:
+        description: "Discard the stored baseline and record this run as the new one"
+        type: boolean
+        default: false
+
+jobs:
+  ingest-throughput:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: semanticos_perf
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/semanticos_perf
+      REDIS_URL: redis://localhost:6379/0
+      SEMANTICOS_ENV: development
+      JWT_SECRET_KEY: perf-only-not-a-real-secret-key-00000
+      INGEST_API_KEY: perf-ingest-key
+      # Without this the harness measures rate limiting, not the platform. At
+      # the default 6,000/minute a 16-worker run is throttled within seconds;
+      # the first local run of this gate returned 100 successes and 5,052
+      # rate-limited responses, and nothing downstream was exercised at all.
+      INGEST_RATE_LIMIT_REQUESTS: "100000000"
+      # No Kafka or ClickHouse. The gate measures the API's own request path —
+      # parse, redact, serialise, publish — which is the part a code change can
+      # regress. Standing up the whole pipeline would measure the broker's
+      # scheduling variance and call it our latency.
+      SEMANTICOS_MAX_UPLOAD_BYTES: "10485760"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Migrate
+        run: uv run alembic upgrade head
+
+      # The baseline lives in the Actions cache, not the repository, and is
+      # keyed by runner image. A number recorded on one machine is meaningless
+      # on another — a baseline taken on a developer's laptop would fail this
+      # gate every night on a shared runner by a factor of several, and the
+      # first thing anyone would do is disable it. Keying by runner also means
+      # a runner-image upgrade re-baselines rather than reporting a fake
+      # regression.
+      - name: Restore the baseline for this runner
+        id: baseline
+        if: ${{ !inputs.reset_baseline }}
+        uses: actions/cache/restore@v4
+        with:
+          path: deploy/perf-baseline.json
+          key: perf-baseline-${{ runner.os }}-${{ runner.arch }}-v1
+
+      - name: Start the API
+        run: |
+          uv run python -m uvicorn denoiser.api.main:app \
+            --host 127.0.0.1 --port 8000 --workers 2 &
+          for _ in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:8000/health/live > /dev/null; then
+              echo "API is up"; exit 0
+            fi
+            sleep 2
+          done
+          echo "API did not become healthy in time"; exit 1
+
+      # The seeded tenant is on the `free` tier, which is 600 requests a minute.
+      # Left alone, the run measures the tenant quota rather than the platform.
+      - name: Put the seeded tenant on the enterprise tier
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -d semanticos_perf \
+            -c "UPDATE tenants SET tier='enterprise' WHERE id = (SELECT MIN(id) FROM tenants);"
+          redis-cli -h localhost FLUSHALL
+
+      # The first requests pay for imports, connection pools and cold paths.
+      # Folding that into the measurement makes every run look like a regression
+      # against a warm baseline.
+      - name: Warm up
+        run: |
+          uv run python scripts/loadtest.py \
+            --url http://127.0.0.1:8000 --api-key "$INGEST_API_KEY" \
+            --concurrency 4 --duration 10 --batch 100
+          redis-cli -h localhost FLUSHALL
+
+      - name: Load test
+        run: |
+          uv run python scripts/loadtest.py \
+            --url http://127.0.0.1:8000 --api-key "$INGEST_API_KEY" \
+            --concurrency 16 --duration 60 --batch 200 \
+            --json perf-results.json
+
+      - name: Check against the baseline
+        run: uv run python scripts/perf_gate.py --results perf-results.json
+
+      # Records one when there wasn't one — the first run on a new runner image,
+      # or after a deliberate reset. `perf_gate.py` passes when no baseline
+      # exists, so this is what actually arms the gate, with no human step to
+      # remember.
+      - name: Record the baseline if this runner has none
+        if: ${{ inputs.reset_baseline || steps.baseline.outputs.cache-hit != 'true' }}
+        run: uv run python scripts/perf_gate.py --results perf-results.json --update-baseline
+
+      - name: Store the baseline for this runner
+        if: ${{ inputs.reset_baseline || steps.baseline.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: deploy/perf-baseline.json
+          key: perf-baseline-${{ runner.os }}-${{ runner.arch }}-v1
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo "### Ingest performance"
+            echo ""
+            echo '```json'
+            cat perf-results.json 2>/dev/null || echo "(no results)"
+            echo '```'
+            echo ""
+            if [ -f deploy/perf-baseline.json ]; then
+              echo "Compared against the baseline cached for ${{ runner.os }}-${{ runner.arch }}."
+            else
+              echo "No baseline for this runner yet; this run recorded one."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the numbers
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-results
+          path: |
+            perf-results.json
+            deploy/perf-baseline.json
+          retention-days: 30

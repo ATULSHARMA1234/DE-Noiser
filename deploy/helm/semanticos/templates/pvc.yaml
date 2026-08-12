@@ -1,10 +1,17 @@
+{{- if .Values.persistence.enabled }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: {{ include "semanticos.fullname" . }}-pvc
+  labels:
+    {{- include "semanticos.labels" . | nindent 4 }}
 spec:
   accessModes:
-    - ReadWriteOnce
+    - {{ .Values.persistence.accessMode }}
+  {{- if .Values.persistence.storageClass }}
+  storageClassName: {{ .Values.persistence.storageClass | quote }}
+  {{- end }}
   resources:
     requests:
-      storage: 10Gi
+      storage: {{ .Values.persistence.size }}
+{{- end }}

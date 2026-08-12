@@ -1,40 +1,269 @@
-replicaCount: 1
-
+# ── Images ───────────────────────────────────────────────────────────────────
 image:
   apiRepository: ghcr.io/atulsharma1234/de-noiser/semanticos-api
   webRepository: ghcr.io/atulsharma1234/de-noiser/semanticos-web
-  tag: "latest"
+  # Empty means "use the chart's appVersion", which is an immutable release
+  # tag. This used to default to "latest" while the comment beside it said to
+  # pin — and the default is what actually gets deployed. A moving tag means
+  # two clusters "running the same version" can be running different code, and
+  # a rollback has nothing to roll back to.
+  #
+  # CI publishes `:<git-sha>` for every build on main; deploy one of those, or
+  # a digest, for anything you need to reproduce.
+  tag: ""
+  # Never Always: with an immutable tag it only adds a registry round-trip to
+  # every pod start, and turns a registry outage into a scheduling failure.
   pullPolicy: IfNotPresent
+imagePullSecrets: []
 
+nameOverride: ""
+fullnameOverride: ""
+
+# ── Component replicas ───────────────────────────────────────────────────────
+# The API no longer keeps request-serving state on its own filesystem: platform
+# settings live in the database, the raw-log copy goes to object storage
+# (`sharedStorage.rawLogBucket`), and uploaded sources go to
+# `sharedStorage.sourceBucket` with the local disk demoted to a cache. Two
+# replicas is therefore the default, and a rolling update no longer drops the
+# tier to zero.
+#
+# Configure sharedStorage below before scaling past one replica. Setting
+# `config.multiReplica: "1"` makes the API refuse to start without it, rather
+# than serving uploads that only one pod out of N can see.
+api:
+  replicaCount: 2
+worker:
+  replicaCount: 1
+ingestion:
+  replicaCount: 1
+web:
+  replicaCount: 2
+
+# ── Disruption budgets ───────────────────────────────────────────────────────
+# Without these a node drain — a cluster upgrade, a spot reclaim, a rebalance —
+# can evict every replica of a component at once. This is the difference
+# between routine maintenance and an outage.
+podDisruptionBudget:
+  enabled: true
+  api:
+    minAvailable: 1
+  web:
+    minAvailable: 1
+  ingestion:
+    minAvailable: 1
+  syslog:
+    minAvailable: 1
+  # The analysis worker takes a distributed lock per job occurrence, so losing
+  # it briefly delays analysis rather than dropping data. No budget by default.
+  worker:
+    minAvailable: 0
+
+# ── Autoscaling ──────────────────────────────────────────────────────────────
+# Off by default: an HPA needs metrics-server, and a chart that assumes it is
+# installed fails confusingly on clusters that do not have it.
+autoscaling:
+  api:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+  ingestion:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+  web:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 70
+
+# ── Backups ──────────────────────────────────────────────────────────────────
+# Nightly logical dump of Postgres and ClickHouse to object storage. Off by
+# default because it needs a bucket and credentials; turn it on for anything
+# holding real data. Establishes an RPO of one backup interval — tighter needs
+# WAL archiving and incremental ClickHouse snapshots (docs/operations.md).
+#
+# A backup nobody has restored is a hypothesis. Run the drill in
+# docs/operations.md and record the date and measured RTO there.
+backup:
+  enabled: false
+  schedule: "0 1 * * *"       # 01:00 UTC, before the 02:00 archival job
+  bucket: ""                  # REQUIRED when enabled
+  endpoint: ""                # set for MinIO or another S3-compatible store
+  retentionDays: 30
+  # Needs pg_dump, clickhouse-client and the aws CLI. Pin this to your own
+  # built image rather than a floating tag for anything you must reproduce.
+  image: "ghcr.io/atulsharma1234/de-noiser/semanticos-backup:1"
+  resources:
+    requests: { cpu: "100m", memory: "256Mi" }
+    limits:   { cpu: "1",    memory: "2Gi" }
+
+# ── Network segmentation ─────────────────────────────────────────────────────
+# Default-deny ingress plus explicit allows. Off by default because it needs a
+# CNI that enforces NetworkPolicy — on one that does not, these objects are
+# inert and would give false assurance. Turn it on for any real deployment.
+networkPolicy:
+  enabled: false
+  # Namespace labels of the ingress controller allowed to reach web and api.
+  ingressControllerSelector:
+    kubernetes.io/metadata.name: ingress-nginx
+  # Namespace labels of the monitoring stack allowed to scrape the API. It must
+  # still present METRICS_TOKEN.
+  monitoringNamespaceSelector:
+    kubernetes.io/metadata.name: monitoring
+  # Networks permitted to send syslog. Senders are outside the cluster, so this
+  # cannot be a pod selector — narrow it to your estate.
+  syslogSourceCIDRs:
+    - "10.0.0.0/8"
+  # Extra ingress rules for the API, e.g. in-cluster shippers posting to /ingest.
+  extraApiIngress: []
+
+# ── Shared storage (required for more than one API replica) ──────────────────
+# Uploaded sources and the raw ingest copy go here instead of a pod's local
+# disk. Leave the buckets empty for a single-replica or evaluation install and
+# both fall back to local files, exactly as before.
+sharedStorage:
+  sourceBucket: ""      # SOURCE_BUCKET   — uploaded log sources
+  rawLogBucket: ""      # RAW_LOG_BUCKET  — the redundant raw copy of ingest
+
+# ── Syslog connector ─────────────────────────────────────────────────────────
+syslog:
+  enabled: true
+  replicaCount: 1
+  serviceType: LoadBalancer   # ClusterIP if you front it with an external LB
+  port: 514
+  containerPort: 5514         # unprivileged; the Service maps 514 -> 5514
+
+# ── Service / ingress ────────────────────────────────────────────────────────
 service:
   type: ClusterIP
   apiPort: 8000
   webPort: 3000
 
 ingress:
-  enabled: true
+  enabled: false
   className: "nginx"
+  annotations: {}
+  # `backend` picks the service a path routes to: "web" (the UI) or "api".
+  # One host can serve both — put the UI at / and the API under /api.
   hosts:
     - host: semanticos.local
       paths:
         - path: /
           pathType: Prefix
           backend: web
-        - path: /api/
-          pathType: Prefix
-          backend: api
   tls: []
 
+# ── Datastores (external / managed recommended in production) ────────────────
 postgres:
-  host: "postgres-db"
+  host: "postgres"
   user: "postgres"
   db: "semanticos"
-  # Never commit a real password here. Provide it at install time via
-  #   helm install ... --set postgres.password=$PGPASS
-  # or, preferably, set existingSecret to the name of a Secret (with key
-  # `database-url`) managed by your secrets store (Vault / Sealed Secrets / ESO).
-  password: ""
-  existingSecret: ""
+  password: ""          # provide via --set or use secrets.existingSecret
+  url: ""               # full DSN overrides host/user/db/password if set
 
 redis:
   url: "redis://redis-master:6379/0"
+
+clickhouse:
+  host: "clickhouse"
+  port: 8123
+  user: "default"
+  password: ""
+
+kafka:
+  # Any Kafka-protocol broker you already run. The chart deploys none; the
+  # compose stack's default is Apache Kafka (Apache-2.0) rather than Redpanda
+  # (BSL 1.1) — see DEPLOY.md § Licensing constraints.
+  broker: "kafka:9092"
+
+# ── Secrets ──────────────────────────────────────────────────────────────────
+# In production, set secrets.existingSecret to a Secret managed by your secrets
+# store (Vault / Sealed Secrets / External Secrets Operator). When empty, the
+# chart creates a Secret from the values below (fine for dev, not for prod).
+secrets:
+  existingSecret: ""
+  jwtSecretKey: ""        # REQUIRED (>=32 chars). helm install will fail without it.
+  adminPassword: ""
+  ingestApiKey: ""
+  scimBearerToken: ""
+  # Bearer token for scraping /internal/metrics. In production the API refuses
+  # the scrape when this is unset — those series name every route the
+  # deployment serves, with its traffic and error rates.
+  metricsToken: ""
+
+# ── App configuration ────────────────────────────────────────────────────────
+config:
+  environment: "production"       # enables the strict startup safety checks
+  autoMigrate: "0"                # migrations run via the pre-install/upgrade Job
+  schedulerEnabled: "1"
+  corsAllowedOrigins: "https://semanticos.local"
+  # Coarse per-IP DoS guard on /ingest. Size it for your shipper fleet: behind
+  # an ingress controller every shipper shares one bucket, so a hundred agents
+  # flushing once a second need at least 6,000/minute between them. Per-tenant
+  # fairness is the tier quota, which is a separate mechanism.
+  ingestRateLimitRequests: 6000
+  ingestRateLimitWindowSeconds: 60
+  # Set to "1" on any deployment running more than one API replica. The API then
+  # refuses to start unless shared storage is configured, instead of silently
+  # keeping uploads on one pod's disk where the other replicas cannot see them.
+  multiReplica: ""
+
+# ── ServiceAccount + RBAC (for the in-cluster Kubernetes log connector) ──────
+serviceAccount:
+  create: true
+  name: ""
+rbac:
+  # Grants get/list/watch on pods and pods/log so the K8s connector can read
+  # logs. Namespaced by default; set clusterWide to watch all namespaces.
+  create: true
+  clusterWide: false
+
+# ── Persistence (API data volume) ────────────────────────────────────────────
+persistence:
+  enabled: true
+  accessMode: ReadWriteOnce
+  size: 10Gi
+  storageClass: ""
+
+# ── Migration Job ────────────────────────────────────────────────────────────
+migrations:
+  enabled: true
+
+# ── Pod hardening (applied to all app pods) ──────────────────────────────────
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  runAsGroup: 1001
+  fsGroup: 1001
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false   # app writes to /app/data (mounted)
+  capabilities:
+    drop: ["ALL"]
+
+# ── Resource requests/limits ─────────────────────────────────────────────────
+resources:
+  api:
+    requests: { cpu: "250m", memory: "512Mi" }
+    limits:   { cpu: "1",    memory: "1Gi" }
+  worker:
+    # The analysis worker loads an embedding model + clusters in memory.
+    requests: { cpu: "500m", memory: "1Gi" }
+    limits:   { cpu: "2",    memory: "3Gi" }
+  ingestion:
+    requests: { cpu: "100m", memory: "256Mi" }
+    limits:   { cpu: "500m", memory: "512Mi" }
+  syslog:
+    requests: { cpu: "50m",  memory: "128Mi" }
+    limits:   { cpu: "250m", memory: "256Mi" }
+  web:
+    requests: { cpu: "100m", memory: "256Mi" }
+    limits:   { cpu: "500m", memory: "512Mi" }
+
+# ── Probes (API uses the real readiness/liveness endpoints) ──────────────────
+probes:
+  enabled: true

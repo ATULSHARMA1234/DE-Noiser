@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class SavedQuerySchema(BaseModel):
@@ -11,8 +11,7 @@ class SavedQuerySchema(BaseModel):
     created_at: datetime
     last_used: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class QueryCreateSchema(BaseModel):
     name: str

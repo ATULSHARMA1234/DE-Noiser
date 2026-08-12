@@ -1,0 +1,139 @@
+{{- /*
+Nightly backup of the two stateful stores.
+
+docs/operations.md documented correct `pg_dump` and `clickhouse-backup`
+commands, and nothing ran them. Documented-but-unautomated backups are how a
+company discovers, during an incident, that the last dump is from whenever
+somebody last read the runbook.
+
+Scope, stated plainly so nobody assumes more than this does:
+
+  * PostgreSQL — full logical dump, custom format, compressed.
+  * ClickHouse — a schema and data dump of the log and span tables. For a large
+    installation use clickhouse-backup with incremental snapshots to object
+    storage instead; a `SELECT ... INTO OUTFILE` at hundreds of millions of
+    rows is not a backup strategy, and the values below say so by defaulting to
+    a size cap.
+  * Object storage is NOT dumped here. Archives and the raw copy already live
+    in a bucket; replicate that bucket rather than copying it through a pod.
+
+The RPO this establishes is one day, which is a policy default and not a
+recommendation. Anything tighter needs WAL archiving (Postgres) and incremental
+snapshots (ClickHouse) — see docs/operations.md.
+
+A backup nobody has restored is a hypothesis. The restore drill is in
+docs/operations.md and its result belongs in that file, dated.
+*/}}
+{{- if .Values.backup.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "semanticos.fullname" . }}-backup
+  labels:
+    {{- include "semanticos.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup
+spec:
+  schedule: {{ .Values.backup.schedule | quote }}
+  # Never overlap: two concurrent dumps of the same database compete for IO and
+  # can leave a half-written object that looks like a backup.
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  # A missed window must be visible. Without a deadline a suspended or
+  # unschedulable job is silently skipped and the gap never surfaces.
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            {{- toYaml .Values.podSecurityContext | nindent 12 }}
+          containers:
+            - name: backup
+              image: {{ .Values.backup.image | quote }}
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "semanticos.secretName" . }}
+                      key: database-url
+                - name: CLICKHOUSE_HOST
+                  value: {{ .Values.clickhouse.host | quote }}
+                - name: CLICKHOUSE_PORT
+                  value: {{ .Values.clickhouse.port | quote }}
+                - name: CLICKHOUSE_USER
+                  value: {{ .Values.clickhouse.user | quote }}
+                - name: CLICKHOUSE_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "semanticos.secretName" . }}
+                      key: clickhouse-password
+                - name: BACKUP_S3_BUCKET
+                  value: {{ .Values.backup.bucket | quote }}
+                - name: BACKUP_S3_ENDPOINT
+                  value: {{ .Values.backup.endpoint | quote }}
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "semanticos.secretName" . }}
+                      key: backup-access-key
+                      optional: true
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "semanticos.secretName" . }}
+                      key: backup-secret-key
+                      optional: true
+                - name: RETENTION_DAYS
+                  value: {{ .Values.backup.retentionDays | quote }}
+              resources:
+                {{- toYaml .Values.backup.resources | nindent 16 }}
+              command: ["/bin/sh", "-euo", "pipefail", "-c"]
+              args:
+                - |
+                  STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+                  WORK="$(mktemp -d)"
+                  trap 'rm -rf "$WORK"' EXIT
+
+                  echo "[backup] postgres -> ${STAMP}"
+                  # Custom format (-Fc): restorable selectively with pg_restore,
+                  # and compressed, unlike plain SQL.
+                  pg_dump --format=custom --no-owner --no-privileges \
+                    --file="${WORK}/postgres-${STAMP}.dump" "${DATABASE_URL}"
+
+                  echo "[backup] clickhouse -> ${STAMP}"
+                  CH="clickhouse-client --host ${CLICKHOUSE_HOST} --user ${CLICKHOUSE_USER}"
+                  # The table names are the ones the application creates.
+                  for table in semantic_logs semantic_traces; do
+                    # FORMAT TabSeparatedRaw is load-bearing. SHOW CREATE TABLE
+                    # returns a single String column, and the default
+                    # TabSeparated escapes the newlines inside it — so the saved
+                    # DDL is one line containing literal "\n" and ClickHouse
+                    # rejects it on restore with a syntax error. Found by
+                    # running scripts/restore_drill.py, not by reading this.
+                    ${CH} --password "${CLICKHOUSE_PASSWORD}" \
+                      --query "SHOW CREATE TABLE ${table} FORMAT TabSeparatedRaw" \
+                      > "${WORK}/clickhouse-${table}-${STAMP}.schema.sql" || {
+                        echo "[backup] table ${table} not present, skipping"; continue; }
+                    ${CH} --password "${CLICKHOUSE_PASSWORD}" \
+                      --query "SELECT * FROM ${table} FORMAT Native" \
+                      | gzip > "${WORK}/clickhouse-${table}-${STAMP}.native.gz"
+                  done
+
+                  echo "[backup] uploading to ${BACKUP_S3_BUCKET}"
+                  for file in "${WORK}"/*; do
+                    aws s3 cp ${BACKUP_S3_ENDPOINT:+--endpoint-url "${BACKUP_S3_ENDPOINT}"} \
+                      "${file}" "s3://${BACKUP_S3_BUCKET}/backups/${STAMP}/$(basename "${file}")"
+                  done
+
+                  # Verify the objects are actually there. A backup job that
+                  # exits 0 without checking is a green dashboard and no backup.
+                  COUNT=$(aws s3 ls ${BACKUP_S3_ENDPOINT:+--endpoint-url "${BACKUP_S3_ENDPOINT}"} \
+                    "s3://${BACKUP_S3_BUCKET}/backups/${STAMP}/" | wc -l)
+                  if [ "${COUNT}" -lt 1 ]; then
+                    echo "[backup] FAILED: nothing landed in the bucket"; exit 1
+                  fi
+                  echo "[backup] complete: ${COUNT} object(s) at ${STAMP}"
+{{- end }}

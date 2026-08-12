@@ -1,7 +1,7 @@
 # Deploying SemanticOS
 
 SemanticOS is a multi-service stack (FastAPI API + Celery worker + Next.js UI +
-Postgres + Redis + ClickHouse + Redpanda + MinIO). Because of the stateful
+Postgres + Redis + ClickHouse + Apache Kafka + MinIO). Because of the stateful
 services and the ML libraries, the **backend must run on a real machine/VM** —
 it cannot run on serverless platforms (Vercel, Lambda, etc.).
 
@@ -36,7 +36,7 @@ cert in `nginx/certs/` for a real one (see "Real TLS" below).
 OCI's **Ampere A1 (ARM)** Always Free shape gives **4 OCPU / 24 GB RAM free
 forever** — enough to run the whole stack at no cost. The entire stack is already
 arm64-compatible (the app images build native arm64, and all infra images —
-Postgres, Redis, nginx, MinIO, ClickHouse, Redpanda — plus CPU-only torch have
+Postgres, Redis, nginx, MinIO, ClickHouse, Kafka — plus CPU-only torch have
 aarch64 builds), so `deploy/bootstrap.sh` works unchanged.
 
 **1. Create the instance**
@@ -147,7 +147,7 @@ for your domain and set `server_name` in `nginx/nginx.conf`.
 | `worker` | Celery analysis/SLO worker | **required** — `/analyze` jobs complete here |
 | `web` | Next.js UI | only used in Option A (Vercel replaces it in Option B) |
 | `nginx` | TLS + reverse proxy | `/` → web, `/api/*` → api, `/stream` → api (WS) |
-| `db` / `redis` / `clickhouse` / `redpanda` / `minio` | stateful backends | data in named volumes |
+| `db` / `redis` / `clickhouse` / `kafka` / `minio` | stateful backends | data in named volumes |
 
 ## Operating notes
 
@@ -159,3 +159,121 @@ for your domain and set `server_name` in `nginx/nginx.conf`.
   `clickhouse_data`, `minio_data`). Snapshot these for DR.
 - **Image tags** are currently `:latest` for infra images — pin them before you
   rely on this in production.
+
+---
+
+## Reverse proxy hostname
+
+The `Caddyfile` used to hardcode one specific IP's `nip.io` name, so nobody but
+its author could deploy it and TLS issuance depended on a third-party wildcard
+DNS service. It now reads two variables:
+
+```bash
+export SEMANTICOS_DOMAIN=semanticos.yourcompany.com
+export SEMANTICOS_ACME_EMAIL=ops@yourcompany.com
+docker compose up -d
+```
+
+Port 80 redirects to HTTPS and serves nothing else. Both the proxy and the
+application set HSTS, `X-Frame-Options`, `X-Content-Type-Options`,
+`Referrer-Policy` and `Permissions-Policy`; the Content-Security-Policy ships in
+report-only mode. Once you have reviewed the reports for your deployment, set
+`CONTENT_SECURITY_POLICY_ENFORCE=1` to enforce it.
+
+---
+
+## The broker: Apache Kafka by default, Redpanda by choice
+
+The stack ships **Apache Kafka** (`apache/kafka:3.9.0`, Apache-2.0), single-node
+KRaft, no ZooKeeper. It used to ship Redpanda, which is BSL 1.1 — permitted to
+run yourself, not permitted to offer to third parties as a service. That is a
+licensing decision belonging to whoever deploys this, and a default should not
+make it for them.
+
+Nothing in the application changed: the broker is spoken to through `aiokafka`,
+which is the same protocol either way. Only `KAFKA_BROKER` and the image differ.
+
+To keep Redpanda — it is a single binary, starts faster, and uses less memory:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.redpanda.yml up -d
+```
+
+**Switching an existing install.** The broker is a transit buffer between
+`/ingest` and the ingestion worker, not a store of record — anything already
+consumed is in ClickHouse. But anything still queued is lost when the broker
+changes, so drain before you switch:
+
+```bash
+docker compose stop api syslog          # stop producing
+docker compose logs -f ingestion        # wait until it stops reporting new batches
+docker compose up -d                    # brings up kafka; the old redpanda container is now an orphan
+```
+
+Compose will not remove the Redpanda container for you — it is no longer a
+service in the base file, so `docker compose rm redpanda` has nothing to act on.
+Once you are satisfied the new broker is carrying traffic:
+
+```bash
+docker rm -f semanticos-redpanda
+docker volume ls | grep redpanda_data   # then `docker volume rm` the one you find
+```
+
+Helm installs point `kafka.broker` at whatever broker you already run; the chart
+does not deploy one. The default value is `kafka:9092`.
+
+---
+
+## Licensing constraints on the bundled services
+
+SemanticOS is distributed **on-premise**: the customer runs it in their own
+infrastructure. Some of the bundled container images are licensed in a way that
+depends on that remaining true.
+
+| Component | License | Constraint |
+|---|---|---|
+| Apache Kafka *(default broker)* | Apache-2.0 | None |
+| Redpanda *(opt-in, `docker-compose.redpanda.yml`)* | BSL 1.1 | May not be offered **as a managed service to third parties** |
+| Redis 7.4+ | RSALv2 / SSPLv1 | Same shape: using it inside a product is fine, offering Redis itself as a service is not |
+| MinIO | AGPL-3.0 | Used unmodified as a container, not linked into SemanticOS. Optional — any S3-compatible endpoint works |
+
+**If SemanticOS is ever offered as a hosted service that you operate**, these
+positions expire and must be resolved before launch:
+
+- Stay on the default Apache Kafka broker. Only the opt-in Redpanda override
+  carries the BSL restriction, and it is the deployer's deliberate choice.
+- Pin `redis:7.2-alpine` (still BSD) or move to Valkey.
+- Use the cloud provider's object storage instead of bundling MinIO.
+
+Full detail, including the position on `psycopg2-binary`'s LGPL and the MPL-2.0
+components, is in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
+
+---
+
+## The incident narrator sends log content to whatever model you configure
+
+`SLD_LLM_BASE_URL` decides where analysed log content goes. Pointed at a local
+model — Ollama, vLLM, anything OpenAI-compatible — nothing leaves your network,
+which is the configuration the product is described around.
+
+Pointed at a hosted API, representative log lines from every analysed run are
+sent to that provider. The content is redacted first (see
+`denoiser.preprocessing.redaction`), but it is still your log data going to a
+third party, and that provider becomes a data processor you must name in your
+DPA.
+
+The API refuses to start in production with a remote endpoint unless you say you
+meant it:
+
+```bash
+# Local: nothing to declare.
+SLD_LLM_BASE_URL=http://ollama:11434/v1
+
+# Remote: requires an explicit acknowledgement.
+SLD_LLM_BASE_URL=https://api.openai.com/v1
+LLM_ALLOW_EXTERNAL=true
+```
+
+Hostnames without a dot (Compose and Kubernetes service names), `.local`,
+`.internal` and `.svc.cluster.local` suffixes, loopback and RFC1918 addresses
+are all treated as your own infrastructure and need no acknowledgement.

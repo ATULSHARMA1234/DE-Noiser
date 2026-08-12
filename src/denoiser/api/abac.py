@@ -1,4 +1,6 @@
 
+from typing import Any
+
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
@@ -8,7 +10,7 @@ from denoiser.storage.db import AnalysisRun, Incident, User, get_db
 
 class ABACPolicyEngine:
     @staticmethod
-    def evaluate(user: User, action: str, resource_type: str, resource_attrs: dict) -> bool:
+    def evaluate(user: User, action: str, resource_type: str, resource_attrs: dict[str, Any]) -> bool:
         """
         Evaluate an Attribute-Based Access Control (ABAC) request.
         - Subject Attributes: user.role, user.department, user.environment_access
@@ -67,8 +69,11 @@ class require_abac:  # noqa: N801 — intentionally function-styled FastAPI depe
                     # Map domains ending with .prod or containing prod to environment 'prod'
                     domain = incident.domain or ""
                     resource_attrs["environment"] = "prod" if "prod" in domain.lower() else "dev"
-                    # If severity/impact score is very high, assume it contains PII context
-                    if (incident.impact_score or 0) > 80:
+                    # If impact score is very high, assume it contains PII context.
+                    # impact_score is stored on a 0.0-1.0 scale, so the threshold
+                    # is 0.8: the previous `> 80` could never fire and silently
+                    # disabled the VIEWER PII-isolation rule entirely.
+                    if (incident.impact_score or 0) > 0.8:
                         resource_attrs["contains_pii"] = True
             except Exception:
                 pass

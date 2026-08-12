@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { LayoutGrid, Terminal, ShieldAlert, History, Database, Settings, Search, Play, Cpu, X, FileText, Loader2, Network, Users, Bell, Sun, Moon, Menu, Activity, Zap, Plug, BookOpen } from 'lucide-react';
+import { LayoutGrid, Terminal, ShieldAlert, History, Database, Settings, Search, Play, Cpu, X, FileText, Loader2, Network, Users, Bell, Sun, Moon, Menu, Activity, Zap, Plug, BookOpen, Bug } from 'lucide-react';
 import { apiFetch, runAnalysis } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from 'next-themes';
@@ -24,7 +24,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
  const [sources, setSources] = useState<any[]>([]);
  const [selectedSource, setSelectedSource] = useState('');
  const [searchQuery, setSearchQuery] = useState('');
- const { tasks, executeTask } = useTasks();
+ const { tasks, executeTask, attachRemoteTask } = useTasks();
  const runningTasksCount = tasks.filter(t => t.status === 'running').length;
 
  // Grouped by the job each tool does, so a long list stays scannable.
@@ -53,6 +53,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
  {
  label: 'Analyze',
  items: [
+ { name: 'Issues', path: '/app/issues', icon: Bug },
  {
  name: 'Incidents', path: '/app/incidents', icon: ShieldAlert,
  children: [{ name: 'Analysis Runs', path: '/app/runs' }],
@@ -174,7 +175,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
  const sourceName = sources.find(s => s.path === selectedSource)?.name || 'Source';
  const taskId = `analysis:${sourceName}`;
  
- executeTask(taskId, `Analyzing ${sourceName}`, runAnalysis({ source: selectedSource, intelligence: true }));
+ executeTask(taskId, `Analyzing ${sourceName}`, runAnalysis(
+ { source: selectedSource, intelligence: true },
+ (remoteId) => attachRemoteTask(taskId, remoteId),
+ ));
  
  router.push('/app');
  };

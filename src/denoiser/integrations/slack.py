@@ -60,7 +60,14 @@ class SlackNotifier:
             response = requests.post(
                 self.webhook_url,
                 data=json.dumps(slack_data),
-                headers={'Content-Type': 'application/json'}
+                headers={'Content-Type': 'application/json'},
+                # `requests` has no default timeout, so without this the call
+                # blocks forever against a host that accepts the connection and
+                # never answers — which is what a partial Slack outage looks
+                # like. Every worker thread that posted a report would be held,
+                # one per run, until analysis stopped entirely, with nothing
+                # timing out and nothing to alert on.
+                timeout=10,
             )
             response.raise_for_status()
             logger.info("Successfully posted to Slack.")

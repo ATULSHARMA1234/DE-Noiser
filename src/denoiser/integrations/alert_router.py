@@ -22,9 +22,46 @@ from enum import StrEnum
 
 import httpx
 
+from denoiser.integrations.net_guard import DestinationNotAllowed, validate_destination
 from denoiser.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def _describe_http_failure(status: int) -> str:
+    """A non-2xx result, described without quoting the upstream body.
+
+    The body is attacker-influenced content from a host the caller chose.
+    Returning it verbatim leaked internal responses back through the API.
+    """
+    if status in (401, 403):
+        return f"HTTP {status}: destination rejected our credentials"
+    if status == 404:
+        return f"HTTP {status}: destination endpoint not found"
+    if status == 410:
+        return f"HTTP {status}: destination has been revoked"
+    if status == 429:
+        return f"HTTP {status}: destination is rate limiting us"
+    if 500 <= status < 600:
+        return f"HTTP {status}: destination returned a server error"
+    return f"HTTP {status}: destination rejected the delivery"
+
+
+def _describe_transport_failure(exc: Exception) -> str:
+    """Transport-level failure, by class rather than by message.
+
+    Exception text from httpx can contain the resolved address and port, which
+    is the same internal-network disclosure the body echo was.
+    """
+    if isinstance(exc, httpx.TimeoutException):
+        return "Timed out waiting for the destination"
+    if isinstance(exc, httpx.ConnectError):
+        return "Could not connect to the destination"
+    if isinstance(exc, httpx.TooManyRedirects):
+        return "Destination redirected too many times"
+    if isinstance(exc, httpx.HTTPError):
+        return "Transport error talking to the destination"
+    return "Delivery failed"
 
 
 # ── Enumerations ─────────────────────────────────────────────────────────────
@@ -72,6 +109,9 @@ class WebhookConfig:
     min_priority: str = "P1"
     enabled: bool = True
     extra: dict = field(default_factory=dict)
+    #: Owning tenant. Destinations loaded from the database always carry one;
+    #: it stays None only for the in-process registry used by unit tests.
+    tenant_id: int | None = None
 
     @staticmethod
     def make_id(name: str, url: str) -> str:
@@ -89,6 +129,9 @@ class DeliveryRecord:
     latency_ms: float = 0.0
     error: str | None = None
     timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+    #: Owning tenant, copied from the destination so the persisted audit row
+    #: can be filtered per tenant.
+    tenant_id: int | None = None
 
 
 @dataclass
@@ -303,10 +346,23 @@ class AlertRouter:
 
     # ── Dispatch ──────────────────────────────────────────────────────────
 
-    async def dispatch(self, alert: AlertPayload) -> list[DeliveryRecord]:
-        """Fire alert to all matching enabled destinations concurrently."""
+    async def dispatch(
+        self,
+        alert: AlertPayload,
+        destinations: list[WebhookConfig] | None = None,
+    ) -> list[DeliveryRecord]:
+        """Fire alert to all matching enabled destinations concurrently.
+
+        ``destinations`` is the tenant's own set, loaded by the caller from the
+        database. It is an explicit argument rather than something this object
+        looks up, because an AlertRouter that reaches for a global registry is
+        exactly how one tenant's alert ends up on another tenant's channel.
+        Omitting it falls back to the in-process registry, which unit tests use.
+        """
+        candidates = self._destinations.values() if destinations is None else destinations
+
         tasks = []
-        for cfg in self._destinations.values():
+        for cfg in candidates:
             if not cfg.enabled:
                 continue
             if not _should_route(alert.priority, cfg.min_priority):
@@ -315,8 +371,9 @@ class AlertRouter:
                     alert_fingerprint=alert.fingerprint,
                     priority=alert.priority,
                     status=DeliveryStatus.SKIPPED,
+                    tenant_id=cfg.tenant_id,
                 )
-                self._delivery_log.append(rec)
+                self._record(rec)
                 continue
             tasks.append(self._deliver_with_retry(cfg, alert))
 
@@ -330,6 +387,27 @@ class AlertRouter:
         body = self._build_payload(cfg, alert)
         last_error: str | None = None
         last_status: int | None = None
+
+        # Re-checked here and not only at registration: DNS is mutable, so a
+        # host that resolved publicly when it was saved can later point at the
+        # metadata service or an internal admin port.
+        try:
+            validate_destination(cfg.url)
+        except DestinationNotAllowed as exc:
+            rec = DeliveryRecord(
+                webhook_id=cfg.id,
+                alert_fingerprint=alert.fingerprint,
+                priority=alert.priority,
+                status=DeliveryStatus.FAILED,
+                error=str(exc),
+                tenant_id=cfg.tenant_id,
+            )
+            self._record(rec)
+            logger.error(
+                "Refusing to deliver to disallowed destination",
+                extra={"dest": cfg.name, "reason": str(exc)},
+            )
+            return rec
 
         for attempt in range(self.MAX_RETRIES):
             t0 = time.monotonic()
@@ -351,8 +429,9 @@ class AlertRouter:
                         status=DeliveryStatus.DELIVERED,
                         http_status=resp.status_code,
                         latency_ms=round(latency_ms, 2),
+                        tenant_id=cfg.tenant_id,
                     )
-                    self._delivery_log.append(rec)
+                    self._record(rec)
                     logger.info(
                         "Alert delivered",
                         extra={"dest": cfg.name, "priority": alert.priority,
@@ -360,13 +439,24 @@ class AlertRouter:
                     )
                     return rec
                 else:
-                    last_error = f"HTTP {resp.status_code}: {resp.text[:200]}"
-                    logger.warning(f"Attempt {attempt+1} failed for {cfg.name}: {last_error}")
+                    # Status and a fixed reason only. Echoing resp.text turned
+                    # this into a readable SSRF: whatever the internal host
+                    # replied came straight back to the caller.
+                    last_error = _describe_http_failure(resp.status_code)
+                    logger.warning(
+                        "Alert delivery attempt failed",
+                        extra={"attempt": attempt + 1, "dest": cfg.name,
+                               "status": resp.status_code},
+                    )
 
             except Exception as exc:
                 latency_ms = (time.monotonic() - t0) * 1000
-                last_error = str(exc)
-                logger.warning(f"Attempt {attempt+1} exception for {cfg.name}: {last_error}")
+                last_error = _describe_transport_failure(exc)
+                logger.warning(
+                    "Alert delivery attempt raised",
+                    extra={"attempt": attempt + 1, "dest": cfg.name,
+                           "error_type": type(exc).__name__},
+                )
 
             if attempt < self.MAX_RETRIES - 1:
                 await asyncio.sleep(self.BACKOFF_BASE ** attempt)
@@ -378,10 +468,46 @@ class AlertRouter:
             status=DeliveryStatus.FAILED,
             http_status=last_status,
             error=last_error,
+            tenant_id=cfg.tenant_id,
         )
-        self._delivery_log.append(rec)
+        self._record(rec)
         logger.error("Alert delivery permanently failed", extra={"dest": cfg.name, "error": last_error})
         return rec
+
+    def _record(self, rec: DeliveryRecord) -> None:
+        """Keep the record in memory and persist it against the owning tenant.
+
+        The in-memory list stays for unit tests and for destinations registered
+        without a tenant; the database row is what ``/webhooks/log`` and
+        ``/alerts/`` read, and it carries the tenant so those endpoints can
+        filter instead of serving one global stream.
+        """
+        self._delivery_log.append(rec)
+        if rec.tenant_id is None:
+            return
+        try:
+            from denoiser.storage.db import AlertLog, SessionLocal
+
+            db = SessionLocal()
+            try:
+                db.add(AlertLog(
+                    tenant_id=rec.tenant_id,
+                    webhook_id=rec.webhook_id,
+                    alert_fingerprint=rec.alert_fingerprint,
+                    priority=rec.priority,
+                    status=rec.status.value,
+                    http_status=rec.http_status,
+                    latency_ms=rec.latency_ms,
+                    error=rec.error,
+                    timestamp=rec.timestamp,
+                ))
+                db.commit()
+            finally:
+                db.close()
+        except Exception as e:
+            # A delivery that succeeded must not be reported as failed because
+            # its audit row could not be written.
+            logger.warning(f"Failed to persist alert delivery record: {e}")
 
     # ── Payload dispatch ──────────────────────────────────────────────────
 

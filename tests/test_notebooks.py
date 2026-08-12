@@ -13,8 +13,8 @@ from fastapi.testclient import TestClient
 @pytest.fixture(scope="module")
 def client():
     """Test client authenticated as an ADMIN with no tenant scoping."""
-    from denoiser.api.auth import get_current_user
-    from denoiser.api.main import app, verify_ingest_auth
+    from denoiser.api.auth import get_current_user, verify_ingest_auth
+    from denoiser.api.main import app
     from denoiser.storage.db import User
 
     mock_user = User(id=1, email="admin@semanticos.io", role="ADMIN")
@@ -103,8 +103,15 @@ class TestNotebookMissing:
 
 
 class TestNotebookTenantIsolation:
-    def test_other_tenants_notebook_is_forbidden(self, client, notebook):
-        """A notebook owned by tenant 1 is not readable, writable or deletable by tenant 2."""
+    def test_other_tenants_notebook_does_not_exist(self, client, notebook):
+        """A notebook owned by tenant 1 is not readable, writable or deletable by tenant 2.
+
+        404 rather than 403: a 403 confirms the id is real, which is enough to
+        count another organisation's notebooks by walking the id space. The two
+        answers were both in use before `TenantScope` — 29 routes returned 404
+        and 14 returned 403 for the same class of access — and this is the one
+        that gives an attacker nothing.
+        """
         from denoiser.storage.db import Notebook as DBNotebook
         from denoiser.storage.db import SessionLocal
 
@@ -121,24 +128,41 @@ class TestNotebookTenantIsolation:
 
         app.dependency_overrides[get_current_user] = lambda: User(id=2, email="other@tenant.io", role="ADMIN", tenant_id=2)
         try:
-            assert client.get(f"/notebooks/{notebook['id']}").status_code == 403
-            assert client.put(f"/notebooks/{notebook['id']}", json={"title": "hijacked"}).status_code == 403
-            assert client.delete(f"/notebooks/{notebook['id']}").status_code == 403
+            assert client.get(f"/notebooks/{notebook['id']}").status_code == 404
+            assert client.put(f"/notebooks/{notebook['id']}", json={"title": "hijacked"}).status_code == 404
+            assert client.delete(f"/notebooks/{notebook['id']}").status_code == 404
 
             # It must not show up in their list either.
             assert notebook["id"] not in [nb["id"] for nb in client.get("/notebooks").json()]
         finally:
             app.dependency_overrides[get_current_user] = lambda: User(id=1, email="admin@semanticos.io", role="ADMIN")
 
-    def test_legacy_unscoped_notebooks_stay_readable(self, client, notebook):
-        """Notebooks created before tenant scoping have tenant_id NULL and must not vanish."""
+    def test_unowned_notebooks_are_not_shared_across_organisations(self, client, notebook):
+        """A notebook with tenant_id NULL belongs to nobody, not to everybody.
+
+        These rows predate tenant scoping, and three routes used to read NULL as
+        "shared" so an upgraded deployment would not appear to lose data. On a
+        deployment serving one customer that is harmless; on one serving two it
+        is a channel between them, and for notebooks a writable one. Migration
+        f7a2c04b91de adopts the rows into the first organisation instead, so
+        ownership is a plain equality and nothing is shared by accident.
+        """
         from denoiser.api.auth import get_current_user
         from denoiser.api.main import app
         from denoiser.storage.db import User
 
         app.dependency_overrides[get_current_user] = lambda: User(id=3, email="scoped@tenant.io", role="ADMIN", tenant_id=7)
         try:
-            assert client.get(f"/notebooks/{notebook['id']}").status_code == 200
-            assert notebook["id"] in [nb["id"] for nb in client.get("/notebooks").json()]
+            assert client.get(f"/notebooks/{notebook['id']}").status_code == 404
+            assert notebook["id"] not in [nb["id"] for nb in client.get("/notebooks").json()]
         finally:
             app.dependency_overrides[get_current_user] = lambda: User(id=1, email="admin@semanticos.io", role="ADMIN")
+
+    def test_an_unassigned_admin_still_sees_unowned_notebooks(self, client, notebook):
+        """The unassigned bucket is a tenant like any other, not a black hole.
+
+        `column == None` compiles to `= NULL` and matches nothing, so a naive
+        equality would make these rows unreachable by anyone at all — which is
+        how the same fix broke user administration when it was first written.
+        """
+        assert client.get(f"/notebooks/{notebook['id']}").status_code == 200
