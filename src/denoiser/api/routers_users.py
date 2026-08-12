@@ -7,6 +7,7 @@ Split out of `api.main`. A pure move — the handlers, the tenant scoping and th
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from denoiser.api.auth import get_password_hash, require_role
@@ -86,7 +87,16 @@ def list_users(
 @router.post("/users", response_model=UserResponse, status_code=201)
 def create_user(payload: UserCreate, db: Session = Depends(get_db), current_user: User = Depends(require_role(["ADMIN"]))):
     """Provision a new operator inside the caller's organisation."""
-    exists = db.query(User).filter(User.email == payload.email).first()
+    # Scoped to the caller's own organisation. Unscoped, this was an existence
+    # oracle: an admin at one company could post a competitor's address and read
+    # the 400 as "that person has an account on this deployment" — precisely the
+    # disclosure the 404-not-403 rule in `_tenant_user` exists to prevent,
+    # reachable by a different route.
+    exists = (
+        db.query(User)
+        .filter(User.email == payload.email, _same_tenant(current_user.tenant_id))
+        .first()
+    )
     if exists:
         raise HTTPException(status_code=400, detail="User with this email already exists")
 
@@ -103,7 +113,16 @@ def create_user(payload: UserCreate, db: Session = Depends(get_db), current_user
         environment_access=payload.environment_access,
     )
     db.add(user)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # `users.email` is unique per organisation, so this can now only be two
+        # admins of the *same* organisation creating the same address at once —
+        # the check above passed for both, and one of them lost the insert. It
+        # is no longer reachable by another customer already employing the same
+        # person; that is the whole point of the constraint change.
+        db.rollback()
+        raise HTTPException(status_code=400, detail="User with this email already exists")
     db.refresh(user)
     return user
 

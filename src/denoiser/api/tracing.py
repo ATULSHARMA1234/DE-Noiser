@@ -19,7 +19,16 @@ from denoiser.utils.time import iso_utc
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/traces", tags=["tracing"])
+# The trace explorer. OTLP *ingest* is authenticated by API key rather than
+# a user session, so it cannot use this dependency; it is gated separately in
+# denoiser.api.otlp.
+from denoiser.api.entitlements import FEATURE_TRACING, require_feature
+
+router = APIRouter(
+    prefix="/traces",
+    tags=["tracing"],
+    dependencies=[Depends(require_feature(FEATURE_TRACING))],
+)
 
 import contextlib
 from datetime import UTC, datetime, timedelta
@@ -246,20 +255,36 @@ def list_traces(
         if to_ts is not None:
             query = query.filter(Span.start_time <= datetime.fromtimestamp(to_ts / 1000.0, tz=UTC))
             
-        # SQLite doesn't let us easily pull the FIRST service_name per trace without a subquery or window func. 
-        # For fallback, we just pull aggregated info. Root service/operation can be looked up or approximated.
-        # But wait, we can just join or do an extra query if we really want root spans. For now we will approximate
-        # or do a slightly simpler group by.
+        # The aggregate cannot carry the root span's service and operation, so
+        # they are fetched separately — but once for the whole page, not once
+        # per row. The per-row version issued up to two extra queries for every
+        # trace returned, so a listing of 100 was 201 round-trips, in the
+        # degraded path that exists precisely for when the fast store is down.
         results = query.group_by(Span.trace_id).order_by(func.min(Span.start_time).desc()).limit(limit).all()
-        
+
+        trace_ids = [row.trace_id for row in results]
+        roots: dict[str, Span] = {}
+        if trace_ids:
+            # Tenant-scoped, like the aggregate above it. These two lookups were
+            # unscoped, which — with trace ids being random — was a narrow leak
+            # rather than a practical one, but "narrow" is not the standard the
+            # rest of this module holds to.
+            candidates = (
+                db.query(Span)
+                .filter(scope.predicate(Span), Span.trace_id.in_(trace_ids))
+                .order_by(Span.start_time.asc())
+                .all()
+            )
+            # A true root (no parent) wins; otherwise the earliest span stands in.
+            for span in candidates:
+                if span.parent_span_id is None:
+                    roots[span.trace_id] = span
+                elif span.trace_id not in roots:
+                    roots.setdefault(span.trace_id, span)
+
         filtered = []
         for row in results:
-            # We don't have root_service in this simplified group_by, so we fetch the root span or just label it
-            # To be efficient, let's just do a quick fetch of the root span for these trace_ids
-            root_span = db.query(Span).filter(Span.trace_id == row.trace_id, Span.parent_span_id.is_(None)).first()
-            if not root_span:
-                # If no strict root span found, just pick any span for the trace
-                root_span = db.query(Span).filter(Span.trace_id == row.trace_id).first()
+            root_span = roots.get(row.trace_id)
 
             duration_ms = max(0, (row.end_time - row.start_time).total_seconds() * 1000.0) if row.end_time and row.start_time else 0
             filtered.append(TraceSchema(
