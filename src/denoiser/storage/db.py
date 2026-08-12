@@ -11,6 +11,7 @@ import os
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     Column,
     DateTime,
@@ -22,6 +23,7 @@ from sqlalchemy import (
     create_engine,
     text,
 )
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
@@ -219,6 +221,29 @@ class Webhook(Base):
 
 class Span(Base):
     __tablename__ = "spans"
+
+    #: A span is identified by its own id within its trace, within one
+    #: customer. Without this, a retried OTLP batch — which is the normal
+    #: reaction to a 503, and the normal reaction to a lost response — wrote a
+    #: second copy of every span it contained.
+    #:
+    #: An index over `coalesce(tenant_id, -1)` rather than a plain unique
+    #: constraint, because both PostgreSQL and SQLite treat NULLs as distinct:
+    #: a constraint on the bare column would not deduplicate unattributed rows,
+    #: which is precisely the state every span was in when this was written. The
+    #: ingest path now sets an owner and a migration clears the old NULLs, but
+    #: the restore path in `storage.archiver` reads its tenant out of an archive
+    #: file and can still produce one, so the guarantee should not depend on
+    #: that column being populated.
+    __table_args__ = (
+        Index(
+            "uq_spans_identity",
+            text("coalesce(tenant_id, -1)"),
+            text("trace_id"),
+            text("span_id"),
+            unique=True,
+        ),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     tenant_id = Column(Integer, index=True, nullable=True)
@@ -488,13 +513,130 @@ class PlatformSetting(Base):
 class BillingMeter(Base):
     __tablename__ = "billing_meters"
 
+    #: One row per customer per day. Metering reads-then-writes to stay
+    #: idempotent, which is check-then-act and races: two beats, or a manual
+    #: re-run overlapping the scheduled one, both saw "no row yet" and both
+    #: inserted. A duplicate day is double-billing, so the database enforces it.
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "date", name="uq_billing_meters_tenant_date"),
+    )
+
     id = Column(Integer, primary_key=True, index=True)
     tenant_id = Column(Integer, index=True, nullable=False)
     date = Column(DateTime, nullable=False)
-    total_logs_ingested = Column(Integer, default=0)
-    total_bytes_ingested = Column(Integer, default=0)
-    total_traces_ingested = Column(Integer, default=0)
+    #: BigInteger, not Integer. PostgreSQL's INTEGER tops out at 2,147,483,647 —
+    #: 2 GiB of bytes, which is a small day for a log platform. Exceeding it
+    #: raises `NumericValueOutOfRange` on commit, and because that commit covers
+    #: the whole pass, one large customer discarded every tenant's meter for
+    #: that day.
+    total_logs_ingested = Column(BigInteger, default=0)
+    total_bytes_ingested = Column(BigInteger, default=0)
+    total_traces_ingested = Column(BigInteger, default=0)
     created_at = Column(DateTime, default=utcnow)
+
+class Plan(Base):
+    """What a customer can buy.
+
+    Priced per GB ingested: it is what the platform already meters, and it is
+    what the platform's own cost tracks. A per-seat price would be simpler to
+    build and would decouple revenue from a three-person team shipping forty
+    terabytes.
+
+    Money is integer minor units — cents, pence — never Float. A float price
+    accumulates rounding error across a month of usage lines, and the direction
+    of that error is not something you get to choose.
+    """
+
+    __tablename__ = "plans"
+
+    id = Column(Integer, primary_key=True, index=True)
+    #: Stable identifier used in code and on the wire ("free", "pro", …).
+    slug = Column(String, nullable=False, unique=True, index=True)
+    name = Column(String, nullable=False)
+    #: Volume included before overage applies.
+    included_gb = Column(Integer, nullable=False, default=0)
+    #: Overage price per GB, in minor units.
+    overage_price_minor = Column(Integer, nullable=False, default=0)
+    #: Flat monthly platform fee, in minor units.
+    base_price_minor = Column(Integer, nullable=False, default=0)
+    currency = Column(String, nullable=False, default="usd")
+    #: Feature slugs this plan grants. See `denoiser.api.entitlements`.
+    features = Column(JSON, nullable=False, default=list)
+    #: Retention granted, in days. Supersedes the tier table once a plan exists.
+    retention_days = Column(Integer, nullable=False, default=7)
+    #: The provider's price object, so usage can be reported against it.
+    provider_price_id = Column(String, nullable=True)
+    is_public = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=utcnow)
+
+
+class Subscription(Base):
+    """One customer's current commercial state.
+
+    Entitlement is decided from ``status`` here, never from ``Tenant.tier``.
+    A tier is a label somebody set; a status is what the payment provider says
+    about whether the last invoice was paid. Gating on the label is how a
+    customer keeps enterprise features after their card fails.
+    """
+
+    __tablename__ = "subscriptions"
+
+    __table_args__ = (
+        # One live subscription per customer. Two would make "which plan are
+        # they on" a question with two answers, and billing questions with two
+        # answers get resolved in the customer's favour by whoever asks first.
+        UniqueConstraint("tenant_id", name="uq_subscriptions_tenant"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, index=True, nullable=False)
+    plan_id = Column(Integer, nullable=False)
+
+    #: "stripe", or "manual" for an invoiced enterprise agreement.
+    provider = Column(String, nullable=False, default="stripe")
+    provider_customer_id = Column(String, nullable=True, index=True)
+    provider_subscription_id = Column(String, nullable=True, index=True)
+
+    #: Mirrors the provider's vocabulary: trialing, active, past_due, canceled,
+    #: incomplete, unpaid. Stored as given rather than mapped, so a status this
+    #: code does not recognise fails closed instead of being silently coerced
+    #: into one it does.
+    status = Column(String, nullable=False, default="trialing")
+    current_period_start = Column(DateTime, nullable=True)
+    current_period_end = Column(DateTime, nullable=True)
+    #: Set when the customer has cancelled but paid through the period. They
+    #: keep access until `current_period_end` — they paid for it.
+    cancel_at_period_end = Column(Boolean, default=False, nullable=False)
+
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class ProcessedWebhookEvent(Base):
+    """Every provider event this deployment has already acted on.
+
+    Payment providers redeliver. Stripe retries a webhook for up to three days
+    if it does not get a 2xx, and it will happily deliver the same event twice
+    on a network hiccup where it did. A handler that upgrades a plan, or credits
+    an account, must therefore be safe to run twice — and the cheapest way to be
+    safe is to not run twice.
+
+    The unique constraint is the mechanism: the insert fails on a replay, and
+    the handler treats that failure as "already done".
+    """
+
+    __tablename__ = "processed_webhook_events"
+
+    __table_args__ = (
+        UniqueConstraint("provider", "event_id", name="uq_processed_webhook_events"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    provider = Column(String, nullable=False, default="stripe")
+    event_id = Column(String, nullable=False, index=True)
+    event_type = Column(String, nullable=True)
+    received_at = Column(DateTime, default=utcnow)
+
 
 class Integration(Base):
     __tablename__ = "integrations"
@@ -706,3 +848,71 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def _row_values(model, obj) -> dict:
+    """The column values of a transient ORM instance, as a plain dict.
+
+    Python-side column defaults are applied here because they normally run at
+    flush time, and this helper bypasses the flush by emitting Core INSERTs.
+    Without it, a column carrying `default=utcnow` would insert NULL.
+    """
+    values = {}
+    for column in model.__table__.columns:
+        value = getattr(obj, column.name, None)
+        if value is None and column.default is not None:
+            default = column.default
+            if default.is_callable:
+                value = default.arg(None)
+            elif default.is_scalar:
+                value = default.arg
+        if value is None and column.primary_key:
+            # Let the database assign it.
+            continue
+        values[column.name] = value
+    return values
+
+
+def insert_ignoring_duplicates(db, model, objects: list) -> int:
+    """Insert ORM instances, silently skipping ones that already exist.
+
+    "Already exist" means a unique constraint on the table rejected the row.
+    The caller gets the number actually written.
+
+    This exists so that an ingest endpoint can be retried safely. A client that
+    resends a batch — because our response was lost, or because we asked it to
+    retry after a downstream failure — must not deposit a second copy of every
+    record. Ordering the writes correctly is not enough on its own: the retry
+    can arrive after a fully successful request whose response never got back.
+
+    ``ON CONFLICT DO NOTHING`` is spelled per-dialect in SQLAlchemy, and this
+    project runs on both PostgreSQL and SQLite, so both are handled. Anything
+    else falls back to inserting row by row inside a savepoint, which is slower
+    but relies on nothing beyond the constraint itself.
+    """
+    if not objects:
+        return 0
+
+    rows = [_row_values(model, obj) for obj in objects]
+    dialect = db.get_bind().dialect.name
+
+    if dialect == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert as _insert
+    elif dialect == "sqlite":
+        from sqlalchemy.dialects.sqlite import insert as _insert
+    else:
+        written = 0
+        for row in rows:
+            try:
+                with db.begin_nested():
+                    db.execute(model.__table__.insert().values(**row))
+                written += 1
+            except IntegrityError:
+                continue
+        return written
+
+    result = db.execute(_insert(model.__table__).on_conflict_do_nothing(), rows)
+    # `rowcount` is the number of rows the statement actually inserted; the
+    # conflicting ones are not counted. Drivers that decline to report it give
+    # -1, in which case the batch size is the closest honest answer.
+    return len(rows) if result.rowcount is None or result.rowcount < 0 else result.rowcount
