@@ -162,6 +162,26 @@ for your domain and set `server_name` in `nginx/nginx.conf`.
 
 ---
 
+## Reverse proxy hostname
+
+The `Caddyfile` used to hardcode one specific IP's `nip.io` name, so nobody but
+its author could deploy it and TLS issuance depended on a third-party wildcard
+DNS service. It now reads two variables:
+
+```bash
+export SEMANTICOS_DOMAIN=semanticos.yourcompany.com
+export SEMANTICOS_ACME_EMAIL=ops@yourcompany.com
+docker compose up -d
+```
+
+Port 80 redirects to HTTPS and serves nothing else. Both the proxy and the
+application set HSTS, `X-Frame-Options`, `X-Content-Type-Options`,
+`Referrer-Policy` and `Permissions-Policy`; the Content-Security-Policy ships in
+report-only mode. Once you have reviewed the reports for your deployment, set
+`CONTENT_SECURITY_POLICY_ENFORCE=1` to enforce it.
+
+---
+
 ## The broker: Apache Kafka by default, Redpanda by choice
 
 The stack ships **Apache Kafka** (`apache/kafka:3.9.0`, Apache-2.0), single-node
@@ -201,3 +221,59 @@ docker volume ls | grep redpanda_data   # then `docker volume rm` the one you fi
 
 Helm installs point `kafka.broker` at whatever broker you already run; the chart
 does not deploy one. The default value is `kafka:9092`.
+
+---
+
+## Licensing constraints on the bundled services
+
+SemanticOS is distributed **on-premise**: the customer runs it in their own
+infrastructure. Some of the bundled container images are licensed in a way that
+depends on that remaining true.
+
+| Component | License | Constraint |
+|---|---|---|
+| Apache Kafka *(default broker)* | Apache-2.0 | None |
+| Redpanda *(opt-in, `docker-compose.redpanda.yml`)* | BSL 1.1 | May not be offered **as a managed service to third parties** |
+| Redis 7.4+ | RSALv2 / SSPLv1 | Same shape: using it inside a product is fine, offering Redis itself as a service is not |
+| MinIO | AGPL-3.0 | Used unmodified as a container, not linked into SemanticOS. Optional — any S3-compatible endpoint works |
+
+**If SemanticOS is ever offered as a hosted service that you operate**, these
+positions expire and must be resolved before launch:
+
+- Stay on the default Apache Kafka broker. Only the opt-in Redpanda override
+  carries the BSL restriction, and it is the deployer's deliberate choice.
+- Pin `redis:7.2-alpine` (still BSD) or move to Valkey.
+- Use the cloud provider's object storage instead of bundling MinIO.
+
+Full detail, including the position on `psycopg2-binary`'s LGPL and the MPL-2.0
+components, is in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
+
+---
+
+## The incident narrator sends log content to whatever model you configure
+
+`SLD_LLM_BASE_URL` decides where analysed log content goes. Pointed at a local
+model — Ollama, vLLM, anything OpenAI-compatible — nothing leaves your network,
+which is the configuration the product is described around.
+
+Pointed at a hosted API, representative log lines from every analysed run are
+sent to that provider. The content is redacted first (see
+`denoiser.preprocessing.redaction`), but it is still your log data going to a
+third party, and that provider becomes a data processor you must name in your
+DPA.
+
+The API refuses to start in production with a remote endpoint unless you say you
+meant it:
+
+```bash
+# Local: nothing to declare.
+SLD_LLM_BASE_URL=http://ollama:11434/v1
+
+# Remote: requires an explicit acknowledgement.
+SLD_LLM_BASE_URL=https://api.openai.com/v1
+LLM_ALLOW_EXTERNAL=true
+```
+
+Hostnames without a dot (Compose and Kubernetes service names), `.local`,
+`.internal` and `.svc.cluster.local` suffixes, loopback and RFC1918 addresses
+are all treated as your own infrastructure and need no acknowledgement.
