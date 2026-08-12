@@ -28,6 +28,22 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
+      # For the integration step. The unit suite substitutes this store, so
+      # nothing else in CI ever executes its SQL or validates its schema.
+      clickhouse:
+        image: clickhouse/clickhouse-server:24-alpine
+        env:
+          CLICKHOUSE_USER: default
+          CLICKHOUSE_PASSWORD: ""
+          CLICKHOUSE_DB: default
+        ports:
+          - 8123:8123
+        options: >-
+          --health-cmd "wget --spider -q http://localhost:8123/ping || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - uses: actions/checkout@v4
 
@@ -47,6 +63,13 @@ jobs:
       # Blocking: lint must be clean.
       - name: Lint with ruff
         run: uv run ruff check src/ tests/
+
+      # Blocking. `requests` has no default timeout, and ruff has no rule for
+      # this. The one call site that was missing one would have hung a worker
+      # thread per analysis run through a partial Slack outage, with nothing
+      # raising and nothing to alert on.
+      - name: Outbound HTTP calls must set a timeout
+        run: uv run python scripts/check_request_timeouts.py src/
 
       # Blocking ratchet: these modules are strict-clean today and must stay that
       # way. Grow this list as more modules reach zero errors — it is the
@@ -109,6 +132,23 @@ jobs:
       # not failed by a rounding change, and it moves up as coverage does.
       - name: Test with pytest
         run: uv run pytest --cov=src tests/ --cov-fail-under=73
+
+      # Blocking, and separate on purpose. The suite above substitutes the
+      # ClickHouse store, so its SQL is never executed and its schema is never
+      # checked — which is how the trace path spent its whole life writing None
+      # into a non-Nullable column, losing every batch, with the tests green.
+      #
+      # These run the same code against a real server. If the service below is
+      # unreachable they skip rather than fail, so this step cannot become a
+      # flaky gate — but a skipped run is visible in the log.
+      - name: Integration tests (real ClickHouse)
+        env:
+          CLICKHOUSE_HOST: localhost
+          CLICKHOUSE_PORT: "8123"
+          CLICKHOUSE_USER: default
+          CLICKHOUSE_PASSWORD: ""
+          CLICKHOUSE_DB: default
+        run: uv run pytest -m integration -v
 
       # Blocking. This was advisory, which meant a known-vulnerable dependency
       # could not fail a release — the exact control a vendor-security

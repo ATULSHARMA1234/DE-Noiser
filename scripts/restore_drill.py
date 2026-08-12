@@ -49,15 +49,49 @@ def run(command: list[str], **kwargs) -> subprocess.CompletedProcess:
     return subprocess.run(command, capture_output=True, text=True, check=False, **kwargs)
 
 
-def clickhouse_raw(url: str, query: str, body: bytes = b"") -> bytes:
+def split_credentials(url: str) -> tuple[str, dict[str, str]]:
+    """Separate ``http://user:pass@host:port`` into a URL and auth headers.
+
+    ``urllib.request.urlopen`` does not understand userinfo in a URL — it hands
+    the whole ``user:pass@host`` string to the resolver and fails with
+    "nodename nor servname provided". So a drill pointed at any ClickHouse with
+    a password could not run at all, which is every deployment that resembles
+    production. The drill only ever worked against an unauthenticated server.
+
+    ClickHouse accepts credentials as ``X-ClickHouse-User`` / ``X-ClickHouse-Key``
+    headers, which keeps them out of the request line (and therefore out of the
+    server's query log) as well.
+    """
+    parsed = urllib.parse.urlsplit(url)
+    if not parsed.username and not parsed.password:
+        return url.rstrip("/"), {}
+
+    host = parsed.hostname or "localhost"
+    if parsed.port:
+        host = f"{host}:{parsed.port}"
+    clean = urllib.parse.urlunsplit((parsed.scheme, host, parsed.path, "", ""))
+
+    headers = {}
+    if parsed.username:
+        headers["X-ClickHouse-User"] = urllib.parse.unquote(parsed.username)
+    if parsed.password:
+        headers["X-ClickHouse-Key"] = urllib.parse.unquote(parsed.password)
+    return clean.rstrip("/"), headers
+
+
+def clickhouse_raw(url: str, query: str, body: bytes = b"", headers: dict | None = None) -> bytes:
     """Issue a query over the HTTP interface, which needs no client binary.
 
     Returns bytes. `FORMAT Native` — which is what the backup uses, because it
     round-trips types exactly where a text format does not — is binary, so
     decoding the response as UTF-8 fails on the first row.
     """
+    base, auth = split_credentials(url)
     request = urllib.request.Request(
-        f"{url}/?query={urllib.parse.quote(query)}", data=body, method="POST"
+        f"{base}/?query={urllib.parse.quote(query)}",
+        data=body,
+        method="POST",
+        headers={**auth, **(headers or {})},
     )
     try:
         with urllib.request.urlopen(request, timeout=300) as response:
