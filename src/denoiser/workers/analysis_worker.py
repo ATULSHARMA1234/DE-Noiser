@@ -377,17 +377,22 @@ def evaluate_monitors():
 
 
 @celery_app.task
-def aggregate_billing():
+def aggregate_billing(day: str | None = None):
     """Periodic task: meter per-tenant usage and enforce tier retention.
 
     This lived on a second Celery app with its own beat that no deployment ever
     started, so usage was never metered and retention was never applied. It runs
     on the platform's own beat now.
+
+    ``day`` is an ISO date, for re-running a specific day by hand. Omitted, the
+    worker meters yesterday.
     """
+    from datetime import date
+
     from denoiser.workers.billing_worker import aggregate_billing as run_aggregation
 
     try:
-        return run_aggregation()
+        return run_aggregation(day=date.fromisoformat(day) if day else None)
     except Exception as e:
         logger.error(f"Billing aggregation failed: {e}")
         return {"error": str(e)}
@@ -402,7 +407,13 @@ def setup_periodic_tasks(sender, **kwargs):
     sender.add_periodic_task(60.0, evaluate_slos.s(), name='evaluate_slos_every_minute')
     sender.add_periodic_task(60.0, extract_metrics.s(), name='extract_metrics_every_minute')
     sender.add_periodic_task(60.0, evaluate_monitors.s(), name='evaluate_monitors_every_minute')
-    # Usage metering + tier retention, daily at midnight UTC.
+    # Usage metering + tier retention, for the day that just ended.
+    #
+    # 00:15 rather than 00:00: the pass reads a closed day, and a quarter hour
+    # of slack lets writes that were in flight at the boundary land before they
+    # are counted. (The window itself is explicit now — see
+    # `billing_worker.aggregate_billing` — so this is about completeness, not
+    # about which day gets read.)
     sender.add_periodic_task(
-        crontab(minute=0, hour=0), aggregate_billing.s(), name='aggregate_billing_daily'
+        crontab(minute=15, hour=0), aggregate_billing.s(), name='aggregate_billing_daily'
     )

@@ -94,7 +94,30 @@ class S3ArchiverEngine:
         db = SessionLocal()
         try:
             # 1. Archive SQLite Traces (spans table)
-            old_spans = db.query(Span).filter(Span.start_time < cutoff_date).all()
+            # Streamed, not materialised. `.all()` loaded every expired span
+            # into memory and the grouping below then built a second full copy,
+            # so peak use was roughly twice the row set — inside the API
+            # process, because this ran under APScheduler rather than in a
+            # worker. A week of missed runs was enough to OOM the pod that
+            # serves requests.
+            #
+            # A hard ceiling as well as batching: a sweep that has not run in a
+            # month should take a month's worth per pass and leave the rest for
+            # the next one, rather than trying to do all of it and failing.
+            max_per_pass = int(settings.get("archive_max_spans_per_pass", 200_000))
+            old_spans = (
+                db.query(Span)
+                .filter(Span.start_time < cutoff_date)
+                .order_by(Span.id)
+                .limit(max_per_pass)
+                .yield_per(5_000)
+            )
+            old_spans = list(old_spans)
+            if len(old_spans) == max_per_pass:
+                logger.warning(
+                    "Archival hit its %d-span ceiling; the remainder will be taken "
+                    "by the next pass", max_per_pass,
+                )
             if old_spans:
                 # Grouped by owner so each customer's cold traces are their own
                 # object, which is what makes them deletable on offboarding.
@@ -281,6 +304,11 @@ class S3ArchiverEngine:
                                     "message": item.get("message", ""),
                                 }],
                                 tenant_id=_tenant_key(item.get("tenant_id")),
+                                # Already redacted on the way in — this row was
+                                # archived from the store, not received from a
+                                # customer. Re-running the patterns over every
+                                # restored record is work with no effect.
+                                redact=False,
                             )
                             restored_count += 1
 
