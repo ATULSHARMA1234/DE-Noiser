@@ -13,7 +13,10 @@ from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
 from denoiser.api.keys import get_keyring
+from denoiser.logging import get_logger
 from denoiser.storage.db import User, get_db
+
+logger = get_logger(__name__)
 
 is_testing = "pytest" in sys.modules or any("pytest" in arg for arg in sys.argv) or "PYTEST_CURRENT_TEST" in os.environ
 ALGORITHM = "HS256"
@@ -155,8 +158,6 @@ def user_for_claims(db: Session, payload: dict) -> User | None:
 
     matches = query.limit(2).all()
     return matches[0] if len(matches) == 1 else None
-
-
 
 
 def rotate_refresh_token(refresh_token: str, db: Session) -> tuple[dict, User]:
@@ -306,12 +307,33 @@ from fastapi.security import APIKeyHeader
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
+#: Raised when the caller authenticated but no owner could be put on their data.
+#: 503 rather than 401: the credential was fine, the deployment is not, and the
+#: shipper should hold the batch and retry rather than discard it as rejected.
+_UNRESOLVED_TENANT = HTTPException(
+    status_code=503,
+    detail="Ingest is authenticated but not attributable to a workspace; retry the batch.",
+)
+
+
 def verify_ingest_auth(
     api_key: str | None = Depends(api_key_header),
     token: str | None = Depends(oauth2_scheme),
     db: Session = Depends(get_db)
-) -> str:
-    """Allow ingest if X-API-Key header matches static config, or if a valid JWT is present. Returns tenant_id."""
+) -> int:
+    """Authenticate an ingest request and return the numeric tenant id that owns it.
+
+    Always an ``int``. It used to be an ``int`` on one branch, a ``str`` on
+    another and the literal ``"default_tenant"`` on a third, and callers wrote
+    whichever they got straight onto a row: ``Span.tenant_id`` is an integer
+    column, so a string owner silently became no owner, and every span ingested
+    over OTLP was unattributed — invisible to tenant-scoped reads, uncounted by
+    metering, and untouched by that customer's erasure.
+
+    Refusing to answer is better than answering with something unusable. Both
+    remaining ways to fail — a deployment with no tenants at all, and a user
+    account belonging to no workspace — now raise instead of inventing an owner.
+    """
     from denoiser.api.credentials import matches_static_secret, tenant_for_api_key
     from denoiser.storage.db import Tenant
     if api_key:
@@ -319,7 +341,7 @@ def verify_ingest_auth(
         # updated in sequence rather than all at the instant of rotation.
         tenant = tenant_for_api_key(db, api_key)
         if tenant:
-            return tenant.id
+            return int(tenant.id)
         # Optional static key for unattended ingest. No hardcoded production
         # default — it must be set via INGEST_API_KEY (a dev default is allowed
         # only under tests so the suite can exercise the path).
@@ -334,8 +356,11 @@ def verify_ingest_auth(
             # invisible to every logged-in user (who carry a numeric tenant_id).
             default_tenant = db.query(Tenant).order_by(Tenant.id).first()
             if default_tenant:
-                return str(default_tenant.id)
-            return "default_tenant"
+                return int(default_tenant.id)
+            # `init_db` seeds a workspace, so reaching here means the database
+            # was emptied underneath a running deployment.
+            logger.error("Static ingest key accepted but no tenant exists to attribute it to")
+            raise _UNRESOLVED_TENANT
 
     if token:
         try:
@@ -344,8 +369,15 @@ def verify_ingest_auth(
             # session to `token` — every JWT-authenticated ingest failed with
             # "Invalid API Key or JWT token", leaving X-API-Key the only way in.
             user = get_current_user(request=None, token=token, db=db)
-            return user.tenant_id
         except Exception:
-            pass
+            user = None
+        if user is not None:
+            if user.tenant_id is None:
+                # An account that belongs to no workspace has nowhere to put
+                # what it sends. Silently accepting it is how rows end up
+                # owned by nobody.
+                logger.warning("Ingest refused: user %s belongs to no workspace", user.email)
+                raise _UNRESOLVED_TENANT
+            return int(user.tenant_id)
 
     raise HTTPException(status_code=401, detail="Invalid API Key or JWT token")

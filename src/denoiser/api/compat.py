@@ -131,7 +131,7 @@ def elastic_root() -> dict[str, Any]:
 
 @router.post("/_bulk")
 @router.post("/{index}/_bulk")
-async def elastic_bulk(request: Request, tenant_id: str = Depends(verify_ingest_auth)):
+async def elastic_bulk(request: Request, tenant_id: int = Depends(verify_ingest_auth)):
     """Elasticsearch `_bulk` ingestion. Returns a bulk-shaped response so Beats/
     Logstash treat the write as successful."""
     raw = await request.body()

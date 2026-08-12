@@ -148,3 +148,28 @@ def build_redactor():
     from denoiser.preprocessing.redaction import Redactor
 
     return Redactor(enabled=redaction_enabled())
+
+
+def redact_batch(logs: list) -> list:
+    """Redact a batch of ingested records, whatever shape they are in.
+
+    Call this once at the ingest boundary, before the batch reaches *any* sink.
+    An ingest request fans out to four of them — the raw object-store copy, the
+    Kafka topic, ClickHouse, and the Redis stream the live console reads — and
+    redacting at only some of them means the data is still there for anyone
+    looking in the right place.
+
+    That is what happened: `/ingest` redacted, `/v1/logs` did not, and the OTLP
+    endpoint is the one the README points enterprises at. Its records reached
+    the object store, the search index and the live stream verbatim.
+
+    One function, called at each entrance, rather than the rule written out per
+    router — the same correction this codebase already made for tenant scoping.
+    """
+    if not logs:
+        return logs
+
+    from denoiser.preprocessing.redaction import redact_value
+
+    redactor = build_redactor()
+    return [redact_value(entry, redactor) for entry in logs]

@@ -24,6 +24,42 @@ Distinguish clearly between "new patterns", "anomalous behavior", and "acknowled
 Focus on precision, identifying specific affected components, and potential cascading impacts.
 """
 
+def _normalise_payload(payload: Any) -> dict[str, Any]:
+    """Coerce the model's JSON into the shapes the rest of the pipeline expects.
+
+    The prompt asks for the failed "component(s)", so a model is within its
+    rights to answer with a list — and several do. That list reached
+    ``Incident.title``/``Incident.domain``, which are ``String`` columns, and
+    psycopg rendered it as a Postgres array literal: the incident list showed
+    a title of ``{"Memory Subsystem","Disk I/O Subsystem"}``. Every other
+    reader of ``failure_domain`` (Slack, email, the alert router, the run
+    detail view) formats it into a message and had the same problem.
+
+    Normalising here rather than at each of those call sites means one rule,
+    applied before the value is ever stored.
+
+    Raises ``ValueError`` when the model did not return an object at all. That
+    is deliberately noisy: returning ``{}`` instead is falsy, and the pipeline
+    reads it as "no intelligence was produced" (`analysis.pipeline`), so the run
+    would finish reporting success, create no incident and raise no alert —
+    indistinguishable from a run where nothing was wrong. Raising puts it
+    through the caller's retry loop and, if the model keeps misbehaving, into
+    the heuristic fallback, which is the honest answer.
+    """
+    if not isinstance(payload, dict):
+        raise ValueError(
+            f"Expected a JSON object from the model, got {type(payload).__name__}"
+        )
+
+    domain = payload.get("failure_domain")
+    if isinstance(domain, (list, tuple, set)):
+        payload["failure_domain"] = ", ".join(str(d) for d in domain if d) or "System"
+    elif domain is not None and not isinstance(domain, str):
+        payload["failure_domain"] = str(domain)
+
+    return payload
+
+
 class IncidentIntelligence:
     """Generates human-readable incident summaries with built-in reliability fallbacks."""
 
@@ -104,7 +140,7 @@ class IncidentIntelligence:
                     temperature=0.2,
                     response_format={"type": "json_object"},
                 )
-                return json.loads(response.choices[0].message.content)
+                return _normalise_payload(json.loads(response.choices[0].message.content))
             except Exception as e:
                 logger.warning(f"LLM API attempt {attempt + 1} failed: {e}")
                 if attempt < max_retries - 1:

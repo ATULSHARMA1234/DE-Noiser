@@ -33,7 +33,7 @@ router = APIRouter(tags=["Ingest"])
 
 
 @router.post("/ingest")
-async def ingest_logs(payload: IngestPayload, tenant_id: str = Depends(verify_ingest_auth)):
+async def ingest_logs(payload: IngestPayload, tenant_id: int = Depends(verify_ingest_auth)):
     """
     Standard HTTP ingestion endpoint.
     Accepts arrays of JSON logs (standard format from FluentBit / Vector).
@@ -50,13 +50,11 @@ async def ingest_logs(payload: IngestPayload, tenant_id: str = Depends(verify_in
         # got written to disk and to ClickHouse, and what /v1/logs/query handed
         # back. Everything downstream of this point sees redacted content.
         from denoiser.api.platform_settings import (
-            build_redactor,
             raw_log_storage_enabled,
+            redact_batch,
         )
-        from denoiser.preprocessing.redaction import redact_value
 
-        redactor = build_redactor()
-        body = [redact_value(entry, redactor) for entry in body]
+        body = redact_batch(body)
 
         # Serialize each entry once and append the whole batch in a single write.
         serialized = [
@@ -89,9 +87,11 @@ async def ingest_logs(payload: IngestPayload, tenant_id: str = Depends(verify_in
             if futures:
                 await asyncio.gather(*futures)
         else:
-            # Fallback to direct ClickHouse insert if Kafka is unavailable
+            # Fallback to direct ClickHouse insert if Kafka is unavailable.
+            # Already redacted above, at the boundary, along with everything
+            # else this request fans out to.
             if isinstance(body[0], dict):
-                runtime.clickhouse_store().insert_logs(body, tenant_id=tenant_id)
+                runtime.clickhouse_store().insert_logs(body, tenant_id=tenant_id, redact=False)
 
         # Task 45: Publish to Redis Pub/Sub for horizontally scaled WebSockets.
         # Pipelined so the fan-out is one round-trip, not one per log.

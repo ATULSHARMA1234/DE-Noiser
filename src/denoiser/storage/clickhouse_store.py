@@ -561,8 +561,25 @@ class ClickHouseStore:
         status["complete"] = status["pending"] == 0
         return status
 
-    def insert_logs(self, logs: list[dict[str, Any]], tenant_id: str):
-        """Dual-write logs to ClickHouse"""
+    def insert_logs(self, logs: list[dict[str, Any]], tenant_id: str, *, redact: bool = True):
+        """Dual-write logs to ClickHouse, redacted.
+
+        Redaction happens here, at the one point every ingest path passes
+        through, rather than in each router. It used to be applied in
+        `api.routers_ingest` only, so `/ingest` was clean and `/v1/logs` — the
+        OTLP endpoint, the one the README tells enterprises to use — wrote
+        customer email addresses and bearer tokens to the store verbatim, for
+        the tenant's full retention period. So did the Kafka consumer.
+
+        That was not a policy decision anyone made. It was the same rule typed
+        out in one place and not the others, which is the failure this project
+        has already fixed twice (see `api.scope`). Doing it at the choke point
+        means the unredacted path is the one that no longer exists.
+
+        ``redact=False`` exists for the archive restore path, which is
+        rehydrating rows that were already redacted on the way in; running the
+        patterns again would be wasted work on every restored record.
+        """
         if not self.client:
             return False
 
@@ -571,6 +588,17 @@ class ClickHouseStore:
             # tenant id (e.g. Tenant.id). Fail-closed on an empty tenant so rows
             # are never written under an unscoped / unreachable partition.
             tenant_id = _require_tenant(tenant_id)
+
+            if redact:
+                from denoiser.api.platform_settings import build_redactor
+                from denoiser.preprocessing.redaction import redact_value
+
+                redactor = build_redactor()
+                # Whole-record, not just `message`: the raw JSON is stored
+                # alongside it and is searchable, so redacting one and not the
+                # other leaves the data exactly where a query would find it.
+                logs = [redact_value(log, redactor) for log in logs]
+
             # Flatten log dicts to tuples matching schema
             data = []
             for log in logs:
