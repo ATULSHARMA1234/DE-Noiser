@@ -29,6 +29,7 @@ from denoiser.api.middleware import (
     CorrelationIDMiddleware,
     CSRFMiddleware,
     RateLimitMiddleware,
+    SecurityHeadersMiddleware,
     TenantQuotaMiddleware,
     register_exception_handlers,
 )
@@ -83,6 +84,7 @@ app.add_middleware(CorrelationIDMiddleware)
 from denoiser.api.alerts import router as alerts_router
 from denoiser.api.audit import AuditMiddleware
 from denoiser.api.audit import router as audit_router
+from denoiser.api.billing import router as billing_router
 from denoiser.api.compat import router as compat_router
 from denoiser.api.dashboards import router as dashboards_router
 from denoiser.api.deployments import router as deployments_router
@@ -113,6 +115,7 @@ from denoiser.api.scim import router as scim_router
 from denoiser.api.slo import router as slo_router
 from denoiser.api.sso import router as sso_router
 from denoiser.api.storage import router as storage_router
+from denoiser.api.subject_erasure import router as subject_erasure_router
 from denoiser.api.tracing import router as tracing_router
 from denoiser.api.versioning import VersionPrefixMiddleware
 
@@ -123,6 +126,10 @@ app.add_middleware(AuditMiddleware)
 app.add_middleware(VersionPrefixMiddleware, fastapi_app=app)
 # Outermost: time the full request (including every other middleware).
 app.add_middleware(MetricsMiddleware)
+# Added last, so it runs first on the way out and its headers are on *every*
+# response — including the ones short-circuited by the rate limiter, the quota
+# middleware and the exception handlers, which never reach a route.
+app.add_middleware(SecurityHeadersMiddleware)
 app.include_router(auth_router)
 app.include_router(log_query_router)
 app.include_router(admin_router)
@@ -136,6 +143,7 @@ app.include_router(health_router)
 app.include_router(users_router)
 app.include_router(telemetry_router)
 app.include_router(audit_router)
+app.include_router(billing_router)
 app.include_router(alerts_router)
 app.include_router(tracing_router)
 app.include_router(query_router)
@@ -150,6 +158,7 @@ app.include_router(issues_router)
 app.include_router(sso_router)
 app.include_router(otlp_router)
 app.include_router(storage_router)
+app.include_router(subject_erasure_router)
 app.include_router(notebooks_router)
 app.include_router(scim_router)
 app.include_router(platform_router)

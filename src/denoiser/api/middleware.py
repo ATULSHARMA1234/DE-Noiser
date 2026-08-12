@@ -32,6 +32,90 @@ request_id_ctx: ContextVar[str] = ContextVar("request_id", default="no-request")
 logger = logging.getLogger("denoiser.api")
 
 
+#: Sent on every response. Values are fixed rather than configurable because a
+#: security header that can be weakened per deployment mostly gets weakened.
+#:
+#: `Content-Security-Policy` is deliberately absent here — it is assembled in
+#: `SecurityHeadersMiddleware` because it has a report-only mode and the others
+#: do not.
+_SECURITY_HEADERS = {
+    # A year, subdomains included. The API is credentialed; a single plaintext
+    # request is enough to strip a session cookie in transit.
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+    # Log content is echoed back in error bodies and query results. Without
+    # this, a browser may sniff a JSON response containing attacker-chosen text
+    # as HTML and execute it.
+    "X-Content-Type-Options": "nosniff",
+    # The dashboard and the API share an origin behind the proxy, so a framed
+    # dashboard is a clickjack onto real ADMIN actions — deleting a user,
+    # running a runbook. Neither has a legitimate reason to be embedded.
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    # Nothing here uses the camera, microphone or location, and saying so keeps
+    # an injected script from asking on our behalf.
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
+}
+
+#: Next.js needs inline styles, and inline scripts unless nonces are threaded
+#: through the app. `connect-src 'self'` keeps an injected script from posting
+#: what it reads to somewhere else, which is the control that matters most for a
+#: console displaying customer log content.
+_CONTENT_SECURITY_POLICY = "; ".join([
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "font-src 'self' data:",
+    "connect-src 'self'",
+    "frame-ancestors 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "object-src 'none'",
+])
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Attach the standard security response headers.
+
+    There were none — not in the application, not in `nginx.conf`, not in the
+    `Caddyfile` — on an API that authenticates with cookies and serves a
+    dashboard from the same origin. These are the headers an enterprise buyer
+    checks with a single curl before they read anything else.
+
+    The policy starts in report-only mode. An enforcing CSP that nobody has
+    watched reports for breaks the console on the day it ships, and a broken
+    console gets the header removed rather than fixed. Set
+    ``CONTENT_SECURITY_POLICY_ENFORCE=1`` once the reports are clean; the
+    intent is that this becomes the default and the flag disappears.
+    """
+
+    def __init__(self, app, *, enforce_csp: bool | None = None) -> None:
+        super().__init__(app)
+        self.enforce_csp = (
+            os.getenv("CONTENT_SECURITY_POLICY_ENFORCE", "").lower() in ("1", "true", "yes")
+            if enforce_csp is None
+            else enforce_csp
+        )
+
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        response = await call_next(request)
+
+        for header, value in _SECURITY_HEADERS.items():
+            # setdefault semantics: a route that has deliberately set its own
+            # (an embeddable status badge, say) keeps it.
+            if header not in response.headers:
+                response.headers[header] = value
+
+        csp_header = (
+            "Content-Security-Policy" if self.enforce_csp
+            else "Content-Security-Policy-Report-Only"
+        )
+        if csp_header not in response.headers:
+            response.headers[csp_header] = _CONTENT_SECURITY_POLICY
+
+        return response
+
+
 class CorrelationIDMiddleware(BaseHTTPMiddleware):
     """
     Attaches a unique X-Request-ID to every incoming request.
@@ -491,23 +575,6 @@ def _jwt_subject(token: str) -> str | None:
         return None
     tid = claims.get("tid")
     return f"{tid}/{sub}" if tid is not None else str(sub)
-
-
-
-    """Read ``sub`` from a JWT without hitting the database.
-
-    Signature verification is the route dependency's job — this only needs a
-    stable bucket key, and an unverifiable token gets rejected downstream
-    anyway. Claims from it are never treated as authorisation.
-    """
-    try:
-        from jose import jwt
-
-        claims = jwt.get_unverified_claims(token)
-    except Exception:
-        return None
-    sub = claims.get("sub")
-    return str(sub) if sub else None
 
 
 def _lookup_tenant(api_key: str | None, subject: str | None) -> tuple[str, str] | None:
