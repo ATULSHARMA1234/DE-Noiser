@@ -216,7 +216,72 @@ def validate_for_production(settings: InfraSettings) -> list[str]:
     if settings.database_url.startswith("sqlite"):
         problems.append("DATABASE_URL is SQLite — it cannot serve multiple API replicas safely")
 
+    problems.extend(_external_llm_problems())
+
     return problems
+
+
+#: Hosts that are, by definition, inside the operator's own infrastructure.
+_LOCAL_LLM_HOSTS = ("localhost", "127.0.0.1", "::1", "0.0.0.0", "host.docker.internal")
+
+
+def _external_llm_problems() -> list[str]:
+    """Refuse to send customer log content off-box without an explicit opt-in.
+
+    The product's first claim is that data never leaves the operator's
+    infrastructure, and the incident narrator is the one component that can
+    break it silently: point ``SLD_LLM_BASE_URL`` at a hosted API and every
+    analysed run sends representative log lines to a third party. Nothing said
+    so — not a log line, not a startup check — and the README promises the
+    opposite.
+
+    This is not a refusal to use a hosted model. It is a refusal to do it by
+    accident: set ``LLM_ALLOW_EXTERNAL=true`` and the deployment proceeds, with
+    the operator having stated that they know the model is remote and that the
+    provider is a data processor they are willing to name in their DPA.
+
+    Read from the environment rather than through ``denoiser.config`` to keep
+    this module free of that import; the two settings objects are separate on
+    purpose.
+    """
+    import os
+    from urllib.parse import urlsplit
+
+    if os.getenv("LLM_ALLOW_EXTERNAL", "").lower() in ("1", "true", "yes"):
+        return []
+
+    enabled = os.getenv("SLD_LLM_ENABLED", "").lower() in ("1", "true", "yes")
+    base_url = (os.getenv("SLD_LLM_BASE_URL") or "").strip()
+    if not enabled or not base_url:
+        return []
+
+    host = (urlsplit(base_url).hostname or "").lower()
+    if not host or host in _LOCAL_LLM_HOSTS:
+        return []
+    # A name with no dot cannot be a public DNS name. It is a Compose service, a
+    # Kubernetes Service, or a hosts-file entry — all of them the operator's own
+    # network. `http://ollama:11434` is the documented local setup.
+    if "." not in host:
+        return []
+    # Cluster-internal and link-local suffixes, likewise.
+    if host.endswith((".local", ".internal", ".svc", ".svc.cluster.local")):
+        return []
+    # A private address is still the operator's own network.
+    try:
+        import ipaddress
+
+        if ipaddress.ip_address(host).is_private:
+            return []
+    except ValueError:
+        pass  # not a literal address; fall through to the check below
+
+    return [
+        f"SLD_LLM_BASE_URL points at {host}, which is outside this deployment — "
+        "analysed log content would be sent to a third party, contradicting the "
+        "privacy claim this product is sold on. Use a local model, or set "
+        "LLM_ALLOW_EXTERNAL=true to accept it deliberately and name the provider "
+        "as a processor in your DPA."
+    ]
 
 
 def load_dotenv_into_environ(path: str | os.PathLike[str] = ".env") -> int:
