@@ -69,6 +69,17 @@ dependencies = [
     "signxml>=4.0.0",
 ]
 
+[project.optional-dependencies]
+# Card payments. Optional because this is an on-premise product: a deployment
+# that invoices its customers by hand, or one a customer runs themselves, should
+# not need a payment SDK installed to boot the API. `denoiser.api.billing`
+# imports it lazily and answers 503 when it is absent.
+#
+#   uv sync --extra billing
+billing = [
+    "stripe>=11.0.0",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8.2.0",

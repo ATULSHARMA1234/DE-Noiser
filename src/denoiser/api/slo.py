@@ -5,6 +5,9 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from denoiser.api.auth import User, require_role
+
+# SLO tracking and forecasting.
+from denoiser.api.entitlements import FEATURE_RETENTION_SLO, require_feature
 from denoiser.api.pagination import ResourceId
 from denoiser.api.scope import TenantScope, tenant_scope
 from denoiser.slo.engine import calculate_slo_status
@@ -12,7 +15,11 @@ from denoiser.slo.models import SLOCreateSchema, SLOSchema, SLOStatusSchema
 from denoiser.storage.db import AlertLog, ServiceLevelObjective, get_db
 from denoiser.utils.time import utcnow
 
-router = APIRouter(prefix="/slos", tags=["slo"])
+router = APIRouter(
+    prefix="/slos",
+    tags=["slo"],
+    dependencies=[Depends(require_feature(FEATURE_RETENTION_SLO))],
+)
 
 @router.get("", response_model=list[SLOSchema])
 def list_slos(scope: TenantScope = Depends(tenant_scope), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):

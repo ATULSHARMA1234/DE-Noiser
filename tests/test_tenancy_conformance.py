@@ -130,6 +130,12 @@ NOT_ADDRESSABLE = {
     # issuer controls which organisation an assertion is routed to. Its
     # isolation is asserted in tests/test_per_org_idp.py.
     "TenantIdentityProvider",
+    # One per organisation, and never addressed by its own id: /billing/subscription
+    # reads the caller's own, and every write to it comes from a verified provider
+    # webhook rather than from a user. A customer's ADMIN must not be able to
+    # name a subscription id at all — that is the row that decides what they have
+    # paid for. Its isolation is asserted in tests/test_billing_and_entitlements.py.
+    "Subscription",
 }
 
 

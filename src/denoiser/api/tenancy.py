@@ -159,6 +159,12 @@ TENANT_SCOPED_MODELS = (
     # issuer registered would keep routing assertions to a tenant that no
     # longer exists.
     "TenantIdentityProvider",
+    # The commercial record for this workspace. A departing customer's
+    # subscription must go with them: leaving it behind means a re-created
+    # workspace with the same id inherits somebody else's plan, and it holds the
+    # provider customer id, which links the row to a real person's payment
+    # method.
+    "Subscription",
 )
 
 #: Tables that belong to a customer only through a parent row. They carry no
@@ -184,7 +190,14 @@ CHILD_MODELS = (
 #: destroy the only proof of the erasure it describes. It holds no customer
 #: data — an id, a name, timestamps and ClickHouse mutation ids — which is the
 #: minimum needed to answer a regulator asking whether the deletion completed.
-GLOBAL_MODELS = ("Tenant", "PlatformSetting", "RevokedToken", "ErasureRecord")
+#: `Plan` is the price list — the vendor's own catalogue, not any customer's
+#: data. `ProcessedWebhookEvent` is the idempotency ledger; purging a customer's
+#: entries would let a redelivered event from before their departure be applied
+#: again, and it holds only a provider event id and a type.
+GLOBAL_MODELS = (
+    "Tenant", "PlatformSetting", "RevokedToken", "ErasureRecord",
+    "Plan", "ProcessedWebhookEvent",
+)
 
 
 def purge_tenant(db: Session, tenant: Tenant) -> dict:
