@@ -5,12 +5,21 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
 from denoiser.api.auth import User, require_role
+
+# Runbook execution and alert routing are a paid capability. Gated at the
+# router so every route inherits it — including any added later, which is the
+# failure mode of per-route gating.
+from denoiser.api.entitlements import FEATURE_AUTOMATION, require_feature
 from denoiser.api.pagination import ResourceId
 from denoiser.api.scope import TenantScope, tenant_scope
 from denoiser.storage.db import Runbook, RunbookExecution, get_db
 from denoiser.utils.time import iso_utc
 
-router = APIRouter(prefix="/runbooks", tags=["runbooks"])
+router = APIRouter(
+    prefix="/runbooks",
+    tags=["runbooks"],
+    dependencies=[Depends(require_feature(FEATURE_AUTOMATION))],
+)
 
 class StepSchema(BaseModel):
     name: str
@@ -47,6 +56,37 @@ class RunbookExecutionResponseSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+#: The keys in a runbook step that name somewhere this process will connect to.
+_DESTINATION_KEYS = ("url", "slack_webhook_url", "jira_url")
+
+
+def _reject_disallowed_destinations(steps: list[dict[str, Any]] | None) -> None:
+    """Refuse to save a runbook that points at somewhere we must not fetch.
+
+    The authoritative check is at execution time — DNS is mutable, so a name
+    that is public now can be private later, and `automation.engine` re-resolves
+    on every step. This one exists so the author finds out while they are still
+    looking at the form, instead of discovering it in an execution log days
+    later when an incident fired.
+    """
+    from denoiser.integrations.net_guard import DestinationNotAllowed, validate_destination
+
+    for index, step in enumerate(steps or []):
+        if not isinstance(step, dict):
+            continue
+        for key in _DESTINATION_KEYS:
+            value = step.get(key)
+            if not value:
+                continue
+            try:
+                validate_destination(value)
+            except DestinationNotAllowed as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Step {index + 1}: {key} is not an allowed destination: {exc}",
+                )
+
+
 @router.get("", response_model=list[RunbookResponseSchema])
 def list_runbooks(scope: TenantScope = Depends(tenant_scope), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
     runbooks = scope.query(Runbook).order_by(Runbook.created_at.desc()).all()
@@ -54,6 +94,7 @@ def list_runbooks(scope: TenantScope = Depends(tenant_scope), current_user: User
 
 @router.post("", response_model=RunbookResponseSchema)
 def create_runbook(payload: RunbookCreateSchema, db: Session = Depends(get_db), scope: TenantScope = Depends(tenant_scope), current_user: User = Depends(require_role(["ANALYST", "ADMIN"]))):
+    _reject_disallowed_destinations(payload.steps)
     rb = Runbook(
         name=payload.name,
         trigger_condition=payload.trigger_condition,
@@ -89,7 +130,11 @@ def update_runbook(
     """Update a runbook — used by the UI's enable/disable toggle and editing."""
     rb = scope.get_or_404(Runbook, runbook_id, "Runbook not found")
 
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    changes = payload.model_dump(exclude_unset=True)
+    if "steps" in changes:
+        _reject_disallowed_destinations(changes["steps"])
+
+    for field, value in changes.items():
         setattr(rb, field, value)
 
     db.commit()

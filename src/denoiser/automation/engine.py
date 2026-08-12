@@ -24,6 +24,32 @@ from denoiser.storage.db import Incident, Runbook, RunbookExecution
 
 logger = get_logger(__name__)
 
+def _checked_destination(url: str | None, what: str) -> str:
+    """The URL a step wants to reach, or a refusal.
+
+    Runbook steps are written by tenant operators — ANALYST is enough to author
+    one and to run it — and the URLs in them are ordinary user input that this
+    process then fetches. Unguarded, that is a request forgery primitive with
+    the platform's network position: `http://169.254.169.254/...` reaches the
+    cloud metadata service, and any internal admin port is one hostname away.
+
+    The check runs at execution rather than only at save time because DNS is
+    mutable: a name that resolved publicly when the runbook was written can
+    point somewhere else by the time it fires. `validate_destination` re-resolves
+    on every call for that reason.
+    """
+    from denoiser.integrations.net_guard import DestinationNotAllowed, validate_destination
+
+    if not url:
+        raise ValueError(f"{what} is missing.")
+    try:
+        return validate_destination(url)
+    except DestinationNotAllowed as exc:
+        # The reason, never the response. See the `raise_for_status` handling
+        # below and the equivalent note in integrations.alert_router.
+        raise ValueError(f"{what} is not an allowed destination: {exc}")
+
+
 def execute_runbook_step(step: dict, incident: Incident, execution_logs: list):
     """
     Execute a runbook step with real API integrations.
@@ -40,19 +66,15 @@ def execute_runbook_step(step: dict, incident: Incident, execution_logs: list):
 
     try:
         if action_type == "webhook":
-            url = step.get("url")
-            if not url:
-                raise ValueError("Webhook URL is missing.")
+            url = _checked_destination(step.get("url"), "Webhook URL")
             execution_logs.append(f"[{utcnow().isoformat()}] Sending POST request to {url}")
             response = requests.post(url, json=incident_payload, timeout=10)
             response.raise_for_status()
             execution_logs.append(f"[{utcnow().isoformat()}] Webhook returned {response.status_code} OK")
 
         elif action_type == "slack_notification":
-            slack_url = step.get("slack_webhook_url")
-            if not slack_url:
-                raise ValueError("Slack Webhook URL is not configured in this runbook step.")
-            
+            slack_url = _checked_destination(step.get("slack_webhook_url"), "Slack Webhook URL")
+
             payload = {
                 "text": f"🚨 *New Incident:* {incident.title}\n*Severity:* {incident.severity}\n*Status:* {incident.status}"
             }
@@ -67,7 +89,12 @@ def execute_runbook_step(step: dict, incident: Incident, execution_logs: list):
             jira_token = step.get("jira_api_token")
             if not all([jira_url, jira_user, jira_token]):
                 raise ValueError("Jira integration is not fully configured in this runbook step.")
-            
+
+            # Before the credential exists, not after. This step carries a Jira
+            # API token in an Authorization header, so an unchecked host here is
+            # not only a request forgery — it hands the token to whoever the
+            # runbook author pointed it at.
+            jira_url = _checked_destination(jira_url, "Jira URL")
             url = f"{jira_url.rstrip('/')}/rest/api/2/issue"
             auth = HTTPBasicAuth(jira_user, jira_token)
             payload = {
