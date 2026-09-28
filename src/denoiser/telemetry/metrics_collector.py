@@ -1,6 +1,8 @@
 import asyncio
 import json
 import logging
+import os
+import socket
 import time
 from pathlib import Path
 
@@ -15,12 +17,21 @@ class MetricsCollector:
     """
 
     def __init__(self, data_dir: str = "data", interval_seconds: int = 5):
-        self.data_dir = Path(data_dir)
+        self.data_dir = Path(os.getenv("SEMANTICOS_DATA_DIR", data_dir))
         self.data_dir.mkdir(exist_ok=True, parents=True)
         self.stream_path = self.data_dir / "metrics_stream.jsonl"
         self.interval_seconds = interval_seconds
         self._running = False
         self._task = None
+
+        # These are the vitals of the machine running SemanticOS itself, which
+        # under Kubernetes is the API pod — not any service the platform is
+        # monitoring. Operators who do not want that signal (because it invites
+        # exactly that misreading) can turn it off.
+        self.host = socket.gethostname()
+        self.enabled = os.getenv("HOST_TELEMETRY_ENABLED", "true").lower() not in (
+            "0", "false", "no",
+        )
 
         # Initialize net IO counters to get a baseline for diffing
         try:
@@ -43,9 +54,15 @@ class MetricsCollector:
         """Starts the background collection task."""
         if self._running:
             return
+        if not self.enabled:
+            logger.info("Host telemetry disabled (HOST_TELEMETRY_ENABLED=false).")
+            return
         self._running = True
         self._task = asyncio.create_task(self._collect_loop())
-        logger.info(f"MetricsCollector started. Writing to {self.stream_path} every {self.interval_seconds}s")
+        logger.info(
+            f"MetricsCollector started on {self.host} (SemanticOS API host, not the "
+            f"monitored fleet). Writing to {self.stream_path} every {self.interval_seconds}s"
+        )
 
     def stop(self):
         """Stops the collection task."""
@@ -139,6 +156,12 @@ class MetricsCollector:
 
         return {
             "timestamp": int(now * 1000),
+            # Whose vitals these are. psutil reads the process's own host, which
+            # is the SemanticOS API node — not the fleet being monitored. Without
+            # this stamp the numbers read as though they described the customer's
+            # services, which they never did.
+            "host": self.host,
+            "scope": "semanticos_api_host",
             "cpu_percent": cpu_percent,
             "memory_percent": memory.percent,
             "memory_used_mb": memory.used / (1024 * 1024),

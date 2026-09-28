@@ -2,26 +2,41 @@ import json
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
 # SQLite dependencies just for OTLP collector signature if needed
 from sqlalchemy.orm import Session
 
+from denoiser import runtime
 from denoiser.api.auth import User, require_role
-from denoiser.storage.clickhouse_store import ClickHouseStore
+from denoiser.api.pagination import MAX_PAGE_SIZE
+from denoiser.api.scope import TenantScope, tenant_scope
+from denoiser.logging import get_logger
 from denoiser.storage.db import get_db
 from denoiser.tracing.models import SpanSchema, TraceSchema
 from denoiser.tracing.otlp_collector import process_otlp_traces
+from denoiser.utils.time import iso_utc
 
-router = APIRouter(prefix="/traces", tags=["tracing"])
+logger = get_logger(__name__)
+
+# The trace explorer. OTLP *ingest* is authenticated by API key rather than
+# a user session, so it cannot use this dependency; it is gated separately in
+# denoiser.api.otlp.
+from denoiser.api.entitlements import FEATURE_TRACING, require_feature
+
+router = APIRouter(
+    prefix="/traces",
+    tags=["tracing"],
+    dependencies=[Depends(require_feature(FEATURE_TRACING))],
+)
 
 import contextlib
-from datetime import UTC
+from datetime import UTC, datetime, timedelta
 
 from fastapi import Header
 
 DATA_DIR = Path("data")
-_clickhouse_store = ClickHouseStore()
+
 
 from sqlalchemy import case, func
 
@@ -43,26 +58,145 @@ async def ingest_traces(
         # Default fallback for testing if no key is provided
         tenant_id = tenant.id if tenant else "default_tenant"
 
-        from denoiser.api.main import kafka_producer
-        if kafka_producer:
+        producer = runtime.kafka_producer()
+        if producer:
             payload["_tenant_id"] = tenant_id
             msg_bytes = json.dumps(payload).encode('utf-8')
-            await kafka_producer.send_and_wait("traces_topic", msg_bytes)
+            await producer.send_and_wait("traces_topic", msg_bytes)
         else:
             process_otlp_traces(db, payload, tenant_id=tenant_id)
         return {"status": "success"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+@router.post("/import", summary="Import traces from a stored trace file")
+def import_traces_from_file(
+    filename: str = Body(..., embed=True),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["ANALYST", "ADMIN"])),
+):
+    """Load spans from a JSON trace file in the data directory.
+
+    Traces could only arrive over OTLP from a live instrumented service, so the
+    Traces tab was permanently empty for anyone holding an exported trace file —
+    including the one this project ships. Accepts either the OTLP JSON envelope
+    (``resourceSpans``) or the flat ``[{trace_id, spans: [...]}]`` export shape.
+    """
+    # Resolve inside DATA_DIR only — a filename is not a path the caller gets to
+    # roam with.
+    candidate = (DATA_DIR / Path(filename).name).resolve()
+    if not str(candidate).startswith(str(DATA_DIR.resolve())) or not candidate.is_file():
+        raise HTTPException(status_code=404, detail=f"Trace file not found: {filename}")
+
+    try:
+        payload = json.loads(candidate.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=f"Could not read {filename}: {e}")
+
+    tenant_id = str(current_user.tenant_id)
+
+    if isinstance(payload, dict) and "resourceSpans" in payload:
+        try:
+            process_otlp_traces(db, payload, tenant_id=tenant_id)
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Failed to store spans: {e}")
+        return {"status": "imported", "format": "otlp", "file": candidate.name}
+
+    if not isinstance(payload, list):
+        raise HTTPException(
+            status_code=400,
+            detail="Unrecognised trace file: expected an OTLP object or a list of traces",
+        )
+
+    rows: list[tuple] = []
+    for trace in payload:
+        if not isinstance(trace, dict):
+            continue
+        for span in trace.get("spans", []):
+            start = _parse_span_time(span.get("start_time"))
+            end = _parse_span_time(span.get("end_time"))
+            if start is None:
+                continue
+            duration = span.get("duration_ms")
+            if duration is None:
+                duration = (end - start).total_seconds() * 1000.0 if end else 0.0
+            if end is None:
+                end = start + timedelta(milliseconds=float(duration))
+
+            rows.append((
+                span.get("trace_id") or trace.get("trace_id") or "",
+                span.get("span_id") or "",
+                span.get("parent_span_id") or "",
+                span.get("service_name") or trace.get("root_service") or "unknown_service",
+                span.get("operation_name") or trace.get("root_operation") or "",
+                start,
+                end,
+                float(duration),
+                (span.get("status_code") or "OK").upper(),
+                json.dumps(span.get("attributes") or {}),
+                json.dumps(span.get("events") or []),
+            ))
+
+    if not rows:
+        raise HTTPException(status_code=400, detail=f"No spans found in {candidate.name}")
+
+    if not runtime.clickhouse_store().insert_traces(rows, tenant_id=tenant_id):
+        raise HTTPException(status_code=502, detail="Trace store rejected the spans")
+
+    # Report the span of what was imported: an exported file usually carries its
+    # original timestamps, so the traces can land outside the UI's current time
+    # range and look like the import silently did nothing.
+    starts = [r[5] for r in rows]
+    return {
+        "status": "imported",
+        "format": "export",
+        "file": candidate.name,
+        "traces": len({r[0] for r in rows}),
+        "spans": len(rows),
+        "earliest": iso_utc(min(starts)),
+        "latest": iso_utc(max(starts)),
+    }
+
+
+def _parse_span_time(value: Any):
+    """Span timestamps as naive UTC, accepting ISO strings or epoch ms/seconds."""
+    if value is None:
+        return None
+    if isinstance(value, int | float):
+        seconds = value / 1000.0 if value > 1e11 else float(value)
+        return datetime.fromtimestamp(seconds, UTC).replace(tzinfo=None)
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed.astimezone(UTC).replace(tzinfo=None) if parsed.tzinfo else parsed
+
+
 @router.get("", response_model=list[TraceSchema])
-def list_traces(from_ts: int | None = None, to_ts: int | None = None, limit: int = 50, db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
+def list_traces(
+    from_ts: int | None = None,
+    to_ts: int | None = None,
+    limit: int = Query(50, ge=1, le=MAX_PAGE_SIZE),
+    db: Session = Depends(get_db),
+    scope: TenantScope = Depends(tenant_scope),
+    current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"])),
+):
     """
     List trace aggregates. Uses ClickHouse if available, else falls back to SQLite data.
     """
-    client = _clickhouse_store.client
+    store = runtime.clickhouse_store()
+    client = store.client
     if client:
         try:
-            # Group by trace_id to get root span data and trace metadata
+            # The tenant predicate and the time bounds come from the store —
+            # the only module that knows how the trace table is partitioned, and
+            # the only one that refuses to build a clause without a tenant.
+            where, params = store.scope(
+                current_user.tenant_id,
+                from_ts=from_ts,
+                to_ts=to_ts,
+                time_column="start_time",
+            )
             sql = f"""
                 SELECT
                     trace_id,
@@ -73,19 +207,11 @@ def list_traces(from_ts: int | None = None, to_ts: int | None = None, limit: int
                     count() AS span_count,
                     countIf(status_code = 'ERROR') AS error_count
                 FROM semantic_traces
-                WHERE tenant_id = {{tenant_id:String}}
-                { " AND start_time >= toDateTime64({from_ts:Float64}, 3, 'UTC')" if from_ts is not None else "" }
-                { " AND start_time <= toDateTime64({to_ts:Float64}, 3, 'UTC')" if to_ts is not None else "" }
+                WHERE {where}
                 GROUP BY trace_id
                 ORDER BY start_time DESC
                 LIMIT {limit}
             """
-
-            params = {'tenant_id': current_user.tenant_id}
-            if from_ts is not None:
-                params['from_ts'] = from_ts / 1000.0
-            if to_ts is not None:
-                params['to_ts'] = to_ts / 1000.0
 
             result = client.query(sql, parameters=params)
 
@@ -122,27 +248,43 @@ def list_traces(from_ts: int | None = None, to_ts: int | None = None, limit: int
             func.max(Span.end_time).label("end_time"),
             func.count(Span.id).label("span_count"),
             func.sum(case((Span.status_code == 'ERROR', 1), else_=0)).label("error_count")
-        ).filter(Span.tenant_id == current_user.tenant_id)
+        ).filter(scope.predicate(Span))
         
         if from_ts is not None:
             query = query.filter(Span.start_time >= datetime.fromtimestamp(from_ts / 1000.0, tz=UTC))
         if to_ts is not None:
             query = query.filter(Span.start_time <= datetime.fromtimestamp(to_ts / 1000.0, tz=UTC))
             
-        # SQLite doesn't let us easily pull the FIRST service_name per trace without a subquery or window func. 
-        # For fallback, we just pull aggregated info. Root service/operation can be looked up or approximated.
-        # But wait, we can just join or do an extra query if we really want root spans. For now we will approximate
-        # or do a slightly simpler group by.
+        # The aggregate cannot carry the root span's service and operation, so
+        # they are fetched separately — but once for the whole page, not once
+        # per row. The per-row version issued up to two extra queries for every
+        # trace returned, so a listing of 100 was 201 round-trips, in the
+        # degraded path that exists precisely for when the fast store is down.
         results = query.group_by(Span.trace_id).order_by(func.min(Span.start_time).desc()).limit(limit).all()
-        
+
+        trace_ids = [row.trace_id for row in results]
+        roots: dict[str, Span] = {}
+        if trace_ids:
+            # Tenant-scoped, like the aggregate above it. These two lookups were
+            # unscoped, which — with trace ids being random — was a narrow leak
+            # rather than a practical one, but "narrow" is not the standard the
+            # rest of this module holds to.
+            candidates = (
+                db.query(Span)
+                .filter(scope.predicate(Span), Span.trace_id.in_(trace_ids))
+                .order_by(Span.start_time.asc())
+                .all()
+            )
+            # A true root (no parent) wins; otherwise the earliest span stands in.
+            for span in candidates:
+                if span.parent_span_id is None:
+                    roots[span.trace_id] = span
+                elif span.trace_id not in roots:
+                    roots.setdefault(span.trace_id, span)
+
         filtered = []
         for row in results:
-            # We don't have root_service in this simplified group_by, so we fetch the root span or just label it
-            # To be efficient, let's just do a quick fetch of the root span for these trace_ids
-            root_span = db.query(Span).filter(Span.trace_id == row.trace_id, Span.parent_span_id.is_(None)).first()
-            if not root_span:
-                # If no strict root span found, just pick any span for the trace
-                root_span = db.query(Span).filter(Span.trace_id == row.trace_id).first()
+            root_span = roots.get(row.trace_id)
 
             duration_ms = max(0, (row.end_time - row.start_time).total_seconds() * 1000.0) if row.end_time and row.start_time else 0
             filtered.append(TraceSchema(
@@ -157,26 +299,36 @@ def list_traces(from_ts: int | None = None, to_ts: int | None = None, limit: int
             ))
             
         return filtered
-    except Exception as e:
-        print(f"SQLite fallback failed: {e}")
+    except Exception:
+        logger.exception("Trace listing fell back to SQLite and failed")
         return []
 
 @router.get("/{trace_id}", response_model=TraceSchema)
-def get_trace(trace_id: str, db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
+def get_trace(
+    trace_id: str,
+    scope: TenantScope = Depends(tenant_scope),
+    current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"])),
+):
     """
     Get full trace details including all spans. Uses ClickHouse if available, else falls back to SQLite.
     """
-    client = _clickhouse_store.client
+    store = runtime.clickhouse_store()
+    client = store.client
     if client:
         try:
-            sql = """
+            where, params = store.scope(
+                current_user.tenant_id,
+                extra=["trace_id = {trace_id:String}"],
+                bind={"trace_id": trace_id},
+            )
+            sql = f"""
                 SELECT *
                 FROM semantic_traces
-                WHERE tenant_id = {tenant_id:String} AND trace_id = {trace_id:String}
+                WHERE {where}
                 ORDER BY start_time ASC
             """
 
-            result = client.query(sql, parameters={'tenant_id': current_user.tenant_id, 'trace_id': trace_id})
+            result = client.query(sql, parameters=params)
             if result.result_rows:
                 spans = []
                 for row in result.result_rows:
@@ -228,7 +380,12 @@ def get_trace(trace_id: str, db: Session = Depends(get_db), current_user: User =
 
     # SQLite fallback
     try:
-        db_spans = db.query(Span).filter(Span.trace_id == trace_id, Span.tenant_id == current_user.tenant_id).order_by(Span.start_time.asc()).all()
+        db_spans = (
+            scope.query(Span)
+            .filter(Span.trace_id == trace_id)
+            .order_by(Span.start_time.asc())
+            .all()
+        )
         if not db_spans:
             raise HTTPException(status_code=404, detail="Trace not found")
             
@@ -267,7 +424,7 @@ def get_trace(trace_id: str, db: Session = Depends(get_db), current_user: User =
         )
     except HTTPException:
         raise
-    except Exception as e:
-        print(f"SQLite fallback failed: {e}")
+    except Exception:
+        logger.exception("Trace lookup fell back to SQLite and failed")
         raise HTTPException(status_code=404, detail="Trace not found")
 

@@ -1,37 +1,88 @@
-import asyncio
 import json
 import os
-import time
-import uuid
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 
-import polars as pl
 from celery import Celery
 
-from denoiser.cli.main import (
-    AnomalyScorer,
-    BaselineManager,
-    Deduplicator,
-    IncidentIntelligence,
-    LocalEmbeddingProvider,
-    LogClusterer,
-    LogReader,
-    Normalizer,
-    Redactor,
-)
-from denoiser.config import settings
-from denoiser.detection.causal_scorer import CausalScorer
-from denoiser.detection.metrics_correlator import MetricsCorrelator
-from denoiser.detection.severity import SeverityScorer
-from denoiser.integrations.alert_router import AlertPayload, alert_router
-from denoiser.integrations.email import email_notifier
+from denoiser.analysis import pipeline
 from denoiser.logging import get_logger
-from denoiser.preprocessing.timestamp import TimestampExtractor
-from denoiser.storage.db import AnalysisRun, Incident, SessionLocal
+from denoiser.storage.db import SessionLocal
 from denoiser.storage.vector_store import VectorStore
 
 logger = get_logger(__name__)
+
+
+# Rows per ClickHouse insert when indexing an analysed source.
+_INDEX_BATCH_SIZE = 5_000
+
+
+def index_records_for_search(records: list[dict], tenant_id, run_id: str) -> int:
+    """Write the analysed records to the searchable log store.
+
+    Analysis read log files straight off disk and never indexed them, so a
+    source you had just analysed returned nothing in Explore, produced no
+    extracted metrics, and could not be monitored — every one of those features
+    queries ClickHouse, and only the live /ingest path ever wrote to it.
+
+    Returns the number of rows indexed (0 when the store is unavailable, which
+    is not fatal: the analysis result itself does not depend on it).
+    """
+    if not tenant_id or not records:
+        return 0
+
+    try:
+        from denoiser import runtime
+
+        store = runtime.clickhouse_store()
+        if not store.client:
+            logger.warning("ClickHouse unavailable; analysed logs were not indexed for search")
+            return 0
+
+        # `raw_text` arrives already redacted from the read loop, so the copy
+        # made searchable here carries no secrets. Indexing it verbatim was what
+        # made every password and card number in an analysed file queryable
+        # through /v1/logs/query.
+        indexed = 0
+        for start in range(0, len(records), _INDEX_BATCH_SIZE):
+            batch = []
+            for record in records[start:start + _INDEX_BATCH_SIZE]:
+                metadata = {}
+                if record.get("metadata"):
+                    try:
+                        metadata = json.loads(record["metadata"])
+                    except (TypeError, ValueError):
+                        metadata = {}
+
+                entry = {
+                    "message": record["raw_text"],
+                    # resolve_source/resolve_level read these keys, so a log that
+                    # names its own service or level keeps it; the file it came
+                    # from is the fallback identity.
+                    "service": metadata.get("service") or record.get("source_label"),
+                    "source": record.get("source_label"),
+                    "run_id": run_id,
+                    **{k: v for k, v in metadata.items() if k not in ("service",)},
+                }
+                if record.get("timestamp") is not None:
+                    entry["timestamp"] = record["timestamp"].isoformat()
+                batch.append(entry)
+
+            if store.insert_logs(batch, tenant_id=str(tenant_id)):
+                indexed += len(batch)
+
+        if indexed:
+            logger.info("Indexed %d analysed log lines for search (run %s)", indexed, run_id)
+        return indexed
+    except Exception as e:
+        logger.warning(f"Failed to index analysed logs for search: {e}")
+        return 0
+
+
+
+
+
+
+
 
 # Initialize Celery using local Redis if URL not provided
 redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
@@ -52,371 +103,42 @@ vector_store = VectorStore()
 
 @celery_app.task(bind=True)
 def run_analysis_task(self, request_dict: dict):
-    """
-    Background Celery task that performs heavy log ingestion, deduplication,
-    embedding, clustering, anomaly detection, LLM analysis, and DB persistence.
+    """Run one analysis and record it.
+
+    The 461-line body this replaced is now `denoiser.analysis.pipeline`, staged
+    over one explicit run state. What is left here is what is genuinely Celery's:
+    unpacking the message, reporting progress, and owning the database session.
     """
     logger.info(f"Starting async analysis task: {self.request.id}")
-    self.update_state(state='PROGRESS', meta={'progress': 10, 'status': 'Ingesting files'})
 
-    start_time = time.time()
-
-    # Unpack request
-    sources = request_dict.get("sources", [])
-    if not sources and "source" in request_dict:
-        sources = [request_dict.get("source")]
-
-    baseline = request_dict.get("baseline")
-    intelligence = request_dict.get("intelligence", False)
-    top_n = request_dict.get("top_n", 3)
-
-    # 1. Ingestion
-    timestamp_extractor = TimestampExtractor()
-    records_data = []
-    reader = LogReader()
-
-    for src in sources:
-        source_label = Path(src).stem
-        try:
-            for record in reader.read(src):
-                epoch_ms = timestamp_extractor.extract(record.raw_text)
-                dt = (
-                    datetime.fromtimestamp(epoch_ms / 1000.0, UTC)
-                    if epoch_ms is not None
-                    else None
-                )
-
-                records_data.append({
-                    "raw_text": record.raw_text,
-                    "source_path": record.source,
-                    "source_label": source_label,
-                    "line_number": record.line_number,
-                    "timestamp": dt,
-                    "timestamp_ms": epoch_ms or 0,
-                    "metadata": json.dumps(record.metadata)
-                })
-        except Exception as e:
-            logger.warning(f"Failed to read source {src}: {e}")
-
-    if not records_data:
-        return {"status": "error", "message": "No logs found at source(s)"}
-
-    self.update_state(state='PROGRESS', meta={'progress': 30, 'status': 'Redacting and Normalizing'})
-    df = pl.DataFrame(records_data)
-
-    # 3. Apply Redaction and Normalization
-    redactor = Redactor(enabled=True)
-    normalizer = Normalizer()
-
-    raw_texts = df["raw_text"].to_list()
-    redacted_texts = [redactor.redact(t) for t in raw_texts]
-    normalized_texts = normalizer.normalize_batch(redacted_texts)
-    df = df.with_columns(pl.Series("normalized_text", normalized_texts))
-
-    # 4. Deduplication
-    deduper = Deduplicator()
-    from denoiser.ingestion.models import LogRecord
-    for row in df.iter_rows(named=True):
-        meta = json.loads(row["metadata"]) if row["metadata"] else {}
-        meta["source_label"] = row["source_label"]
-
-        rec = LogRecord(
-            raw_text=row["raw_text"],
-            source=row["source_path"],
-            line_number=row["line_number"],
-            timestamp=row["timestamp"],
-            metadata=meta,
-            normalized_text=row["normalized_text"]
-        )
-        deduper.add(rec)
-
-    unique_templates = deduper.get_unique_templates()
-    if not unique_templates:
-        return {"status": "error", "message": "No unique log templates found"}
-
-    # 5. Embeddings
-    self.update_state(state='PROGRESS', meta={'progress': 50, 'status': 'Generating Embeddings'})
-    embedder = LocalEmbeddingProvider()
-    vectors = embedder.embed(unique_templates)
-
-    # Persist vectors to LanceDB (Task 38)
-    try:
-        groups = deduper.get_all_groups()
-        source_list = []
-        ts_list = []
-        for template in unique_templates:
-            records = groups.get(template, [])
-            first = records[0] if records else None
-            source_list.append(
-                first.metadata.get("source_label", first.source if first else "unknown")
-                if first
-                else "unknown"
-            )
-            ts_list.append(
-                int(first.timestamp.timestamp() * 1000)
-                if first and first.timestamp
-                else int(time.time() * 1000)
-            )
-
-        vector_store.add_embeddings(
-            ids=[str(uuid.uuid4()) for _ in unique_templates],
-            vectors=vectors,
-            templates=unique_templates,
-            sources=source_list,
-            timestamps=ts_list
-        )
-    except Exception as e:
-        logger.error(f"Failed to persist to LanceDB: {e}")
-
-    # 6. Clustering
-    self.update_state(state='PROGRESS', meta={'progress': 60, 'status': 'Clustering Logs'})
-    clusterer = LogClusterer()
-    clusters = clusterer.fit_predict(
-        unique_templates, vectors, deduper.get_all_groups(), deduper.get_all_counts()
+    request = pipeline.RunRequest.from_dict(
+        request_dict, run_id=self.request.id or ""
     )
 
-    # 7. Anomaly Detection
-    anomalies = None
-    if baseline:
-        bm = BaselineManager(baseline)
-        scorer = AnomalyScorer(bm)
-        results = scorer.score_batch(unique_templates, vectors)
-        anomalies = {res.template: res for res in results}
-
-    # 8. Intelligence
-    llm_payload = None
-    if intelligence:
-        self.update_state(state='PROGRESS', meta={'progress': 80, 'status': 'Generating AI Summary'})
-        settings.llm_enabled = True
-        intel = IncidentIntelligence()
-        llm_payload = intel.generate_summary(clusters, anomalies, top_n=top_n)
-
-    # 9. Format Response
-    formatted_clusters = []
-    summaries = llm_payload.get("cluster_summaries", []) if llm_payload else []
-
-    for i, c in enumerate(clusters):
-        cluster_data = {
-            "id": c.cluster_id,
-            "cluster_id": c.cluster_id,
-            "size": c.size,
-            "summary": summaries[i] if i < len(summaries) else "Analyzing...",
-            "source": f"{c.representative_source}:{c.representative_line}",
-            "representative_log": c.representative_raw,
-            "representative_template": c.representative_template,
-            "representative_timestamp_ms": getattr(c, "representative_timestamp_ms", 0),
-            "anomaly_label": "known",
-            "anomaly_score": 0.0
-        }
-        if anomalies and c.representative_template in anomalies:
-            res = anomalies[c.representative_template]
-            cluster_data["anomaly_label"] = res.label.value
-            cluster_data["anomaly_score"] = res.distance
-
-        formatted_clusters.append(cluster_data)
-
-    # 10. Cross-service causal links and severity labels
-    try:
-        causal_links = CausalScorer().analyze(clusters, deduper.get_all_groups())
-    except Exception as e:
-        logger.error(f"Causal scorer failed: {e}")
-        causal_links = []
-
-    narratives = {}
-    if intelligence and causal_links:
-        try:
-            narratives = IncidentIntelligence().narrate_causal_links(causal_links)
-        except Exception as e:
-            logger.error(f"Failed to generate causal narration: {e}")
-
-    formatted_links = []
-    for link in causal_links:
-        key = f"{link.source_service}->{link.target_service}"
-        narrative_val = narratives.get(key) or (
-            f"Anomalous pattern in {link.source_service} co-occurred with a warning in "
-            f"{link.target_service} after an average delay of {link.avg_delay_ms:.1f}ms "
-            f"(Confidence: {link.confidence * 100:.0f}%)."
-        )
-        formatted_links.append({
-            "source_cluster_id": link.source_cluster_id,
-            "target_cluster_id": link.target_cluster_id,
-            "source_service": link.source_service,
-            "target_service": link.target_service,
-            "source_template": link.source_template,
-            "target_template": link.target_template,
-            "confidence": link.confidence,
-            "avg_delay_ms": link.avg_delay_ms,
-            "occurrences": link.occurrences,
-            "direction": link.direction,
-            "narrative": narrative_val,
-        })
+    def progress(percent: int, status: str) -> None:
+        self.update_state(state="PROGRESS", meta={"progress": percent, "status": status})
 
     try:
-        severity_map = SeverityScorer().score_all(clusters, anomalies, causal_links)
-        for cluster_data in formatted_clusters:
-            sev = severity_map.get(cluster_data["cluster_id"])
-            cluster_data["priority"] = sev.priority if sev else "P3"
-            cluster_data["composite_severity_score"] = sev.composite_score if sev else 0.0
-            cluster_data["severity_breakdown"] = sev.breakdown if sev else {}
-            cluster_data["keyword_flag"] = sev.keyword_flag if sev else False
-    except Exception as e:
-        logger.error(f"Severity scorer failed: {e}")
+        state = pipeline.analyse(request, vector_store=vector_store, progress=progress)
+    except pipeline.RunAborted as e:
+        return {"status": "error", "message": str(e)}
 
-    metrics_context = {"status": "disabled", "clusters_correlated": 0, "clusters_total": 0}
-    try:
-        correlator = MetricsCorrelator()
-        clusters_total = 0
-        clusters_correlated = 0
-        for cluster_data in formatted_clusters:
-            if cluster_data.get("cluster_id") == -1:
-                cluster_data["metrics_context"] = {"status": "skipped_noise"}
-                continue
-            clusters_total += 1
-            if cluster_data.get("priority", "P3") not in ("P0", "P1", "P2"):
-                cluster_data["metrics_context"] = {"status": "skipped_non_incident"}
-                continue
-            ts_ms = int(cluster_data.get("representative_timestamp_ms") or 0)
-            if ts_ms <= 0:
-                cluster_data["metrics_context"] = {"status": "no_timestamp"}
-                continue
-            ctx = correlator.get_context_for_anomaly(ts_ms, window_ms=30000)
-            cluster_data["metrics_context"] = ctx
-            if ctx.get("status") == "correlated":
-                clusters_correlated += 1
-        metrics_context = {
-            "status": "correlated" if clusters_correlated > 0 else "no_data",
-            "clusters_correlated": clusters_correlated,
-            "clusters_total": clusters_total,
-        }
-    except Exception as e:
-        logger.error(f"Metrics correlator failed: {e}")
-        metrics_context = {"status": "error", "message": str(e)}
-
-    # 11. Database persistence
-    self.update_state(state='PROGRESS', meta={'progress': 95, 'status': 'Saving to Database'})
+    progress(95, "Saving to Database")
     db = SessionLocal()
-    duration = time.time() - start_time
-    run_id = self.request.id or f"run_{uuid.uuid4().hex[:8]}"
-    source_name = ", ".join(sources)
     try:
-        tenant_id = request_dict.get("tenant_id")
-        db_run = AnalysisRun(
-            id=run_id,
-            tenant_id=tenant_id,
-            source=source_name,
-            status="Completed",
-            raw_lines=deduper.total_count,
-            cluster_count=len(clusters),
-            reduction_ratio=1.0 - (len(clusters) / deduper.total_count) if deduper.total_count > 0 else 0,
-            duration_sec=duration,
-            clusters_snapshot=formatted_clusters
+        incident = pipeline.persist(state, db, index=index_records_for_search)
+        pipeline.announce(
+            state, db, alert=pipeline.pending_alert(state), incident=incident
         )
-        db.add(db_run)
-
-        if llm_payload:
-            new_incident = Incident(
-                tenant_id=tenant_id,
-                title=llm_payload.get("failure_domain", "Unknown Failure"),
-                domain=llm_payload.get("failure_domain", "System"),
-                impact_score=min(1.0, len(clusters) / 10.0) if len(clusters) > 1 else 0.3,
-                summary=llm_payload.get("incident_summary", ""),
-                remediation_hints=llm_payload.get("root_cause_hints", []),
-                run_id=run_id,
-                source=source_name,
-                total_logs=deduper.total_count,
-                cluster_count=len(clusters),
-            )
-            db.add(new_incident)
-
-            # Dispatch alerts via AlertRouter
-            try:
-                # Find the most severe priority among clusters
-                max_priority = "P3"
-                anomaly_score = 0.0
-                representative_log = "No log available"
-                keyword_flag = False
-
-                for c in formatted_clusters:
-                    if c.get("priority") in ("P0", "P1") and max_priority not in ("P0", "P1"):
-                        max_priority = c.get("priority", "P3")
-                    if max_priority == "P0":
-                        break
-
-                if formatted_clusters:
-                    anomaly_score = formatted_clusters[0].get("anomaly_score", 0.0)
-                    representative_log = formatted_clusters[0].get("representative_log", "")
-                    keyword_flag = formatted_clusters[0].get("keyword_flag", False)
-
-                if max_priority in ("P0", "P1", "P2"):
-                    alert = AlertPayload(
-                        source=source_name,
-                        run_id=run_id,
-                        priority=max_priority,
-                        cluster_id=formatted_clusters[0].get("cluster_id", 0) if formatted_clusters else 0,
-                        cluster_summary=llm_payload.get("incident_summary", "Anomaly Detected"),
-                        representative_log=representative_log,
-                        anomaly_score=anomaly_score,
-                        causal_links=formatted_links,
-                        intelligence=llm_payload,
-                        keyword_flag=keyword_flag
-                    )
-
-                    # Fire email concurrently (using thread/synchronous send)
-                    # We send emails for P0 or P1
-                    if max_priority in ("P0", "P1"):
-                        try:
-                            email_notifier.send_alert(alert)
-                        except Exception as em_err:
-                            logger.error(f"EmailNotifier error: {em_err}")
-
-                    delivery_records = asyncio.run(alert_router.dispatch(alert))
-
-                    # Store delivery records in DB
-                    from denoiser.storage.db import AlertLog
-                    for rec in delivery_records:
-                        db_log = AlertLog(
-                            webhook_id=rec.webhook_id,
-                            alert_fingerprint=rec.alert_fingerprint,
-                            priority=rec.priority,
-                            status=rec.status.value,
-                            http_status=rec.http_status,
-                            latency_ms=rec.latency_ms,
-                            error=rec.error,
-                            timestamp=rec.timestamp
-                        )
-                        db.add(db_log)
-
-            except Exception as e:
-                logger.error(f"Failed to dispatch alerts: {e}")
-
-        db.commit()
-
-        # Post-commit triggers
-        if llm_payload:
-            try:
-                from denoiser.automation.engine import process_incident
-                process_incident(db, new_incident)
-            except Exception as auto_err:
-                logger.error(f"Failed to execute runbooks: {auto_err}")
-
     except Exception as e:
         logger.error(f"DB Error: {e}")
         db.rollback()
+        state.failed("persistence", e)
     finally:
         db.close()
 
-    return {
-        "status": "success",
-        "run_id": run_id,
-        "clusters": formatted_clusters,
-        "intelligence": llm_payload,
-        "causal_links": formatted_links,
-        "metrics_context": metrics_context,
-        "total_logs": deduper.total_count,
-        "total_logs_analyzed": deduper.total_count,
-        "duration_sec": duration,
-        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
-    }
+    return pipeline.result(state)
+
 
 @celery_app.task
 def evaluate_slos():
@@ -427,34 +149,28 @@ def evaluate_slos():
     logger.info("Evaluating active Service Level Objectives (SLOs)...")
     db = SessionLocal()
     try:
-        import random
-
-        from denoiser.storage.clickhouse_store import ClickHouseStore
+        from denoiser.slo.engine import calculate_slo_status
         from denoiser.storage.db import ServiceLevelObjective, SLODataPoint
 
         slos = db.query(ServiceLevelObjective).all()
-        ch_store = ClickHouseStore()
 
         for slo in slos:
-            # Simplistic Evaluation
-            # Let's query ClickHouse to see the volume of logs for this service
             try:
-                res = ch_store.query_logs(f"service:{slo.service}", limit=1000, tenant_id=slo.tenant_id)
-                total_events = len(res)
+                # Real SLI from ingested logs — no fabricated data. When nothing
+                # in the window could be measured the engine reports NO_DATA and
+                # we record nothing rather than inventing a data point. For a
+                # latency SLO the denominator is the measurable subset, not every
+                # log line, so persist that as the data point's total.
+                status = calculate_slo_status(db, slo)
+                measured_events = status.get("measured_events", status.get("total_events", 0))
+                good_events = status.get("good_events", 0)
+                value = status.get("current_value", 0.0)
 
-                # Mock good events based on target percentage to keep it looking somewhat realistic
-                target = slo.target_percentage / 100.0
-                if total_events > 0:
-                    # Randomize slightly around the target
-                    actual_ratio = target + random.uniform(-0.02, 0.005)
-                    good_events = int(total_events * actual_ratio)
-                else:
-                    # Synthetic data if no real logs
-                    total_events = random.randint(100, 1000)
-                    actual_ratio = target + random.uniform(-0.02, 0.005)
-                    good_events = int(total_events * actual_ratio)
-
-                value = (good_events / total_events) * 100.0 if total_events > 0 else 100.0
+                if status.get("status") == "NO_DATA" or measured_events <= 0:
+                    # Nothing measurable this cycle; skip rather than record a
+                    # perfect score earned by an absence of evidence.
+                    continue
+                total_events = measured_events
 
                 dp = SLODataPoint(
                     slo_id=slo.id,
@@ -492,6 +208,7 @@ def evaluate_slos():
                             tenant_id=slo.tenant_id,
                             title=f"SLO Breach: {slo.name}",
                             domain=slo.service,
+                            severity="P1",
                             impact_score=1.0,
                             summary=f"SLO '{slo.name}' breached for service '{slo.service}'. Target: {slo.target_percentage}%, Actual: {value:.2f}%",
                             remediation_hints=["Check recent deployments", "Scale up service replicas"],
@@ -550,6 +267,7 @@ def evaluate_slos():
                                         tenant_id=slo.tenant_id,
                                         title=f"Predictive Warning: {slo.name} will breach soon",
                                         domain=slo.service,
+                                        severity="P2",
                                         impact_score=0.8,
                                         summary=f"Predictive AI (Holt-Winters) foresees SLO '{slo.name}' for service '{slo.service}' will breach its target of {slo.target_percentage}% in approx {int(minutes_to_depletion)} minutes.",
                                         remediation_hints=["Investigate current trend", "Rollback recent deployment"],
@@ -588,32 +306,45 @@ def extract_metrics():
     logger.info("Extracting metrics from logs...")
     db = SessionLocal()
     try:
-        import random
-
-        from denoiser.storage.clickhouse_store import ClickHouseStore
+        from denoiser import runtime
         from denoiser.storage.db import ExtractedMetric, MetricRule
+        from denoiser.storage.errors import StoreUnavailable
 
         rules = db.query(MetricRule).filter(MetricRule.enabled).all()
-        ch_store = ClickHouseStore()
+        ch_store = runtime.clickhouse_store()
 
+        now = datetime.now(UTC)
         for rule in rules:
             try:
-                # In a real system, you'd aggregate logs over window_seconds.
-                # Here we just run a basic count to simulate extraction
-                res = ch_store.query_logs(rule.query, limit=100)
-                count = len(res)
+                # Aggregate the rule's real matches over its own window_seconds,
+                # in ClickHouse — no synthetic multipliers.
+                window_ms = int((rule.window_seconds or 60) * 1000)
+                to_ms = int(now.timestamp() * 1000)
+                from_ms = to_ms - window_ms
 
-                if rule.aggregation == "count":
-                    value = count
-                else:
-                    value = count * random.uniform(1.0, 5.0) # mock
+                value = ch_store.aggregate_metric(
+                    rule.query,
+                    aggregation=rule.aggregation or "count",
+                    tenant_id=rule.tenant_id,
+                    from_ts=from_ms,
+                    to_ts=to_ms,
+                )
 
                 dp = ExtractedMetric(
                     rule_id=rule.id,
-                    timestamp=datetime.now(UTC),
+                    tenant_id=rule.tenant_id,
+                    timestamp=now,
                     value=value
                 )
                 db.add(dp)
+            except StoreUnavailable as e:
+                # A gap in the series, not a zero in it. Recording the store's
+                # own absence as a measurement would put a permanent flat line
+                # through every outage, and nothing downstream could ever tell
+                # it apart from a genuinely quiet window.
+                logger.warning(
+                    "Skipped metric rule %s: %s", rule.id, e,
+                )
             except Exception as e:
                 logger.error(f"Failed to extract metric for rule {rule.id}: {e}")
 
@@ -624,9 +355,65 @@ def extract_metrics():
     finally:
         db.close()
 
+@celery_app.task
+def evaluate_monitors():
+    """Periodic task: run every enabled monitor's query and fire on breach."""
+    from denoiser.monitors.evaluator import evaluate_all
+
+    db = SessionLocal()
+    try:
+        results = evaluate_all(db)
+        breaching = [r for r in results if r.is_breaching]
+        logger.info(
+            "Evaluated %d monitors (%d breaching)", len(results), len(breaching)
+        )
+        return {"evaluated": len(results), "breaching": len(breaching)}
+    except Exception as e:
+        logger.error(f"Monitor evaluation failed: {e}")
+        db.rollback()
+        return {"evaluated": 0, "error": str(e)}
+    finally:
+        db.close()
+
+
+@celery_app.task
+def aggregate_billing(day: str | None = None):
+    """Periodic task: meter per-tenant usage and enforce tier retention.
+
+    This lived on a second Celery app with its own beat that no deployment ever
+    started, so usage was never metered and retention was never applied. It runs
+    on the platform's own beat now.
+
+    ``day`` is an ISO date, for re-running a specific day by hand. Omitted, the
+    worker meters yesterday.
+    """
+    from datetime import date
+
+    from denoiser.workers.billing_worker import aggregate_billing as run_aggregation
+
+    try:
+        return run_aggregation(day=date.fromisoformat(day) if day else None)
+    except Exception as e:
+        logger.error(f"Billing aggregation failed: {e}")
+        return {"error": str(e)}
+
+
 # Setup periodic tasks
 @celery_app.on_after_configure.connect
 def setup_periodic_tasks(sender, **kwargs):
+    from celery.schedules import crontab
+
     # Execute every minute
     sender.add_periodic_task(60.0, evaluate_slos.s(), name='evaluate_slos_every_minute')
     sender.add_periodic_task(60.0, extract_metrics.s(), name='extract_metrics_every_minute')
+    sender.add_periodic_task(60.0, evaluate_monitors.s(), name='evaluate_monitors_every_minute')
+    # Usage metering + tier retention, for the day that just ended.
+    #
+    # 00:15 rather than 00:00: the pass reads a closed day, and a quarter hour
+    # of slack lets writes that were in flight at the boundary land before they
+    # are counted. (The window itself is explicit now — see
+    # `billing_worker.aggregate_billing` — so this is about completeness, not
+    # about which day gets read.)
+    sender.add_periodic_task(
+        crontab(minute=15, hour=0), aggregate_billing.s(), name='aggregate_billing_daily'
+    )

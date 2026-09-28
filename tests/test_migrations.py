@@ -50,8 +50,13 @@ class TestFreshDatabase:
 
         tables = set(inspect(fresh_engine).get_table_names())
         assert "alembic_version" in tables
-        # 20 model tables + alembic_version
-        assert len(tables) == 21
+        # Every model table, derived from the metadata rather than a hardcoded
+        # count — the point is that migrations and models agree, and a literal
+        # just has to be bumped by hand every time a table is added.
+        from denoiser.storage.db import Base
+
+        expected = set(Base.metadata.tables) | {"alembic_version"}
+        assert tables == expected
 
     def test_includes_columns_that_predate_the_migrations(self, fresh_engine):
         """These only ever existed via ad-hoc ALTERs; the baseline must carry them."""

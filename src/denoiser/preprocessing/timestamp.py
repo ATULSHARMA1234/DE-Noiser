@@ -36,7 +36,15 @@ class TimestampExtractor:
         # 1. Docker Compose prefix pattern (e.g., "auth-service-1  | " or "api-1|")
         self.docker_prefix_re = re.compile(r"^\s*([a-zA-Z0-9_-]+(?:-\d+)?\s*\|)\s*")
 
-        # 2. 13-digit Unix Epoch Milliseconds
+        # 2a. 19-digit Unix Epoch Nanoseconds. This is OpenTelemetry's native
+        # resolution, so every OTLP-shaped line was previously falling through
+        # to "no timestamp" and losing its position on the timeline entirely.
+        self.epoch_ns_re = re.compile(r"(?:\b|^\s*)(\d{19})\b")
+
+        # 2b. 16-digit Unix Epoch Microseconds.
+        self.epoch_us_re = re.compile(r"(?:\b|^\s*)(\d{16})\b")
+
+        # 2c. 13-digit Unix Epoch Milliseconds
         self.epoch_ms_re = re.compile(r"(?:\b|^\s*)(\d{13})\b")
 
         # 3. 10-digit Unix Epoch Seconds with optional fractions
@@ -45,7 +53,7 @@ class TimestampExtractor:
         # 4. ISO 8601 / RFC 3339
         # Group 1: Year, 2: Month, 3: Day, 4: Hour, 5: Minute, 6: Second, 7: Fraction, 8: Timezone
         self.iso8601_re = re.compile(
-            r"\b(\d{4})[-/](\d{2})[-/](\d{2})[T\s](\d{2}):(\d{2}):(\d{2})(?:[.,](\d{1,6}))?\s*(Z|[+-]\d{2}:?\d{2})?\b"
+            r"\b(\d{4})[-/](\d{2})[-/](\d{2})[T\s](\d{2}):(\d{2}):(\d{2}|60)(?:[.,](\d{1,6}))?\s*(Z|[+-]\d{2}:?\d{2})?\b"
         )
 
         # 5. Syslog (RFC 3164)
@@ -75,7 +83,21 @@ class TimestampExtractor:
         if docker_match:
             text = text[docker_match.end():]
 
-        # Step 2: Try 13-digit Millisecond Epoch
+        # Step 2a: Try 19-digit Nanosecond Epoch (OTLP native)
+        epoch_ns_match = self.epoch_ns_re.search(text)
+        if epoch_ns_match and epoch_ns_match.start() < 50:
+            ms = int(epoch_ns_match.group(1)) // 1_000_000
+            if self._plausible(ms):
+                return ms
+
+        # Step 2b: Try 16-digit Microsecond Epoch
+        epoch_us_match = self.epoch_us_re.search(text)
+        if epoch_us_match and epoch_us_match.start() < 50:
+            ms = int(epoch_us_match.group(1)) // 1_000
+            if self._plausible(ms):
+                return ms
+
+        # Step 2c: Try 13-digit Millisecond Epoch
         epoch_ms_match = self.epoch_ms_re.search(text)
         if epoch_ms_match and epoch_ms_match.start() < 50:
             val = int(epoch_ms_match.group(1))
@@ -104,8 +126,15 @@ class TimestampExtractor:
                 minute = int(iso_match.group(5))
                 second = int(iso_match.group(6))
 
+                # A leap second (:60) is valid in real NTP-stamped logs but is
+                # not representable by datetime. Fold it onto :59.999 rather
+                # than dropping the line's time entirely.
+                leap_second = second == 60
+                if leap_second:
+                    second = 59
+
                 frac_str = iso_match.group(7)
-                ms_val = self._frac_to_ms(frac_str)
+                ms_val = 999 if leap_second else self._frac_to_ms(frac_str)
 
                 tz_str = iso_match.group(8)
                 tz = UTC
@@ -117,7 +146,14 @@ class TimestampExtractor:
                     tz = timezone(sign * timedelta(hours=hours_offset, minutes=mins_offset))
 
                 dt = datetime(year, month, day, hour, minute, second, microsecond=ms_val * 1000, tzinfo=tz)
-                return int(dt.timestamp() * 1000)
+                ms = int(dt.timestamp() * 1000)
+                if not self._plausible(ms):
+                    logger.debug(
+                        "Discarding implausible timestamp",
+                        extra={"parsed_year": year},
+                    )
+                    return None
+                return ms
             except Exception as e:
                 logger.debug("Failed parsing match as ISO 8601", extra={"error": str(e)})
 
@@ -146,6 +182,33 @@ class TimestampExtractor:
                 logger.debug("Failed parsing match as Syslog", extra={"error": str(e)})
 
         return None
+
+    #: How far back a log may claim to be from. Ten years covers any realistic
+    #: backfill or archive replay.
+    MAX_AGE = timedelta(days=365 * 10)
+
+    #: How far into the future a log may claim to be. A small window absorbs
+    #: ordinary clock skew between hosts; anything beyond it is a broken clock.
+    MAX_SKEW = timedelta(days=1)
+
+    def _plausible(self, epoch_ms: int) -> bool:
+        """Whether a parsed timestamp is inside the acceptable window.
+
+        Log timestamps are attacker- and bug-influenced input: a container with
+        an unsynchronised clock, or a shipper with a formatting error, can emit
+        year 9999. Issue folding takes max(last_seen) across a pattern's events,
+        so a single such line pins that issue's "last seen" millennia into the
+        future and permanently satisfies every recency filter, trend window and
+        SLO evaluation keyed on it.
+
+        Rejecting here means the line still gets ingested, clustered and
+        counted — it simply has no usable time, which is what "the clock was
+        wrong" actually means.
+        """
+        now_ms = int(datetime.now(UTC).timestamp() * 1000)
+        floor_ms = now_ms - int(self.MAX_AGE.total_seconds() * 1000)
+        ceiling_ms = now_ms + int(self.MAX_SKEW.total_seconds() * 1000)
+        return floor_ms <= epoch_ms <= ceiling_ms
 
     def _frac_to_ms(self, frac_str: str | None) -> int:
         """Convert fractional seconds string to integer milliseconds."""

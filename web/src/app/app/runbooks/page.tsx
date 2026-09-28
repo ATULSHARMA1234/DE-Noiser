@@ -99,6 +99,39 @@ export default function RunbooksPage() {
  }
  };
 
+ // Execute a runbook on demand rather than waiting for an incident to match it.
+ const [runningId, setRunningId] = useState<number | null>(null);
+ const runNow = async (rb: any) => {
+  setRunningId(rb.id);
+  try {
+   const res = await apiFetch(`/runbooks/${rb.id}/run`, { method: 'POST', body: JSON.stringify({}) });
+   toast({
+    title: `${rb.name}: ${res.status}`,
+    description: res.logs?.[res.logs.length - 1] || 'Execution finished',
+    type: res.status === 'FAILED' ? 'error' : 'info',
+   });
+   setActiveTab('history');
+   fetchExecutions();
+  } catch (e: any) {
+   toast({ title: 'Execution failed', description: e.message, type: 'error' });
+  } finally {
+   setRunningId(null);
+  }
+ };
+
+ const toggleEnabled = async (rb: any) => {
+  try {
+   await apiFetch(`/runbooks/${rb.id}`, { method: 'PUT', body: JSON.stringify({ enabled: !rb.enabled }) });
+   toast({ title: rb.enabled ? 'Runbook disabled' : 'Runbook enabled' });
+   fetchRunbooks();
+  } catch (e: any) {
+   toast({ title: 'Failed to update runbook', description: e.message, type: 'error' });
+  }
+ };
+
+ // Full step-by-step log of one execution.
+ const [openExecution, setOpenExecution] = useState<any | null>(null);
+
  const deleteRunbook = (id: number) => {
  setConfirmTitle('Delete Runbook');
  setConfirmMessage('Delete this runbook?');
@@ -161,13 +194,31 @@ export default function RunbooksPage() {
  ) : (
  runbooks.map(rb => (
  <div key={rb.id} className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-6 relative group">
- <button 
+ <div className="absolute top-4 right-4 flex items-center gap-2">
+ <button
+ onClick={() => runNow(rb)}
+ disabled={runningId === rb.id}
+ title="Run this runbook now"
+ className="text-[var(--text-secondary)] hover:text-green-500 transition-colors disabled:opacity-40"
+ >
+ <Play size={16} className={runningId === rb.id ? 'animate-pulse' : ''} />
+ </button>
+ <button
+ onClick={() => toggleEnabled(rb)}
+ title={rb.enabled ? 'Disable runbook' : 'Enable runbook'}
+ className={`transition-colors ${rb.enabled ? 'text-green-500 hover:text-[var(--text-secondary)]' : 'text-[var(--text-muted)] hover:text-green-500'}`}
+ >
+ <Power size={16} />
+ </button>
+ <button
  onClick={() => deleteRunbook(rb.id)}
- className="absolute top-4 right-4 text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+ title="Delete runbook"
+ className="text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
  >
  <Trash2 size={16} />
  </button>
- 
+ </div>
+
  <div className="flex justify-between items-start mb-6">
  <div>
  <div className="flex items-center gap-2 mb-1">
@@ -228,7 +279,7 @@ export default function RunbooksPage() {
  </thead>
  <tbody className="divide-y divide-[var(--border)] text-[var(--text-primary)]">
  {executions.map(exec => (
- <tr key={exec.id} className="hover:bg-[var(--bg-app)]">
+ <tr key={exec.id} onClick={() => setOpenExecution(exec)} className="hover:bg-[var(--bg-app)] cursor-pointer">
  <td className="px-6 py-4 whitespace-nowrap">{new Date(exec.created_at).toLocaleString()}</td>
  <td className="px-6 py-4">#{exec.runbook_id}</td>
  <td className="px-6 py-4 text-[var(--primary)]">#{exec.incident_id}</td>
@@ -250,6 +301,31 @@ export default function RunbooksPage() {
  </table>
  </div>
  )}
+ </div>
+ )}
+
+ {openExecution && (
+ <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setOpenExecution(null)}>
+ <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg shadow-xl w-full max-w-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
+ <div className="p-4 border-b border-[var(--border)] flex justify-between items-center bg-[var(--bg-app)]">
+ <div>
+ <h2 className="font-bold text-[var(--text-primary)]">Execution #{openExecution.id}</h2>
+ <p className="text-xs text-[var(--text-secondary)] mt-0.5">
+ Runbook #{openExecution.runbook_id}
+ {openExecution.incident_id ? ` · Incident #${openExecution.incident_id}` : ' · No incident context'}
+ {' · '}{new Date(openExecution.created_at).toLocaleString()}
+ </p>
+ </div>
+ <button onClick={() => setOpenExecution(null)} className="text-[var(--text-secondary)] hover:text-[var(--text-primary)]">
+ <X size={20} />
+ </button>
+ </div>
+ <div className="p-4 max-h-[60vh] overflow-auto">
+ <pre className="text-xs font-mono text-[var(--text-secondary)] whitespace-pre-wrap leading-relaxed">
+{(openExecution.logs || []).join('\n') || 'No step logs were recorded.'}
+ </pre>
+ </div>
+ </div>
  </div>
  )}
 

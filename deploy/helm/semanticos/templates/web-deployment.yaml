@@ -3,9 +3,10 @@ kind: Deployment
 metadata:
   name: {{ include "semanticos.fullname" . }}-web
   labels:
-    app.kubernetes.io/name: {{ include "semanticos.name" . }}-web
+    {{- include "semanticos.labels" . | nindent 4 }}
+    app.kubernetes.io/component: web
 spec:
-  replicas: {{ .Values.replicaCount }}
+  replicas: {{ .Values.web.replicaCount }}
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ include "semanticos.name" . }}-web
@@ -13,12 +14,31 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: {{ include "semanticos.name" . }}-web
+        app.kubernetes.io/component: web
     spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
-        - name: {{ .Chart.Name }}-web
+        - name: web
           image: "{{ .Values.image.webRepository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
           ports:
             - name: http
               containerPort: 3000
               protocol: TCP
+          {{- if .Values.probes.enabled }}
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources.web | nindent 12 }}

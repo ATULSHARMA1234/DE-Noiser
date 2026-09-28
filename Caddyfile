@@ -1,33 +1,46 @@
+# The hostname comes from the environment, not from this file. It used to be one
+# specific IP's nip.io name, which meant no customer could deploy the Caddyfile
+# as written and TLS issuance depended on a third-party wildcard DNS service
+# staying up.
+#
+# Set SEMANTICOS_DOMAIN and SEMANTICOS_ACME_EMAIL before bringing the stack up.
+# See DEPLOY.md.
 {
-    email admin@semanticos.io
+	email {$SEMANTICOS_ACME_EMAIL}
 }
 
+# Plain HTTP exists only to hand the browser to HTTPS. It used to serve the
+# whole application, so a first request on port 80 carried the session cookie in
+# clear text — and the HSTS header that would have prevented the next one never
+# arrived, because nothing set it.
 :80 {
-    # Default non-HTTPS endpoint just in case
-    handle_path /api/* {
-        reverse_proxy api:8000
-    }
-    handle_path /stream* {
-        reverse_proxy api:8000
-    }
-    handle /* {
-        reverse_proxy web:3000
-    }
+	redir https://{host}{uri} permanent
 }
 
-20.2.90.156.nip.io {
-    # Automatic HTTPS using Let's Encrypt for magic DNS
-    tls admin@semanticos.io
-    
-    handle_path /api/* {
-        reverse_proxy api:8000
-    }
-    
-    handle_path /stream* {
-        reverse_proxy api:8000
-    }
-    
-    handle /* {
-        reverse_proxy web:3000
-    }
+{$SEMANTICOS_DOMAIN} {
+	# Automatic HTTPS using Let's Encrypt
+	tls {$SEMANTICOS_ACME_EMAIL}
+
+	# Mirrors denoiser.api.middleware.SecurityHeadersMiddleware, so anything
+	# this proxy serves without reaching the API still carries them.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+		-Server
+	}
+
+	handle_path /api/* {
+		reverse_proxy api:8000
+	}
+
+	handle_path /stream* {
+		reverse_proxy api:8000
+	}
+
+	handle /* {
+		reverse_proxy web:3000
+	}
 }

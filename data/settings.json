@@ -3,7 +3,9 @@
   "redact_pii": true,
   "llm_model": "llama-3.3-70b",
   "confidence_threshold": 70,
-  "retention_days": 60,
+  "retention_days": 33,
   "sampling_threshold": 50000,
-  "auto_analyze": false
+  "auto_analyze": false,
+  "s3_archive_days": null,
+  "s3_enabled": false
 }

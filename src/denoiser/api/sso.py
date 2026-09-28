@@ -1,13 +1,16 @@
 import os
 import sys
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Response
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
-from denoiser.api.auth import create_access_token
+from denoiser.api.auth import issue_token_pair
 from denoiser.api.schemas import TokenResponse
-from denoiser.storage.db import Tenant, User, get_db
+from denoiser.logging import get_logger
+from denoiser.storage.db import User, get_db
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/auth/sso", tags=["SSO"])
 
@@ -51,23 +54,161 @@ def _is_safe_redirect(uri: str) -> bool:
     return origin in _allowed_redirect_origins()
 
 
+def _provision_sso_user(
+    db: Session,
+    fields: dict,
+    default_environments: list[str] | None = None,
+    tenant_id: int | None = None,
+) -> User:
+    """Just-in-time provision/update an SSO user from mapped IdP claims.
+
+    Matches on the IdP subject (``external_id``) first, then email, so a user
+    whose email changes at the IdP is still recognised. Role and team membership
+    are refreshed on every login, so IdP group changes take effect immediately.
+
+    Which organisation the user joins is decided, in order:
+
+    1. ``tenant_id``, when the assertion came from an organisation's *own*
+       registered IdP. That is a stronger signal than the email domain: the
+       organisation configured the certificate the assertion was verified
+       against, so they have already vouched for the identity.
+    2. Otherwise the email domain — see `denoiser.api.tenancy`. An address from
+       a domain no customer has registered is refused rather than guessed at,
+       because guessing seats one company's employee inside another's data.
+    """
+    from denoiser.api.auth import get_password_hash
+    from denoiser.api.tenancy import TenantRoutingError, resolve_identity_tenant
+
+    if tenant_id is None:
+        try:
+            tenant_id = resolve_identity_tenant(db, fields.get("email"))
+        except TenantRoutingError as e:
+            logger.warning("Rejected SSO login: %s", e)
+            raise HTTPException(status_code=403, detail=str(e))
+
+    # Both lookups are scoped to the organisation the assertion resolved to. An
+    # address, and an IdP subject, are unique inside one organisation and not
+    # across the deployment — unscoped, a consultant signing in to their second
+    # customer would be matched to their first customer's account and handed
+    # that company's data.
+    from denoiser.api.scope import tenant_predicate
+
+    scope = tenant_predicate(User, tenant_id)
+    user = None
+    if fields.get("external_id"):
+        user = (
+            db.query(User)
+            .filter(User.external_id == fields["external_id"], scope)
+            .first()
+        )
+    if user is None:
+        user = db.query(User).filter(User.email == fields["email"], scope).first()
+    if user is None and tenant_id is not None:
+        # One deliberate exception to the scoping: an account that belongs to no
+        # organisation at all. Those are pre-tenancy rows, and this login is the
+        # moment their organisation becomes known. Adopting one is safe in a way
+        # that matching another tenant's row is not — it takes nothing from
+        # anybody, and the alternative is a second account beside the first with
+        # the same person's history stranded behind it.
+        user = (
+            db.query(User)
+            .filter(User.email == fields["email"], User.tenant_id.is_(None))
+            .first()
+        )
+
+    if user is None:
+        import uuid
+        user = User(
+            email=fields["email"],
+            hashed_password=get_password_hash(str(uuid.uuid4())),  # SSO users have no local password
+            role=fields.get("role", "VIEWER"),
+            tenant_id=tenant_id,
+            is_active=True,
+            department=fields.get("department", "Engineering"),
+            environment_access=default_environments or ["dev"],
+            external_id=fields.get("external_id"),
+            teams=fields.get("teams", []),
+        )
+        db.add(user)
+    else:
+        # Refresh federated attributes on each login.
+        user.role = fields.get("role", user.role)
+        user.teams = fields.get("teams", user.teams)
+        if fields.get("external_id"):
+            user.external_id = fields["external_id"]
+        user.is_active = True
+        # The only account that can reach here without already belonging to this
+        # organisation is an unassigned one, adopted just above. A user who
+        # belongs somewhere else is never matched at all now, so there is no
+        # re-homing decision left to make: they get their own account here, and
+        # their work at the other customer stays where it is.
+        if user.tenant_id is None:
+            user.tenant_id = tenant_id
+
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@router.get("/providers")
+def sso_providers():
+    """Which sign-in methods this deployment actually offers.
+
+    The login page previously hardcoded a single "Enterprise SSO" button wired
+    to the OIDC flow, so a SAML-only deployment had a working, signature-
+    verifying SAML endpoint that no user could reach, and an unconfigured
+    deployment showed a button that could only 501. Unauthenticated on purpose:
+    it exposes no secrets, only which buttons to draw.
+    """
+    from denoiser.api.saml import saml_enabled
+    from denoiser.settings import get_settings
+
+    settings = get_settings()
+    return {
+        "oidc": {
+            "enabled": settings.oidc_enabled,
+            "start_url": "/auth/sso/login",
+            "label": "Sign in with Enterprise SSO",
+        },
+        "saml": {
+            "enabled": saml_enabled(),
+            "start_url": "/auth/sso/saml/login",
+            "label": "Sign in with SAML",
+        },
+        "mock": {
+            "enabled": _mock_sso_enabled() and not settings.oidc_enabled,
+            "start_url": "/auth/sso/login",
+            "label": "Sign in with the mock IdP (sandbox)",
+        },
+        "local_login": settings.local_login_enabled,
+    }
+
+
 @router.get("/login")
 def sso_login(provider: str = "okta", redirect_uri: str | None = None):
     """
-    Initiate SSO redirection. In production, this redirects to the configured
-    Okta/SAML IdP. For local development/sandbox, we redirect to our mock callback.
+    Initiate SSO redirection. When OIDC is configured, build the real provider
+    authorization URL; otherwise fall back to the mock IdP (dev/sandbox only).
     """
-    if not _mock_sso_enabled():
-        # Production path: a real OIDC/SAML authorization URL must be built and the
-        # returned assertion cryptographically verified before any token is issued.
-        raise HTTPException(
-            status_code=501,
-            detail="SSO is not configured. Set up an OIDC/SAML IdP (mock SSO is disabled).",
-        )
+    from denoiser.api.oidc import OIDCError, build_authorization_url
+    from denoiser.settings import get_settings
 
     target_uri = redirect_uri or "/auth/sso/callback"
     if not _is_safe_redirect(target_uri):
         raise HTTPException(status_code=400, detail="Invalid redirect_uri")
+
+    if get_settings().oidc_enabled:
+        try:
+            return RedirectResponse(url=build_authorization_url(target_uri))
+        except OIDCError as e:
+            raise HTTPException(status_code=502, detail=f"OIDC provider error: {e}")
+
+    if not _mock_sso_enabled():
+        raise HTTPException(
+            status_code=501,
+            detail="SSO is not configured. Set OIDC_ISSUER/OIDC_CLIENT_ID/OIDC_CLIENT_SECRET (mock SSO is disabled).",
+        )
+
     mock_idp_url = f"{target_uri}?code=mock_okta_code_abc123&provider={provider}"
     return RedirectResponse(url=mock_idp_url)
 
@@ -76,72 +217,164 @@ def sso_login(provider: str = "okta", redirect_uri: str | None = None):
 def sso_callback(
     code: str = Query(..., description="SSO authorization code or SAML assertion token"),
     provider: str = "okta",
+    state: str | None = Query(None, description="OIDC CSRF state"),
     db: Session = Depends(get_db)
 ):
     """
-    Assertion Consumer Service (ACS) / OAuth Callback.
-    Verifies the SSO assertion, resolves the user attributes (email, department, roles),
-    provisions the user if not exists, and issues a standard platform JWT.
+    OAuth/OIDC callback. Exchanges the code, cryptographically validates the ID
+    token, maps its claims to a role + teams, provisions/updates the user, and
+    issues a platform JWT. Falls back to the mock IdP only when OIDC is unset.
     """
+    from denoiser.settings import get_settings
+
+    if get_settings().oidc_enabled:
+        from denoiser.api.oidc import OIDCError, exchange_code, map_claims, validate_id_token
+
+        try:
+            # Validate CSRF state when present (the mock flow doesn't send one).
+            if state:
+                from denoiser.api.oidc import verify_state
+                verify_state(state)
+            tokens = exchange_code(code, redirect_uri="/auth/sso/callback")
+            id_token = tokens.get("id_token")
+            if not id_token:
+                raise OIDCError("Provider response had no id_token")
+            claims = validate_id_token(id_token)
+            fields = map_claims(claims)
+        except OIDCError as e:
+            raise HTTPException(status_code=401, detail=f"SSO authentication failed: {e}")
+
+        user = _provision_sso_user(db, fields)
+        if not user.is_active:
+            raise HTTPException(status_code=401, detail="User account is deactivated")
+        return {**issue_token_pair(user.email, user.tenant_id), "user": user}
+
+    # ── Mock IdP fallback (dev/sandbox only) ─────────────────────────────
     if not _mock_sso_enabled():
-        # No real IdP integration is wired up yet. Refuse rather than mint a token
-        # off an unverified assertion — issuing one here is a full auth bypass.
         raise HTTPException(
             status_code=501,
-            detail="SSO is not configured. A real OIDC/SAML assertion verifier must be wired up.",
+            detail="SSO is not configured. Set OIDC_ISSUER/OIDC_CLIENT_ID/OIDC_CLIENT_SECRET.",
         )
-
     if "mock_okta_code" not in code:
         raise HTTPException(status_code=400, detail="Invalid or expired SSO token")
 
-    # In production, we exchange 'code' for Okta ID token or decode the SAML assertion XML.
-    # We simulate resolving user attributes from Okta/SAML:
-    sso_email = "okta-operator@semanticos.io"
-    sso_department = "Operations"
-    sso_environments = ["prod", "staging", "dev"]
-    sso_role = "ANALYST"
-
-    # Auto-provision user if not exists
-    default_tenant = db.query(Tenant).filter(Tenant.name == "Default Workspace").first()
-    tenant_id = default_tenant.id if default_tenant else None
-
-    user = db.query(User).filter(User.email == sso_email).first()
-    if not user:
-        # Create user
-        # SSO users don't use local password, we set a strong random one
-        import uuid
-
-        from denoiser.api.auth import get_password_hash
-        dummy_pwd = get_password_hash(str(uuid.uuid4()))
-        user = User(
-            email=sso_email,
-            hashed_password=dummy_pwd,
-            role=sso_role,
-            tenant_id=tenant_id,
-            is_active=True,
-            department=sso_department,
-            environment_access=sso_environments
-        )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-
+    user = _provision_sso_user(
+        db,
+        {
+            "external_id": "mock-okta|okta-operator",
+            "email": "okta-operator@semanticos.io",
+            "role": "ANALYST",
+            "department": "Operations",
+            "teams": ["operations"],
+        },
+        default_environments=["prod", "staging", "dev"],
+    )
     if not user.is_active:
         raise HTTPException(status_code=401, detail="User account is deactivated")
+    return {**issue_token_pair(user.email, user.tenant_id), "user": user}
 
-    # Issue JWT
-    access_token = create_access_token(data={"sub": user.email})
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "user": user
-    }
+
+@router.get("/saml/login")
+def saml_login(
+    relay_state: str | None = None,
+    org: str | None = None,
+    db: Session = Depends(get_db),
+):
+    """Start an SP-initiated SAML login by redirecting to the IdP.
+
+    ``org`` is an organisation name, an email domain or a whole email address,
+    and selects whose IdP to redirect to. A hint is needed because nobody is
+    authenticated yet — and it is safe here in a way it would not be on the way
+    back in: the worst a forged hint achieves is a redirect to somebody else's
+    IdP, which will not authenticate the sender.
+    """
+    from denoiser.api.idp_registry import saml_config_for, tenant_for_hint
+    from denoiser.api.saml import SAMLError, build_authn_request, saml_enabled
+
+    tenant = tenant_for_hint(db, org)
+    config = saml_config_for(db, tenant.id if tenant else None)
+
+    if not config.enabled and not saml_enabled():
+        raise HTTPException(
+            status_code=501,
+            detail=(
+                "SAML SSO is not configured. Set SAML_IDP_ENTITY_ID, SAML_IDP_SSO_URL, "
+                "SAML_IDP_X509_CERT, SAML_SP_ENTITY_ID and SAML_SP_ACS_URL."
+            ),
+        )
+    if relay_state and not _is_safe_redirect(relay_state):
+        raise HTTPException(status_code=400, detail="Invalid relay_state")
+    try:
+        url, _request_id = build_authn_request(relay_state, config=config)
+    except SAMLError as e:
+        raise HTTPException(status_code=500, detail=f"Cannot build SAML request: {e}")
+    return RedirectResponse(url=url)
+
+
+@router.get("/saml/metadata")
+def saml_metadata():
+    """SP metadata XML for the IdP administrator to register this service."""
+    from denoiser.api.saml import SAMLError, build_sp_metadata
+
+    try:
+        return Response(content=build_sp_metadata(), media_type="application/samlmetadata+xml")
+    except SAMLError as e:
+        raise HTTPException(status_code=501, detail=str(e))
 
 
 @router.post("/saml/acs", response_model=TokenResponse)
-def saml_acs(db: Session = Depends(get_db)):
+def saml_acs(
+    # These are wire field names fixed by the SAML 2.0 HTTP-POST binding, not
+    # names we get to choose: FastAPI reads the form key from the parameter, so
+    # renaming them to snake_case stops the IdP's POST from binding at all.
+    SAMLResponse: str | None = Form(default=None),  # noqa: N803
+    RelayState: str | None = Form(default=None),  # noqa: N803
+    db: Session = Depends(get_db),
+):
+    """SAML Assertion Consumer Service.
+
+    Verifies the posted assertion's XML signature against the configured IdP
+    certificate — plus audience, issuer, recipient, validity window and replay —
+    and only then provisions the user and issues a platform token. Every
+    rejection path returns 401 without minting anything.
+
+    When SAML is not configured this is fail-closed: 501, except under the
+    explicitly enabled dev mock IdP, which issues the sandbox operator session.
     """
-    ACS endpoint mapping to post-back SAML XML assertions.
-    """
-    # SAML POST callback simulation
+    from denoiser.api.idp_registry import peek_saml_issuer, saml_config_for_issuer
+    from denoiser.api.saml import SAMLError, parse_and_verify_response, saml_enabled
+
+    # Which organisation's IdP is this? Resolved from the assertion's own
+    # Issuer, which is inside the signature, rather than from anything the
+    # poster controls — routing on a query parameter would let an attacker pick
+    # which certificate their assertion is checked against.
+    config, idp_tenant_id = saml_config_for_issuer(db, peek_saml_issuer(SAMLResponse))
+
+    if config.enabled or saml_enabled():
+        if not SAMLResponse:
+            raise HTTPException(status_code=400, detail="Missing SAMLResponse")
+        try:
+            fields = parse_and_verify_response(SAMLResponse, config=config)
+        except SAMLError as e:
+            # The reason is logged in full; the client gets a generic failure so
+            # a probing attacker learns nothing about which check tripped.
+            logger.warning("SAML assertion rejected: %s", e)
+            raise HTTPException(status_code=401, detail="SAML authentication failed")
+
+        # An assertion verified against an organisation's *own* certificate
+        # seats the user in that organisation. That is a stronger signal than
+        # the email domain: the organisation configured the certificate, so
+        # they have already vouched for the identity. Domain routing still
+        # applies when the deployment-wide provider answered.
+        user = _provision_sso_user(db, fields, tenant_id=idp_tenant_id)
+        if not user.is_active:
+            raise HTTPException(status_code=401, detail="User account is deactivated")
+        return {**issue_token_pair(user.email, user.tenant_id), "user": user}
+
+    if not _mock_sso_enabled():
+        raise HTTPException(
+            status_code=501,
+            detail="SAML SSO is not configured; set SAML_IDP_* or use OIDC SSO instead.",
+        )
+    # Dev/sandbox only: mock SAML operator session (no assertion verification).
     return sso_callback(code="mock_okta_code_saml", provider="saml", db=db)

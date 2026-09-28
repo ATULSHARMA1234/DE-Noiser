@@ -61,17 +61,19 @@ def test_abac_policies(db_session: Session):
         tenant_id = default_tenant.id if default_tenant else 1
 
         # Create two incident resources: one in prod, one in dev (domain contains env info)
+        # impact_score is on a 0.0-1.0 scale (matching the frontend and every
+        # backend writer); > 0.8 marks a resource as PII-bearing.
         prod_incident = Incident(
             title="Database Outage",
             domain="db-primary-prod.semanticos.io",
-            impact_score=95.0, # >80 triggers contains_pii=True
+            impact_score=0.95, # > 0.8 triggers contains_pii=True
             status="OPEN",
             tenant_id=tenant_id
         )
         dev_incident = Incident(
             title="Local test fail",
             domain="localhost-dev",
-            impact_score=30.0,
+            impact_score=0.30,
             status="OPEN",
             tenant_id=tenant_id
         )
@@ -147,7 +149,7 @@ def test_abac_policies(db_session: Session):
         assert res.status_code == 200
 
         # --- Rule 3: PII Sensitivity check for Viewers ---
-        # User 3 (Viewer) tries to access high impact prod incident (impact > 80 triggers contains_pii): 403 Forbidden
+        # User 3 (Viewer) tries to access high impact prod incident (impact > 0.8 triggers contains_pii): 403 Forbidden
         res = client.get(f"/incidents/{prod_incident.id}", headers={"Authorization": f"Bearer {t_view}"})
         assert res.status_code == 403
 

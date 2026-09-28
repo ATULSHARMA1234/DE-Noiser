@@ -50,19 +50,39 @@ test.describe('Monkey Crawler - Button Fuzzing', () => {
 
       // We click each button one by one
       for (let i = 0; i < count; i++) {
-        // Reload page to ensure clean state before clicking the next button
-        await page.goto(routePath, { waitUntil: 'domcontentloaded' });
-        
+        // Reload page to ensure clean state before clicking the next button.
+        //
+        // Tolerant of an in-flight navigation: the previous iteration may have
+        // clicked something that navigates, and Playwright aborts a goto that is
+        // interrupted by another navigation. That raced rather than failed on
+        // Chromium and failed outright on WebKit, which is the kind of
+        // difference that makes a suite look green until it does not.
+        try {
+          await page.goto(routePath, { waitUntil: 'domcontentloaded' });
+        } catch {
+          await page.waitForTimeout(300);
+          await page.goto(routePath, { waitUntil: 'domcontentloaded' });
+        }
+
         // Wait a small amount of time for React to attach handlers
         await page.waitForTimeout(500);
 
         const currentButton = page.locator('button').nth(i);
-        
+
         if (!(await currentButton.isVisible()) || (await currentButton.isDisabled())) {
           continue;
         }
 
         const btnText = await currentButton.textContent();
+
+        // Logging out is not a crash, it is the button working. Clicking it
+        // ends the session for every following iteration and leaves the crawler
+        // racing its own redirect to /login — so the control is skipped rather
+        // than the failure being explained away later.
+        if (/log ?out|sign ?out/i.test(btnText ?? '')) {
+          console.log(`Skipping session-ending control on ${routePath}: "${btnText?.trim()}"`);
+          continue;
+        }
         console.log(`Clicking button ${i} on ${routePath} (Text: "${btnText?.trim()}")`);
 
         try {

@@ -1,12 +1,33 @@
-import contextlib
 import json
 import os
-from datetime import UTC
+import re
+from collections.abc import Sequence
+from datetime import UTC, datetime
 from typing import Any
 
 from denoiser.logging import get_logger
+from denoiser.storage.errors import StoreUnavailable
 
 logger = get_logger(__name__)
+
+
+def _require_tenant(tenant_id: Any) -> str:
+    """Fail-closed tenant guard.
+
+    Every read/write against tenant-partitioned tables must be scoped to a
+    concrete tenant. A falsy tenant id (``""``, ``None``, ``0``) previously made
+    the ``WHERE tenant_id = ...`` predicate *conditional*, so an empty value
+    silently ran the query across every tenant — a cross-tenant data leak. We
+    now reject it instead of degrading to unscoped access.
+    """
+    coerced = str(tenant_id).strip() if tenant_id not in (None, "", 0, "0") else ""
+    if not coerced:
+        raise ValueError(
+            "tenant_id is required for tenant-scoped ClickHouse access; "
+            "refusing to run an unscoped (cross-tenant) query"
+        )
+    return coerced
+
 
 # Where a log's originating service can be found, in priority order.
 #
@@ -66,15 +87,199 @@ def resolve_source(log: dict[str, Any]) -> str:
     return UNKNOWN_SOURCE
 
 
+# Where a log's severity can be found, in priority order — same problem as the
+# source: only "level" was read, so OpenTelemetry ("severity_text"), syslog-
+# derived shippers ("severity") and anything using "log.level" (ECS) all fell
+# through to the INFO default. A real ERROR silently filed as INFO corrupts the
+# severity histogram, incident ranking and SLO error-budget maths.
+LEVEL_KEYS: tuple[str, ...] = (
+    "level",
+    "severity_text",   # OpenTelemetry
+    "severity",        # syslog-derived, many JSON loggers
+    "log.level",       # Elastic Common Schema
+    "loglevel",
+    "levelname",       # Python logging
+    "status",
+)
+
+DEFAULT_LEVEL = "INFO"
+
+# Aliases map onto the vocabulary the rest of the platform already uses —
+# DEBUG, INFO, WARN, ERROR, FATAL — not a "more standard" WARNING/CRITICAL set.
+# The Explore severity histogram hardcodes LEVEL_ORDER/LEVEL_COLOR on exactly
+# these five names, so a value outside them renders colorless and drops out of
+# the stack. Match the surrounding code rather than fight it.
+_LEVEL_ALIASES: dict[str, str] = {
+    "TRACE": "DEBUG", "DEBUG": "DEBUG", "DBG": "DEBUG",
+    "INFO": "INFO", "INFORMATION": "INFO", "INFORMATIONAL": "INFO", "NOTICE": "INFO",
+    "WARN": "WARN", "WARNING": "WARN",
+    "ERR": "ERROR", "ERROR": "ERROR",
+    "CRIT": "FATAL", "CRITICAL": "FATAL", "FATAL": "FATAL",
+    "ALERT": "FATAL", "EMERGENCY": "FATAL", "EMERG": "FATAL", "PANIC": "FATAL",
+    # Syslog numeric severities (RFC 5424): 0 emerg … 7 debug.
+    "0": "FATAL", "1": "FATAL", "2": "FATAL", "3": "ERROR",
+    "4": "WARN", "5": "INFO", "6": "INFO", "7": "DEBUG",
+}
+
+
+# Severity written into the log line itself, which is how every plain-text
+# logger does it: "[ERROR]", "ERROR:", or a bare uppercase token. Bracketed and
+# colon-suffixed forms are matched case-insensitively (docker's "[info]"), while
+# a bare token must be uppercase — otherwise prose like "no errors found" would
+# be filed as an ERROR.
+_MESSAGE_LEVEL_PATTERN = re.compile(
+    r"\[\s*(DEBUG|TRACE|INFO|NOTICE|WARN|WARNING|ERR|ERROR|CRIT|CRITICAL|FATAL|ALERT|EMERG|EMERGENCY|PANIC)\s*\]"
+    r"|\b(DEBUG|TRACE|INFO|NOTICE|WARN|WARNING|ERR|ERROR|CRIT|CRITICAL|FATAL|ALERT|EMERG|EMERGENCY|PANIC)\s*:"
+    r"|\b(DEBUG|TRACE|INFO|NOTICE|WARN|WARNING|ERR|ERROR|CRIT|CRITICAL|FATAL|ALERT|EMERG|EMERGENCY|PANIC)\b",
+    re.IGNORECASE,
+)
+
+
+def _level_from_message(log: dict[str, Any]) -> str | None:
+    """Severity parsed out of the log line, when no field carries one.
+
+    A file of plain-text lines has no ``level`` key, so every line was indexed
+    as INFO — ``level:ERROR`` in Explore then matched nothing in a file where
+    every line said ERROR.
+    """
+    message = log.get("message") or log.get("raw_text")
+    if not isinstance(message, str) or not message:
+        return None
+
+    for match in _MESSAGE_LEVEL_PATTERN.finditer(message[:500]):
+        bracketed, colon_suffixed, bare = match.group(1), match.group(2), match.group(3)
+        token = bracketed or colon_suffixed
+        if token is None:
+            # A bare token is only trusted when the logger wrote it uppercase.
+            if bare is None or bare != bare.upper():
+                continue
+            token = bare
+        return _LEVEL_ALIASES.get(token.upper(), token.upper())
+    return None
+
+
+def resolve_level(log: dict[str, Any]) -> str:
+    """The canonical severity of a log, or ``INFO`` when nothing specifies one."""
+    for key in LEVEL_KEYS:
+        value = _lookup(log, key)
+        if value is None or isinstance(value, dict | list):
+            continue
+        raw = str(value).strip()
+        if not raw:
+            continue
+        return _LEVEL_ALIASES.get(raw.upper(), raw.upper())
+    return _level_from_message(log) or DEFAULT_LEVEL
+
+
+# Where a log's event time can be found, in priority order. Same "only one key
+# was read" problem as source and level: insert only looked at "timestamp", so
+# Elastic's "@timestamp", the Docker json-file driver's "time", OTel's
+# "timeUnixNano" and Fluent Bit's "date" all fell through to ingestion
+# wall-clock — which detaches the stored time from the event and corrupts every
+# time-range query and the volume histogram.
+TIMESTAMP_KEYS: tuple[str, ...] = (
+    "timestamp",
+    "@timestamp",           # Elastic Common Schema
+    "time",                 # Docker json-file driver
+    "ts",
+    "timeunixnano",         # OpenTelemetry (matched case-insensitively below)
+    "observedtimeunixnano",
+    "eventtime",
+    "date",                 # Fluent Bit
+)
+
+
+def _from_epoch(value: float) -> datetime | None:
+    """Epoch number to a UTC datetime, detecting the unit by magnitude.
+
+    Shippers send epochs in seconds, milliseconds (JavaScript Date.now, many
+    JSON loggers), microseconds, or nanoseconds (OpenTelemetry). Feeding a
+    millisecond epoch to fromtimestamp as if it were seconds does not just store
+    the wrong time — it raises ("year 56531 is out of range"), and because that
+    happens inside insert_logs' batch loop it fails the whole batch. In the
+    at-least-once worker a permanently failing batch is a poison pill that wedges
+    the partition, so one JavaScript service can stop ingestion outright.
+
+    Thresholds are chosen so a real timestamp (years ~2001-2100) is never
+    misread: seconds top out around 4.1e9, well below the 1e11 boundary.
+    """
+    magnitude = abs(value)
+    if magnitude >= 1e17:
+        value /= 1e9    # nanoseconds
+    elif magnitude >= 1e14:
+        value /= 1e6    # microseconds
+    elif magnitude >= 1e11:
+        value /= 1e3    # milliseconds
+
+    try:
+        return datetime.fromtimestamp(value, UTC)
+    except (ValueError, OSError, OverflowError):
+        return None
+
+
+def coerce_timestamp(value: Any) -> datetime | None:
+    """A single timestamp field value to a UTC datetime, or None if unparseable.
+
+    Never raises: a value it cannot understand returns None so the caller can
+    fall back, rather than taking down the batch it belongs to.
+    """
+    # bool is a subclass of int; a truthy flag is not an epoch.
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        return _from_epoch(float(value))
+    if isinstance(value, str):
+        s = value.strip()
+        if not s:
+            return None
+        # A bare number in a string is still an epoch.
+        try:
+            return _from_epoch(float(s))
+        except ValueError:
+            pass
+        try:
+            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        # A naive ISO string is assumed to be UTC rather than left tz-less,
+        # so ClickHouse does not reinterpret it in the server's local zone.
+        return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+    return None
+
+
+def resolve_timestamp(log: dict[str, Any]) -> datetime:
+    """The event time of a log, or ingestion wall-clock when none is present."""
+    lowered = {k.lower(): v for k, v in log.items()} if log else {}
+    for key in TIMESTAMP_KEYS:
+        value = _lookup(log, key)
+        if value is None:
+            value = lowered.get(key)  # case-insensitive (timeUnixNano etc.)
+        if value is None or isinstance(value, dict | list):
+            continue
+        dt = coerce_timestamp(value)
+        if dt is not None:
+            return dt
+    return datetime.now(UTC)
+
+
 class ClickHouseStore:
-    def __init__(self):
+    def __init__(self, client: Any = None):
+        """The store, optionally over a client the caller already has.
+
+        Passing ``client`` skips connecting: construction opens no socket and
+        issues no DDL. Tests previously had to monkeypatch the private
+        ``_init_client`` to stop the constructor dialling out, which meant every
+        test knew a private method's name — and a rename would have broken them
+        all while the production path stayed green.
+        """
         self.host = os.getenv("CLICKHOUSE_HOST", "localhost")
         self.port = int(os.getenv("CLICKHOUSE_PORT", "8123"))
         self.username = os.getenv("CLICKHOUSE_USER", "default")
         self.password = os.getenv("CLICKHOUSE_PASSWORD", "")
         self.database = os.getenv("CLICKHOUSE_DB", "default")
-        self.client = None
-        self._init_client()
+        self.client = client
+        if client is None:
+            self._init_client()
 
     def _init_client(self):
         try:
@@ -123,63 +328,287 @@ class ClickHouseStore:
             logger.error(f"Failed to connect to ClickHouse: {e}")
             self.client = None
 
-    def cleanup_old_data(self, tenant_id: str, days_to_keep: int):
+    def scope(
+        self,
+        tenant_id: Any,
+        *,
+        query_string: str | None = None,
+        from_ts: int | None = None,
+        to_ts: int | None = None,
+        since: datetime | None = None,
+        time_column: str = "timestamp",
+        extra: Sequence[str] = (),
+        bind: dict[str, Any] | None = None,
+    ) -> tuple[str, dict[str, Any]]:
+        """The WHERE clause and bound parameters for one organisation's rows.
+
+        Every read of `semantic_logs` goes through here, and there is no way to
+        obtain a clause without naming a tenant: `_require_tenant` raises on an
+        empty one rather than quietly dropping the predicate. That mattered —
+        the SLO engine and the billing worker each hand-wrote their own window
+        and one of them left the tenant out entirely, so two organisations
+        running a service of the same name were scored against each other's
+        traffic.
+
+        ``query_string`` is LQL, compiled and ANDed in. ``extra`` carries SQL
+        fragments for columns this signature does not know about, and ``bind``
+        their values — ``extra=["source = {service:String}"], bind={"service": s}``.
+        Values are always bound, never interpolated.
         """
-        Phase 26: Data Tiering. Deletes logs and traces older than `days_to_keep` for a specific tenant.
+        params: dict[str, Any] = {"tenant_id": _require_tenant(tenant_id)}
+        params.update(bind or {})
+        clauses = ["tenant_id = {tenant_id:String}"]
+
+        if query_string is not None:
+            from denoiser.query.parser import compile_to_sql, parse_query
+
+            compiled = compile_to_sql(parse_query(query_string), params)
+            clauses.append(f"({compiled})")
+
+        # `semantic_logs` times its rows on `timestamp`, `semantic_traces` on
+        # `start_time`. The column name is the caller's, so it is validated
+        # rather than trusted — it is the one part of the clause that cannot be
+        # a bound parameter.
+        if time_column not in ("timestamp", "start_time"):
+            raise ValueError(f"unknown time column {time_column!r}")
+
+        if from_ts is not None:
+            clauses.append(f"{time_column} >= toDateTime64({{from_ts:Float64}}, 3, 'UTC')")
+            params["from_ts"] = from_ts / 1000.0
+        if to_ts is not None:
+            clauses.append(f"{time_column} <= toDateTime64({{to_ts:Float64}}, 3, 'UTC')")
+            params["to_ts"] = to_ts / 1000.0
+        if since is not None:
+            clauses.append(f"{time_column} >= toDateTime64({{since:Float64}}, 3, 'UTC')")
+            params["since"] = since.timestamp()
+
+        clauses.extend(extra)
+
+        return " AND ".join(clauses), params
+
+    @property
+    def available(self) -> bool:
+        """Whether the store can answer at all.
+
+        Read paths that legitimately degrade check this and say so, rather than
+        drawing an empty result that means something quite different.
+        """
+        return self.client is not None
+
+    def cleanup_old_data(self, tenant_id: str, days_to_keep: int) -> bool:
+        """Delete logs and traces older than `days_to_keep` for one tenant.
+
+        Returns whether the deletion was submitted. It previously returned
+        ``None`` on every path, so a caller could not tell a completed retention
+        pass from one that never ran — and retention that silently stops is a
+        disk that silently fills.
         """
         if not self.client:
-            return
+            logger.warning("Retention skipped for tenant %s: ClickHouse unavailable", tenant_id)
+            return False
         try:
+            # tenant_id is bound as a parameter (never string-interpolated) so a
+            # crafted tenant id cannot break out of the WHERE clause. days is a
+            # numeric interval, which ClickHouse won't accept as a bound value,
+            # so it is hard-cast to int instead.
+            days = int(days_to_keep)
+            params = {"tenant_id": _require_tenant(tenant_id)}
             # Delete old logs
-            self.client.command(f"""
-                ALTER TABLE semantic_logs
-                DELETE WHERE tenant_id = '{tenant_id}' AND timestamp < now() - INTERVAL {days_to_keep} DAY
-            """)
+            self.client.command(
+                "ALTER TABLE semantic_logs DELETE WHERE tenant_id = {tenant_id:String} "
+                f"AND timestamp < now() - INTERVAL {days} DAY",
+                parameters=params,
+            )
             # Delete old traces
-            self.client.command(f"""
-                ALTER TABLE semantic_traces
-                DELETE WHERE tenant_id = '{tenant_id}' AND start_time < now() - INTERVAL {days_to_keep} DAY
-            """)
-            logger.info(f"Cleaned up data older than {days_to_keep} days for tenant {tenant_id}")
+            self.client.command(
+                "ALTER TABLE semantic_traces DELETE WHERE tenant_id = {tenant_id:String} "
+                f"AND start_time < now() - INTERVAL {days} DAY",
+                parameters=params,
+            )
+            logger.info(f"Cleaned up data older than {days} days for tenant {tenant_id}")
+            return True
         except Exception as e:
             logger.error(f"Failed to cleanup old data for tenant {tenant_id}: {e}")
+            return False
 
-    @staticmethod
-    def _coerce_timestamp(ts):
-        """Accept an epoch number OR an ISO-8601 string.
+    #: Tables a tenant purge has to clear. Named once so the delete and the
+    #: completion check cannot drift apart — a table missing from the second
+    #: list would be reported as erased while its parts were still being
+    #: rewritten.
+    TENANT_TABLES = ("semantic_logs", "semantic_traces")
 
-        ISO strings are the natural producer format (and what the API examples
-        use), but were previously dropped -- any non-numeric timestamp fell back
-        to ingestion wall-clock, so the stored time bore no relation to the event
-        and corrupted every time-range query and the volume histogram.
+    def delete_tenant(self, tenant_id: str) -> bool:
+        """Submit deletion of every log and trace belonging to a tenant.
+
+        Returns whether the mutations were *accepted*. Use
+        `submit_tenant_deletion` when the caller needs to certify the erasure
+        later — see that method for why the distinction matters.
         """
-        from datetime import datetime
-        if isinstance(ts, (int, float)):
-            return datetime.fromtimestamp(ts, UTC)
-        if isinstance(ts, str) and ts.strip():
-            with contextlib.suppress(ValueError):
-                return datetime.fromisoformat(ts.strip().replace("Z", "+00:00"))
-        return datetime.now(UTC)
+        return bool(self.submit_tenant_deletion(tenant_id).get("submitted"))
 
-    def insert_logs(self, logs: list[dict[str, Any]], tenant_id: str):
-        """Dual-write logs to ClickHouse"""
+    def submit_tenant_deletion(self, tenant_id: str) -> dict[str, Any]:
+        """Submit the purge and return the mutations to track it by.
+
+        ClickHouse `ALTER TABLE … DELETE` is asynchronous: it returns once the
+        mutation is *queued*, not once the parts have been rewritten. So the
+        old boolean answered "was the request accepted", while the question a
+        GDPR Article 17 erasure certificate has to answer is "is the data
+        gone" — and on a large table those are minutes or hours apart.
+
+        `mutations_sync` is deliberately still not set: a final purge must not
+        hold an HTTP request open for the length of a table rewrite. Instead
+        the mutation ids come back here, and `mutation_status` turns them into
+        a completion check the certificate can be issued against.
+        """
+        result: dict[str, Any] = {"submitted": False, "mutations": [], "tables": []}
+        if not self.client:
+            result["error"] = "no ClickHouse client"
+            return result
+
+        try:
+            scoped = _require_tenant(tenant_id)
+            params = {"tenant_id": scoped}
+            for table in self.TENANT_TABLES:
+                self.client.command(
+                    f"ALTER TABLE {table} DELETE WHERE tenant_id = {{tenant_id:String}}",
+                    parameters=params,
+                )
+                result["tables"].append(table)
+            result["submitted"] = True
+            logger.info("Submitted deletion of all ClickHouse data for tenant %s", tenant_id)
+        except Exception as e:
+            logger.error(f"Failed to delete ClickHouse data for tenant {tenant_id}: {e}")
+            result["error"] = str(e)
+            return result
+
+        # Look the mutations up rather than parsing them out of the command
+        # result: clickhouse_connect does not surface a mutation id, and
+        # system.mutations is the only authority on whether one has finished.
+        try:
+            rows = self.client.query(
+                "SELECT mutation_id, table, is_done FROM system.mutations "
+                "WHERE table IN {tables:Array(String)} "
+                "AND command LIKE {needle:String} "
+                "ORDER BY create_time DESC LIMIT {cap:UInt32}",
+                parameters={
+                    "tables": list(self.TENANT_TABLES),
+                    "needle": f"%{scoped}%",
+                    "cap": len(self.TENANT_TABLES),
+                },
+            ).result_rows
+            result["mutations"] = [
+                {"mutation_id": row[0], "table": row[1], "is_done": bool(row[2])}
+                for row in rows
+            ]
+        except Exception as e:
+            # The delete is submitted either way. What is lost is the ability to
+            # confirm it later, and saying so is better than implying the purge
+            # itself failed.
+            logger.warning("Could not record mutation ids for tenant %s: %s", tenant_id, e)
+            result["mutation_lookup_error"] = str(e)
+
+        return result
+
+    def mutation_status(self, mutation_ids: list[str]) -> dict[str, Any]:
+        """Whether the given mutations have finished rewriting their parts.
+
+        This is what an erasure certificate should be issued against — not the
+        response of the endpoint that submitted the delete.
+        """
+        status: dict[str, Any] = {"complete": False, "mutations": [], "pending": 0}
+        if not mutation_ids:
+            # Nothing to wait on. A purge that submitted no mutations because
+            # the tenant had no rows is complete, not indeterminate.
+            status["complete"] = True
+            return status
+        if not self.client:
+            status["error"] = "no ClickHouse client"
+            return status
+
+        try:
+            rows = self.client.query(
+                "SELECT mutation_id, table, is_done, latest_fail_reason "
+                "FROM system.mutations WHERE mutation_id IN {ids:Array(String)}",
+                parameters={"ids": list(mutation_ids)},
+            ).result_rows
+        except Exception as e:
+            logger.error("Could not read mutation status: %s", e)
+            status["error"] = str(e)
+            return status
+
+        seen = set()
+        for row in rows:
+            seen.add(row[0])
+            status["mutations"].append(
+                {
+                    "mutation_id": row[0],
+                    "table": row[1],
+                    "is_done": bool(row[2]),
+                    "failure": row[3] or None,
+                }
+            )
+
+        # A mutation that has left system.mutations has been applied and
+        # cleaned up; treating it as pending would leave a purge permanently
+        # uncertifiable.
+        missing = [m for m in mutation_ids if m not in seen]
+        for mutation_id in missing:
+            status["mutations"].append(
+                {"mutation_id": mutation_id, "table": None, "is_done": True, "failure": None}
+            )
+
+        status["pending"] = sum(1 for m in status["mutations"] if not m["is_done"])
+        status["complete"] = status["pending"] == 0
+        return status
+
+    def insert_logs(self, logs: list[dict[str, Any]], tenant_id: str, *, redact: bool = True):
+        """Dual-write logs to ClickHouse, redacted.
+
+        Redaction happens here, at the one point every ingest path passes
+        through, rather than in each router. It used to be applied in
+        `api.routers_ingest` only, so `/ingest` was clean and `/v1/logs` — the
+        OTLP endpoint, the one the README tells enterprises to use — wrote
+        customer email addresses and bearer tokens to the store verbatim, for
+        the tenant's full retention period. So did the Kafka consumer.
+
+        That was not a policy decision anyone made. It was the same rule typed
+        out in one place and not the others, which is the failure this project
+        has already fixed twice (see `api.scope`). Doing it at the choke point
+        means the unredacted path is the one that no longer exists.
+
+        ``redact=False`` exists for the archive restore path, which is
+        rehydrating rows that were already redacted on the way in; running the
+        patterns again would be wasted work on every restored record.
+        """
         if not self.client:
             return False
 
         try:
             # tenant_id is a String column in ClickHouse; callers may pass an int
-            # tenant id (e.g. Tenant.id). Coerce so the binary insert doesn't crash.
-            tenant_id = str(tenant_id)
+            # tenant id (e.g. Tenant.id). Fail-closed on an empty tenant so rows
+            # are never written under an unscoped / unreachable partition.
+            tenant_id = _require_tenant(tenant_id)
+
+            if redact:
+                from denoiser.api.platform_settings import build_redactor
+                from denoiser.preprocessing.redaction import redact_value
+
+                redactor = build_redactor()
+                # Whole-record, not just `message`: the raw JSON is stored
+                # alongside it and is searchable, so redacting one and not the
+                # other leaves the data exactly where a query would find it.
+                logs = [redact_value(log, redactor) for log in logs]
+
             # Flatten log dicts to tuples matching schema
             data = []
             for log in logs:
-                dt = self._coerce_timestamp(log.get("timestamp"))
+                dt = resolve_timestamp(log)
 
                 data.append((
                     tenant_id,
                     dt,
                     resolve_source(log),
-                    log.get("level", "INFO"),
+                    resolve_level(log),
                     log.get("message", str(log)),
                     json.dumps(log)
                 ))
@@ -197,7 +626,7 @@ class ClickHouseStore:
 
         try:
             # tenant_id is a String column; callers may pass an int Tenant.id.
-            tenant_id = str(tenant_id)
+            tenant_id = _require_tenant(tenant_id)
             # Insert tenant_id to the beginning of each tuple
             traces_data_with_tenant = [(tenant_id, *row) for row in traces_data]
 
@@ -216,22 +645,24 @@ class ClickHouseStore:
         if not self.client:
             return []
 
-        from denoiser.query.parser import compile_to_sql, parse_query
+        # Hand-written rather than relying on a driver instrumentor: there is
+        # no OpenTelemetry instrumentation for clickhouse-connect, and this is
+        # the span that usually explains a slow query. Without it a trace shows
+        # a four-second request with a one-millisecond database call and an
+        # unexplained gap. See denoiser.telemetry.otel.
+        from denoiser.telemetry.otel import tracer
 
-        ast = parse_query(query_string)
-        params = {}
-        sql_where = compile_to_sql(ast, params)
+        with tracer().start_as_current_span("clickhouse.query_logs") as span:
+            span.set_attribute("db.system", "clickhouse")
+            span.set_attribute("db.sql.table", "semantic_logs")
+            span.set_attribute("semanticos.tenant_id", str(tenant_id))
+            span.set_attribute("semanticos.limit", int(limit))
+            return self._query_logs(query_string, limit, tenant_id, from_ts, to_ts, group_by)
 
-        if tenant_id:
-            sql_where = f"tenant_id = {{tenant_id:String}} AND ({sql_where})"
-            params['tenant_id'] = str(tenant_id)
-
-        if from_ts is not None:
-            sql_where += " AND timestamp >= toDateTime64({from_ts:Float64}, 3, 'UTC')"
-            params['from_ts'] = from_ts / 1000.0
-        if to_ts is not None:
-            sql_where += " AND timestamp <= toDateTime64({to_ts:Float64}, 3, 'UTC')"
-            params['to_ts'] = to_ts / 1000.0
+    def _query_logs(self, query_string: str = "", limit: int = 100, tenant_id: str = "", from_ts: int | None = None, to_ts: int | None = None, group_by: str | None = None):
+        sql_where, params = self.scope(
+            tenant_id, query_string=query_string, from_ts=from_ts, to_ts=to_ts
+        )
 
         sql = "SELECT * FROM semantic_logs"
         
@@ -257,23 +688,59 @@ class ClickHouseStore:
             logger.error(f"Failed to query ClickHouse: {e}")
             return []
 
+    def aggregate_metric(
+        self,
+        query_string: str = "",
+        aggregation: str = "count",
+        tenant_id: str = "",
+        from_ts: int | None = None,
+        to_ts: int | None = None,
+    ) -> float:
+        """Compute a real metric value over the ingested logs for a MetricRule.
+
+        ``count`` is the well-defined default. For sum/avg/max/min there is no
+        rule-level target field, so we aggregate a numeric value pulled from the
+        common latency/value keys, falling back to a count when none is present.
+        The LQL where-clause and all bounds are parameterized.
+
+        Raises `StoreUnavailable` rather than returning ``0.0`` when ClickHouse
+        cannot answer. The caller writes this number into a timeseries, and a
+        zero it did not measure is indistinguishable, forever, from a zero it
+        did — a flat line through an outage reads as "nothing happened".
+        """
+        if not self.client:
+            raise StoreUnavailable("ClickHouse", "no client")
+
+        sql_where, params = self.scope(
+            tenant_id, query_string=query_string, from_ts=from_ts, to_ts=to_ts
+        )
+
+        agg = (aggregation or "count").lower()
+        if agg in ("sum", "avg", "max", "min"):
+            numeric = (
+                "coalesce("
+                "nullIf(JSONExtractFloat(raw_json, 'duration_ms'), 0),"
+                "nullIf(JSONExtractFloat(raw_json, 'latency'), 0),"
+                "nullIf(JSONExtractFloat(raw_json, 'value'), 0), 0)"
+            )
+            sql = f"SELECT {agg}({numeric}) FROM semantic_logs WHERE {sql_where}"
+        else:
+            sql = f"SELECT count() FROM semantic_logs WHERE {sql_where}"
+
+        try:
+            result = self.client.query(sql, parameters=params)
+            value = result.result_rows[0][0] if result.result_rows else 0
+            return float(value or 0)
+        except Exception as e:
+            logger.error(f"Failed to aggregate metric: {e}")
+            raise StoreUnavailable("ClickHouse", str(e)) from e
+
     def get_facets(self, tenant_id: str = "", from_ts: int | None = None, to_ts: int | None = None):
         """Get facet counts for log explorer sidebar"""
         if not self.client:
             return {"source": [], "level": []}
             
-        params = {}
-        sql_where = "1=1"
-        if tenant_id:
-            sql_where += " AND tenant_id = {tenant_id:String}"
-            params['tenant_id'] = str(tenant_id)
-
-        if from_ts is not None:
-            sql_where += " AND timestamp >= toDateTime64({from_ts:Float64}, 3, 'UTC')"
-            params['from_ts'] = from_ts / 1000.0
-        if to_ts is not None:
-            sql_where += " AND timestamp <= toDateTime64({to_ts:Float64}, 3, 'UTC')"
-            params['to_ts'] = to_ts / 1000.0
+        sql_where, params = self.scope(tenant_id, from_ts=from_ts, to_ts=to_ts)
 
         facets = {"source": [], "level": []}
         
@@ -298,21 +765,9 @@ class ClickHouseStore:
         if not self.client:
             return []
             
-        from denoiser.query.parser import compile_to_sql, parse_query
-        ast = parse_query(query_string)
-        params = {}
-        sql_where = compile_to_sql(ast, params)
-
-        if tenant_id:
-            sql_where = f"tenant_id = {{tenant_id:String}} AND ({sql_where})"
-            params['tenant_id'] = str(tenant_id)
-
-        if from_ts is not None:
-            sql_where += " AND timestamp >= toDateTime64({from_ts:Float64}, 3, 'UTC')"
-            params['from_ts'] = from_ts / 1000.0
-        if to_ts is not None:
-            sql_where += " AND timestamp <= toDateTime64({to_ts:Float64}, 3, 'UTC')"
-            params['to_ts'] = to_ts / 1000.0
+        sql_where, params = self.scope(
+            tenant_id, query_string=query_string, from_ts=from_ts, to_ts=to_ts
+        )
 
         # Determine grouping interval if not explicitly provided based on time range
         # ClickHouse syntax: toStartOfInterval(timestamp, INTERVAL 1 hour)

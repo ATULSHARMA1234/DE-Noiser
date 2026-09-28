@@ -1,0 +1,29 @@
+version: 2
+updates:
+  # Python backend (uv / pip-compatible lockfile)
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      python-dependencies:
+        patterns:
+          - "*"
+
+  # Next.js frontend
+  - package-ecosystem: "npm"
+    directory: "/web"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      js-dependencies:
+        patterns:
+          - "*"
+
+  # GitHub Actions themselves
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

@@ -29,5 +29,8 @@ This section guides you through submitting a bug report. Following these guideli
 3. Start the FastAPI backend: `cd src && uv run python -m uvicorn denoiser.api.main:app`
 4. Start the Next.js frontend: `cd web && npm install && npm run dev`
 
+## Licensing of contributions
+SemanticOS is source-available under the [Elastic License 2.0](LICENSE). By opening a pull request you agree that your contribution is licensed under those terms. Work you contributed before commit `97ad799` remains MIT-licensed in the commits where it was published. See [LICENSING.md](LICENSING.md).
+
 ## Code of Conduct
 By participating in this project, you are expected to uphold our Code of Conduct. Please be respectful to all community members.

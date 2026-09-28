@@ -1,0 +1,193 @@
+# Prometheus alerting rules for SemanticOS itself.
+#
+# The platform computes SLOs and error budgets for the customer's services and
+# had none for its own. These are the conditions where SemanticOS is failing in
+# a way nobody would otherwise notice — specifically the ones where it keeps
+# returning 200 while losing data, which is the failure mode an observability
+# product can least afford.
+#
+# Load as a PrometheusRule (kube-prometheus-stack) or include from
+# prometheus.yml via rule_files. The scrape must present METRICS_TOKEN:
+#
+#   scrape_configs:
+#     - job_name: semanticos
+#       metrics_path: /internal/metrics
+#       authorization:
+#         type: Bearer
+#         credentials_file: /etc/prometheus/semanticos-metrics-token
+#       static_configs:
+#         - targets: ["semanticos-api:8000"]
+#
+# Severities: `page` means wake someone; `ticket` means it can wait for
+# business hours. Anything that cannot justify one of those is not an alert.
+
+groups:
+  - name: semanticos-data-loss
+    rules:
+      # The sharpest signal in the file. A dead-lettered record is one the
+      # ingestion pipeline gave up on: the customer's log line was accepted with
+      # a 200 and will never be queryable. Any increase at all is worth waking
+      # someone for, because the alternative is finding out during an audit.
+      - alert: SemanticOSIngestionDeadLettering
+        expr: increase(semanticos_ingestion_dead_lettered_total[15m]) > 0
+        for: 0m
+        labels:
+          severity: page
+        annotations:
+          summary: "Ingestion is dead-lettering records ({{ $value | humanize }} in 15m)"
+          description: >-
+            The ingestion worker could not write these records to ClickHouse and
+            has quarantined them to the dead-letter topic. They were accepted
+            with a 200 and are not queryable. Check ClickHouse health and the
+            worker logs, then replay from the DLQ topic once the cause is fixed.
+
+      # A steady trickle is a poison-pill pattern — one malformed shipper, not
+      # an outage. Different response, so a different alert.
+      - alert: SemanticOSIngestionDeadLetteringSustained
+        expr: increase(semanticos_ingestion_dead_lettered_total[6h]) > 100
+        for: 0m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Sustained dead-lettering ({{ $value | humanize }} records in 6h)"
+          description: >-
+            A source is producing records the pipeline cannot accept. Inspect
+            the dead-letter topic and identify the shipper by `topic` label.
+
+  - name: semanticos-ingestion
+    rules:
+      # /ingest returns 200 as soon as a record reaches Kafka. If the consumer
+      # is not running, the topic fills and nothing ever reaches ClickHouse —
+      # successful writes, and no logs to query. Readiness already fails on
+      # this; the alert is what tells somebody at 3am.
+      - alert: SemanticOSIngestionConsumerDown
+        expr: semanticos_ingestion_consumer_up == 0
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "The ingestion consumer has not checked in"
+          description: >-
+            Records are being accepted and queued but nothing is writing them to
+            ClickHouse. Every minute here is a minute of logs the customer
+            cannot query.
+
+      - alert: SemanticOSIngestionConsumerStalled
+        expr: semanticos_ingestion_heartbeat_age_seconds > 60
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "Consumer heartbeat is {{ $value | humanizeDuration }} old"
+
+      # Losing ground, as distinct from being briefly behind. Alert on the
+      # backlog growing rather than on an absolute number, so a deliberate
+      # replay does not page.
+      - alert: SemanticOSIngestionLagGrowing
+        expr: >-
+          semanticos_ingestion_consumer_lag > 100000
+          and
+          deriv(semanticos_ingestion_consumer_lag[30m]) > 0
+        for: 30m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Consumer backlog is {{ $value | humanize }} and still growing"
+          description: >-
+            The consumer is not keeping up with ingest. Scale the ingestion
+            deployment or check ClickHouse write latency.
+
+      - alert: SemanticOSIngestionLagCritical
+        expr: semanticos_ingestion_consumer_lag > 500000
+        for: 15m
+        labels:
+          severity: page
+        annotations:
+          summary: "Consumer backlog past the readiness ceiling ({{ $value | humanize }})"
+
+  - name: semanticos-availability
+    rules:
+      - alert: SemanticOSAPIErrorRateHigh
+        expr: >-
+          sum(rate(semanticos_http_requests_total{status=~"5.."}[5m]))
+          /
+          sum(rate(semanticos_http_requests_total[5m]))
+          > 0.05
+        for: 10m
+        labels:
+          severity: page
+        annotations:
+          summary: "API 5xx rate above 5% ({{ $value | humanizePercentage }})"
+
+      # Ingest is the write path. It failing means data is being refused at the
+      # door, which is more urgent than a read endpoint being slow.
+      - alert: SemanticOSIngestFailing
+        expr: >-
+          sum(rate(semanticos_http_requests_total{path="/ingest",status=~"5.."}[5m]))
+          /
+          sum(rate(semanticos_http_requests_total{path="/ingest"}[5m]))
+          > 0.01
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "/ingest is rejecting writes ({{ $value | humanizePercentage }} 5xx)"
+
+      - alert: SemanticOSAPILatencyHigh
+        expr: >-
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(semanticos_http_request_duration_seconds_bucket[5m]))
+          ) > 2
+        for: 15m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "API p95 latency above 2s ({{ $value | humanizeDuration }})"
+
+      - alert: SemanticOSAPIDown
+        expr: up{job="semanticos"} == 0
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "SemanticOS API is not being scraped"
+          description: >-
+            Either the API is down or the scrape is failing. If the API is up,
+            check that the scrape presents METRICS_TOKEN — the endpoint returns
+            401 without it.
+
+  - name: semanticos-slo
+    rules:
+      # An availability SLO for the platform itself. 99.9% over 30 days is
+      # ~43 minutes of budget; these fire on burn rate, not on instantaneous
+      # error rate, so a brief blip does not page and a slow bleed does.
+      - alert: SemanticOSErrorBudgetBurnFast
+        expr: >-
+          (
+            sum(rate(semanticos_http_requests_total{status=~"5.."}[1h]))
+            /
+            sum(rate(semanticos_http_requests_total[1h]))
+          ) > (14.4 * 0.001)
+        for: 5m
+        labels:
+          severity: page
+          slo: availability
+        annotations:
+          summary: "Burning the 30-day error budget 14x too fast"
+          description: >-
+            At this rate the entire monthly budget is gone in ~2 days.
+
+      - alert: SemanticOSErrorBudgetBurnSlow
+        expr: >-
+          (
+            sum(rate(semanticos_http_requests_total{status=~"5.."}[6h]))
+            /
+            sum(rate(semanticos_http_requests_total[6h]))
+          ) > (6 * 0.001)
+        for: 30m
+        labels:
+          severity: ticket
+          slo: availability
+        annotations:
+          summary: "Burning the 30-day error budget 6x too fast"

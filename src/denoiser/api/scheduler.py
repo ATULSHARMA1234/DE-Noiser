@@ -13,26 +13,19 @@ from denoiser.storage.object_store import ObjectStore
 logger = get_logger(__name__)
 
 DATA_DIR = Path("data")
-SETTINGS_FILE = DATA_DIR / "settings.json"
-
-def get_retention_days():
-    import json
-    try:
-        if SETTINGS_FILE.exists():
-            cfg = json.loads(SETTINGS_FILE.read_text())
-            return cfg.get("retention_days", 7)
-    except Exception:
-        pass
-    return 7
 
 def get_storage_settings():
-    import json
+    """Settings as every replica sees them (database-backed, not a local file)."""
     try:
-        if SETTINGS_FILE.exists():
-            return json.loads(SETTINGS_FILE.read_text())
-    except Exception:
-        pass
-    return {}
+        from denoiser.api.platform_settings import load_settings
+
+        return load_settings()
+    except Exception as e:
+        logger.error(f"Could not load settings for the retention job: {e}")
+        return {}
+
+def get_retention_days():
+    return get_storage_settings().get("retention_days", 7)
 
 async def archive_old_logs_to_s3():
     """
@@ -93,7 +86,9 @@ async def cleanup_database_records():
     logger.info("Running Database Retention Scheduler Job...")
     retention_days = int(get_retention_days())
     import datetime
-    cutoff_time = datetime.datetime.utcnow() - datetime.timedelta(days=retention_days)
+
+    from denoiser.utils.time import utcnow
+    cutoff_time = utcnow() - datetime.timedelta(days=retention_days)
 
     try:
         from denoiser.storage.db import AnalysisRun, AuditLog, SessionLocal
@@ -113,7 +108,12 @@ async def cleanup_database_records():
         db.close()
 
 async def trigger_sso_s3_db_archival():
-    """Daily job to run S3ArchiverEngine.run_archival()"""
+    """Run S3ArchiverEngine.run_archival().
+
+    No longer on a schedule of its own — see the note by the job registrations
+    below. Kept as a callable so an operator can still invoke the sweep out of
+    band (the `/storage` endpoint does exactly that).
+    """
     from denoiser.storage.archiver import S3ArchiverEngine
     try:
         S3ArchiverEngine.run_archival()
@@ -122,12 +122,39 @@ async def trigger_sso_s3_db_archival():
 
 scheduler = AsyncIOScheduler()
 
-# Every job is wrapped so that only one replica executes a given occurrence.
-# APScheduler is in-process: without this, N replicas each run the nightly
-# archival, racing to gzip, upload and delete the same files.
-scheduler.add_job(single_instance("archive_old_logs_to_s3")(archive_old_logs_to_s3), 'cron', hour=2, minute=0)
-scheduler.add_job(single_instance("cleanup_database_records")(cleanup_database_records), 'cron', hour=3, minute=0)
-scheduler.add_job(single_instance("trigger_sso_s3_db_archival")(trigger_sso_s3_db_archival), 'cron', hour=4, minute=0)
+#: The nightly schedule, as data: ``(job id, callable, hour, minute)``.
+#:
+#: Declared rather than registered inline so that what is scheduled can be read
+#: — and asserted — without a live scheduler. Job registration is process state,
+#: and process state is not where a policy decision should only be visible.
+#:
+#: Every job is wrapped so that only one replica executes a given occurrence.
+#: APScheduler is in-process: without this, N replicas each run the nightly
+#: sweep, racing to gzip, upload and delete the same files.
+#:
+#: `archive_old_logs_to_s3` sweeps *log files on local disk*. It is unrelated to
+#: the ClickHouse and span archival — it protects the data volume, not the
+#: retention policy — and the similar name is why the two were once confused.
+#:
+#: `trigger_sso_s3_db_archival` — the store archival — is deliberately absent.
+#: It ran at 04:00, while retention (a hard DELETE against the same rows, on the
+#: same seven-day threshold) ran at 00:00 on the Celery beat, in a different
+#: process. The destructive job won by four hours, so a free-tier tenant's logs
+#: were deleted from ClickHouse before the job that would have written them to
+#: S3 came looking. Both reported success and the archive stayed empty.
+#:
+#: It now runs inside `denoiser.workers.billing_worker.aggregate_billing`,
+#: immediately before the deletion it protects, and the deletion is skipped when
+#: it fails. Ordering that matters cannot live in two crontabs in two processes.
+NIGHTLY_JOBS: tuple[tuple[str, object, int, int], ...] = (
+    ("archive_old_logs_to_s3", archive_old_logs_to_s3, 2, 0),
+    ("cleanup_database_records", cleanup_database_records, 3, 0),
+)
+
+for _job_id, _func, _hour, _minute in NIGHTLY_JOBS:
+    scheduler.add_job(
+        single_instance(_job_id)(_func), "cron", hour=_hour, minute=_minute, id=_job_id
+    )
 
 
 def scheduler_enabled() -> bool:

@@ -1,13 +1,15 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import ReactEcharts from 'echarts-for-react';
 import * as echarts from 'echarts';
-import { Database, TrendingUp, Zap, Loader2, AlertTriangle, RefreshCw, FileText, Cpu, MemoryStick, HardDrive, Wifi, Search } from 'lucide-react';
+import { Database, TrendingUp, Zap, Loader2, AlertTriangle, RefreshCw, FileText, Cpu, MemoryStick, HardDrive, Wifi, Search, ArrowRight, Maximize2 } from 'lucide-react';
 import { LineChart, Line, ResponsiveContainer, YAxis } from 'recharts';
 import { apiFetch, runAnalysis as runAnalysisJob } from '@/lib/api';
 import { useTimeRange } from '@/context/TimeRangeContext';
 import { useTasks } from '@/context/TaskContext';
+import { TopologyModal } from '@/components/TopologyModal';
 
 // ECharts draws to a canvas, where `var(--token)` is not a valid colour — it
 // would silently render black. Resolve design tokens to their computed value.
@@ -16,12 +18,6 @@ const cssVar = (name: string, fallback: string) => {
  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
  return v || fallback;
 };
-
-const seededValue = (index: number, seed: number) => {
- const x = Math.sin(index * 12.9898 + seed * 78.233) * 43758.5453;
- return x - Math.floor(x);
-};
-
 
 function Sparkline({ data, dataKey, color }: { data: any[], dataKey: string, color: string }) {
  // A sparkline alone shows shape but no reading. State the current value's
@@ -50,8 +46,9 @@ function Sparkline({ data, dataKey, color }: { data: any[], dataKey: string, col
 }
 
 export default function CommandCenter() {
+ const router = useRouter();
  const { timeRange } = useTimeRange();
- const { tasks, executeTask } = useTasks();
+ const { tasks, executeTask, attachRemoteTask } = useTasks();
  const [data, setData] = useState<any>(null);
  const [loading, setLoading] = useState(false);
  const [error, setError] = useState<string | null>(null);
@@ -62,6 +59,7 @@ export default function CommandCenter() {
  const [selectedSource, setSelectedSource] = useState('');
  const [elapsedTime, setElapsedTime] = useState(0);
  const [settings, setSettings] = useState<any>(null);
+ const [topologyExpanded, setTopologyExpanded] = useState(false);
 
  // Fetch settings on mount
  useEffect(() => {
@@ -129,6 +127,9 @@ export default function CommandCenter() {
  const [vitals, setVitals] = useState<any[]>(
  Array.from({ length: 20 }, () => ({ cpu: 0, mem: 0, disk: 0, net: 0 }))
  );
+ // These vitals are the SemanticOS host's own, not the monitored fleet's. The
+ // panel said only "System Vitals", which invited exactly that misreading.
+ const [vitalsHost, setVitalsHost] = useState<string | null>(null);
 
  useEffect(() => {
  const padToWindow = (arr: any[]) =>
@@ -146,6 +147,7 @@ export default function CommandCenter() {
  try {
  const res = await apiFetch('/vitals');
  if (res?.vitals) setVitals(padToWindow(res.vitals));
+ if (res?.host) setVitalsHost(res.host);
  } catch {
  // Keep previous vitals if the backend is temporarily unavailable.
  }
@@ -189,15 +191,43 @@ export default function CommandCenter() {
  }
  }, [failedAnalysisTask]);
 
- // Timer for loading state
+ // Timer for loading state. Derived from the task's startedAt rather than
+ // counted up from zero: this component unmounts whenever you navigate away,
+ // so a local counter restarted at 0 on every return and claimed a long-running
+ // analysis had just begun.
+ const analysisStartedAt = activeAnalysisTask?.startedAt;
  useEffect(() => {
- let interval: any;
- if (loading) {
+ if (!analysisStartedAt) {
  setElapsedTime(0);
- interval = setInterval(() => setElapsedTime(t => t + 1), 1000);
+ return;
  }
+ const tick = () => setElapsedTime(Math.floor((Date.now() - analysisStartedAt) / 1000));
+ tick();
+ const interval = setInterval(tick, 1000);
  return () => clearInterval(interval);
- }, [loading]);
+ }, [analysisStartedAt]);
+
+ // The run this panel links to. Both a fresh task result and the snapshot loaded
+ // on mount carry the id, so the link works after a reload as well.
+ const reportRunId: string | null = data?.run_id || null;
+ const clusterCount: number | null = data?.clusters?.length ?? null;
+
+ // One line of scale, so the card says something without reproducing the
+ // report. The failure domain is its own field above; repeating it here would
+ // just be the same sentence twice.
+ const reportHeadline = (() => {
+ if (!data) return '';
+ const parts: string[] = [];
+ if (data.total_logs) parts.push(`${data.total_logs.toLocaleString()} logs`);
+ if (clusterCount != null) parts.push(`${clusterCount.toLocaleString()} clusters`);
+ const outliers = (data.clusters || [])
+ .filter((c: any) => c.cluster_id === -1)
+ .reduce((acc: number, c: any) => acc + (c.size || 0), 0);
+ if (outliers > 0) parts.push(`${outliers.toLocaleString()} outliers`);
+ const hints = data.intelligence?.root_cause_hints?.length;
+ if (hints) parts.push(`${hints} remediation hint${hints === 1 ? '' : 's'}`);
+ return parts.length ? parts.join(' · ') : 'Analysis complete.';
+ })();
 
  const taskIdForSource = (name: string) => `analysis:${name}`;
 
@@ -207,7 +237,11 @@ export default function CommandCenter() {
 
  const sourceName = sources.find(s => s.path === target)?.name || 'Source';
  // Use a stable ID so the same source can't be analyzed twice simultaneously
- executeTask(taskIdForSource(sourceName), `Analyzing ${sourceName}`, runAnalysisJob({ source: target, intelligence: true }));
+ const taskId = taskIdForSource(sourceName);
+ executeTask(taskId, `Analyzing ${sourceName}`, runAnalysisJob(
+ { source: target, intelligence: true },
+ (remoteId) => attachRemoteTask(taskId, remoteId),
+ ));
  };
 
  const handleSearch = async (e: React.FormEvent) => {
@@ -328,22 +362,31 @@ export default function CommandCenter() {
  };
  };
 
- const getTopologyOption = () => {
- // Use real cluster data if available
- if (data?.clusters) {
+ // Real UMAP coordinates for the current run, or null when the run carries
+ // none. Never invent points: a synthetic scatter under a "HDBSCAN Projection"
+ // heading reads as a real clustering result.
+ const projectionPoints = () => {
+ if (!data?.clusters) return null;
  const scatterData: any[] = [];
- data.clusters.forEach((c: any, idx: number) => {
- if (c.projection_2d && c.projection_2d.length > 0) {
- c.projection_2d.forEach((point: [number, number], i: number) => {
+ data.clusters.forEach((c: any) => {
+ (c.projection_2d || []).forEach((point: [number, number]) => {
  scatterData.push([
  point[0],
  point[1],
- c.size > 50 ? 5 + (c.size / 50) : 3 + (c.size / 10), // Base symbol size on cluster size
+ // Marker radius grows with cluster size, but on a sqrt scale and
+ // clamped: the old linear formula turned a 2,913-log cluster into a
+ // ~126px blob that swallowed the whole panel.
+ Math.max(4, Math.min(16, 3 + Math.sqrt(c.size))),
  c.cluster_id === -1 ? 'Noise' : `C${c.cluster_id}`
  ]);
  });
- }
  });
+ return scatterData.length > 0 ? scatterData : null;
+ };
+
+ const getTopologyOption = () => {
+ const scatterData = projectionPoints();
+ if (scatterData) {
  const groups = [...new Set(scatterData.map(d => d[3]))];
  const colors = [cssVar('--signal-alt', '#9d7bff'), cssVar('--signal-info', '#4a9eff'), cssVar('--signal-ok', '#35c08e'), cssVar('--signal-warn', '#f5a623'), cssVar('--signal-crit', '#f2555a')];
  return {
@@ -351,40 +394,34 @@ export default function CommandCenter() {
  tooltip: { show: false },
  legend: { bottom: 0, left: 10, textStyle: { color: cssVar('--text-muted', '#6a717a'), fontSize: 9 }, icon: 'circle' },
  grid: { top: 10, bottom: 30, left: 10, right: 10 },
- xAxis: { show: false }, yAxis: { show: false },
+ // UMAP coordinates are not centred on zero, and a value axis includes the
+ // origin unless scaled — without this every cluster lands in one corner.
+ xAxis: { show: false, type: 'value', scale: true },
+ yAxis: { show: false, type: 'value', scale: true },
  series: groups.map((g, gi) => ({
  name: g,
  type: 'scatter',
- symbolSize: (d: any) => d[2] * 2,
+ symbolSize: (d: any) => d[2],
  data: scatterData.filter(d => d[3] === g),
- itemStyle: { color: colors[gi % colors.length], opacity: g === 'Noise' ? 0.3 : 0.8 },
+ itemStyle: { color: colors[gi % colors.length], opacity: g === 'Noise' ? 0.35 : 0.75 },
  })),
  };
  }
- // Fallback placeholder
- const scatterData = Array.from({ length: 150 }, (_, i) => [
- seededValue(i, 8) * 10,
- seededValue(i, 9) * 10,
- seededValue(i, 10) * 5 + 2,
- seededValue(i, 11) > 0.9 ? 'C1' : seededValue(i, 12) > 0.8 ? 'C2' : 'Noise'
- ]);
+ // No projection in this run — render an empty grid; the caller shows why.
  return {
  backgroundColor: 'transparent',
  tooltip: { show: false },
- legend: { bottom: 0, left: 10, textStyle: { color: cssVar('--text-muted', '#6a717a'), fontSize: 9 }, icon: 'circle' },
  grid: { top: 10, bottom: 30, left: 10, right: 10 },
  xAxis: { show: false }, yAxis: { show: false },
- series: [
- { name: 'C1', type: 'scatter', symbolSize: (d: any) => d[2] * 2, data: scatterData.filter(d => d[3] === 'C1'), itemStyle: { color: cssVar('--signal-alt', '#9d7bff'), opacity: 0.8 } },
- { name: 'C2', type: 'scatter', symbolSize: (d: any) => d[2] * 2, data: scatterData.filter(d => d[3] === 'C2'), itemStyle: { color: cssVar('--signal-info', '#4a9eff'), opacity: 0.8 } },
- { name: 'Noise', type: 'scatter', symbolSize: (d: any) => d[2] * 2, data: scatterData.filter(d => d[3] === 'Noise'), itemStyle: { color: cssVar('--signal-ok', '#35c08e'), opacity: 0.3 } }
- ]
+ series: [],
  };
  };
 
+ const hasProjection = projectionPoints() !== null;
+
  return (
  <div className="space-y-6 max-w-[1600px] mx-auto pb-10">
- 
+
  {/* Source Selector + Run Button */}
  <div className="flex items-center gap-4">
  <div className="flex-1 flex items-center gap-3">
@@ -468,7 +505,13 @@ export default function CommandCenter() {
  )}
  </div>
 
- {/* System Vitals Panel */}
+ {/* System Vitals Panel — the SemanticOS host, not the monitored fleet */}
+ <div className="flex items-baseline gap-2 -mb-1">
+ <p className="eyebrow">SemanticOS Host Vitals</p>
+ <span className="text-[10px] text-[var(--text-muted)]">
+ {vitalsHost ? `${vitalsHost} — this platform node, not your monitored services` : 'this platform node, not your monitored services'}
+ </span>
+ </div>
  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
  <div className="bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-[3px] p-3.5 flex items-center justify-between">
  <div>
@@ -610,64 +653,58 @@ export default function CommandCenter() {
  )}
  </div>
 
- <div className="mb-5">
- <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-2">Incident Summary</p>
- <ul className="space-y-3 text-xs text-[var(--text-input)]">
+ {/* The report itself is not rendered here. The full narrative summary,
+ every remediation hint and every cluster used to be dumped into this
+ panel, which buried the operational view. The Command Center states
+ that a report exists and what it found; reading it is one click. */}
+ <div className="flex-1 flex flex-col justify-center">
  {loading ? (
- <div className="space-y-2">
+ <div className="space-y-2.5 py-4">
  <div className="shimmer-bg h-4 w-full rounded" />
  <div className="shimmer-bg h-4 w-5/6 rounded" />
  <div className="shimmer-bg h-4 w-2/3 rounded" />
  </div>
  ) : error ? (
- <li className="flex items-start gap-2.5 text-red-400 bg-red-500/5 p-3 rounded-lg border border-red-500/10">
+ <div className="flex items-start gap-2.5 text-red-400 bg-red-500/5 p-3 rounded-lg border border-red-500/10 text-xs">
  <AlertTriangle size={14} className="shrink-0 mt-0.5" />
  {error}
- </li>
- ) : data?.intelligence?.incident_summary ? (
- Array.isArray(data.intelligence.incident_summary) ? data.intelligence.incident_summary.map((s:string, i:number) => (
- <li key={i} className="flex items-start gap-2.5">
- <span className="w-1.5 h-1.5 rounded-full bg-[var(--primary)] mt-1.5 shrink-0"></span>
- {s}
- </li>
- )) : (
- <li className="flex items-start gap-2.5">
- <span className="w-1.5 h-1.5 rounded-full bg-[var(--primary)] mt-1.5 shrink-0"></span>
- {typeof data.intelligence.incident_summary === 'object' ? (data.intelligence.incident_summary?.summary || data.intelligence.incident_summary?.representative_log || JSON.stringify(data.intelligence.incident_summary)) : data.intelligence.incident_summary}
- </li>
- )
+ </div>
+ ) : reportRunId ? (
+ <button
+ type="button"
+ onClick={() => router.push(`/app/runs/${reportRunId}`)}
+ className="group w-full text-left bg-[var(--bg-inset)] border border-[var(--border-subtle)] hover:border-[var(--primary)]/40 rounded-lg p-5 transition-colors cursor-pointer"
+ >
+ <div className="flex items-start gap-3">
+ <div className="w-9 h-9 rounded-lg bg-[var(--primary)]/10 border border-[var(--primary)]/20 flex items-center justify-center shrink-0">
+ <FileText size={16} className="text-[var(--primary)]" />
+ </div>
+ <div className="min-w-0">
+ <p className="text-sm font-semibold text-[var(--text-primary)]">Report generated</p>
+ <p className="text-[11px] text-[var(--text-muted)] mt-1 leading-relaxed">
+ {reportHeadline}
+ </p>
+ </div>
+ </div>
+ <span className="mt-4 inline-flex items-center gap-1.5 text-xs font-semibold text-[var(--primary)] group-hover:gap-2.5 transition-all">
+ View full analysis report <ArrowRight size={13} />
+ </span>
+ </button>
+ ) : data ? (
+ // A run finished but was never persisted (e.g. an older in-memory
+ // result); say so rather than offering a link that 404s.
+ <p className="text-xs text-[var(--text-muted)] py-4">
+ Analysis complete. This result was not persisted, so there is no report to open.
+ </p>
  ) : (
- <li className="flex items-start gap-2.5 text-[var(--text-muted)]">
- Select a source and run analysis to begin.
- </li>
+ <p className="text-xs text-[var(--text-muted)] py-4">
+ Select a source and run analysis to generate a report.
+ </p>
  )}
- </ul>
  </div>
 
- <div className="mt-auto bg-[var(--bg-inset)] border border-[var(--border-subtle)] rounded-lg p-5 shadow-inner">
- <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-3">Remediation Hints</p>
- <ul className="space-y-3 text-xs text-emerald-400 font-medium">
- {loading ? (
- <div className="space-y-2">
- <div className="shimmer-bg h-4 w-full rounded" />
- <div className="shimmer-bg h-4 w-4/5 rounded" />
- </div>
- ) : data?.intelligence?.root_cause_hints ? data.intelligence.root_cause_hints.map((hint:string, i:number) => (
- <li key={i} className="flex items-start gap-2">
- <Zap size={14} className="shrink-0 mt-0.5 text-emerald-500" />
- {hint}
- </li>
- )) : (
- <li className="flex items-start gap-2 text-[var(--text-muted)]">
- <Zap size={14} className="shrink-0 mt-0.5 text-[var(--text-dimmed)]" />
- Pending analysis...
- </li>
- )}
- </ul>
- </div>
- 
- <div className="mt-4 flex justify-between text-[10px] text-[var(--text-muted)]">
- <span>Confidence: {data?.intelligence ? '85%' : '—'}</span>
+ <div className="mt-5 pt-4 border-t border-[var(--border-subtle)] flex justify-between text-[10px] text-[var(--text-muted)]">
+ <span>{clusterCount != null ? `${clusterCount.toLocaleString()} clusters` : 'Confidence: —'}</span>
  <span>Model: {settings?.llm_model || 'Llama 3.3-70B Local'}</span>
  </div>
  </div>
@@ -751,14 +788,50 @@ export default function CommandCenter() {
 
  {/* Neural Topology */}
  <div className="lg:col-span-1 bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-xl p-6">
+ <div className="flex items-start justify-between mb-6">
+ <div>
  <h2 className="text-sm font-semibold text-[var(--text-primary)] mb-1">Neural Topology</h2>
- <p className="text-xs text-[var(--text-muted)] mb-6">HDBSCAN Projection</p>
- <div className="h-[200px] bg-[var(--bg-inset)] rounded-lg border border-[var(--border-subtle)] relative">
+ <p className="text-xs text-[var(--text-muted)]">HDBSCAN Projection</p>
+ </div>
+ {hasProjection && <Maximize2 size={14} className="text-[var(--text-muted)] mt-0.5" />}
+ </div>
+ <div
+ className={`h-[200px] bg-[var(--bg-inset)] rounded-lg border border-[var(--border-subtle)] relative transition-colors ${
+ hasProjection ? 'cursor-pointer hover:border-[var(--primary)]' : ''
+ }`}
+ // The scatter is unreadable at 200px; clicking opens the same option
+ // full screen. Only offer it when there is something to enlarge.
+ onClick={() => hasProjection && setTopologyExpanded(true)}
+ onKeyDown={(e) => {
+ if (hasProjection && (e.key === 'Enter' || e.key === ' ')) {
+ e.preventDefault();
+ setTopologyExpanded(true);
+ }
+ }}
+ role={hasProjection ? 'button' : undefined}
+ tabIndex={hasProjection ? 0 : undefined}
+ aria-label={hasProjection ? 'Expand neural topology projection' : undefined}
+ >
  <ReactEcharts option={getTopologyOption()} style={{ height: '100%', width: '100%' }} />
+ {!hasProjection && (
+ <div className="absolute inset-0 flex items-center justify-center text-xs text-[var(--text-muted)] text-center px-6 pointer-events-none">
+ {loading
+ ? 'Computing UMAP projection…'
+ : data?.clusters
+ ? 'This run carries no 2D projection.'
+ : 'Run an analysis to project clusters.'}
+ </div>
+ )}
  </div>
  </div>
 
  </div>
+
+ <TopologyModal
+ isOpen={topologyExpanded}
+ onClose={() => setTopologyExpanded(false)}
+ option={getTopologyOption()}
+ />
 
  </div>
  );

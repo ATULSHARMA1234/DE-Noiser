@@ -58,67 +58,16 @@ export default function ServiceTopology() {
  const svgRef = useRef<SVGSVGElement | null>(null);
  const requestRef = useRef<number | null>(null);
 
- // Mock initial topology to instantly WOW the user on landing page
- const loadMockTopology = () => {
- const mockNodes: Node[] = [
- { id: 'gateway_service', label: 'gateway_service', x: 200, y: 150, vx: 0, vy: 0, size: 28, color: '#3b82f6', clusterCount: 4 },
- { id: 'auth_service', label: 'auth_service', x: 100, y: 300, vx: 0, vy: 0, size: 24, color: '#10b981', clusterCount: 2 },
- { id: 'payment_service', label: 'payment_service', x: 300, y: 300, vx: 0, vy: 0, size: 26, color: '#d946ef', clusterCount: 5 },
- { id: 'order_service', label: 'order_service', x: 500, y: 300, vx: 0, vy: 0, size: 24, color: '#f59e0b', clusterCount: 3 },
- { id: 'database_replica', label: 'database_replica', x: 300, y: 450, vx: 0, vy: 0, size: 30, color: '#ef4444', clusterCount: 8 }
- ];
-
- const mockLinks: Link[] = [
- {
- id: 'link_1',
- source: 'gateway_service',
- target: 'auth_service',
- confidence: 0.85,
- avgDelayMs: 12.5,
- occurrences: 14,
- sourceTemplate: 'GET /api/v1/checkout/session - 500 Internal Error',
- targetTemplate: 'JWT Token verification failed: expired signature',
- directionLabel: 'gateway_service -> auth_service'
- },
- {
- id: 'link_2',
- source: 'gateway_service',
- target: 'payment_service',
- confidence: 0.92,
- avgDelayMs: 45.2,
- occurrences: 28,
- sourceTemplate: 'POST /api/v1/payment/charge - 504 Gateway Timeout',
- targetTemplate: 'Failed to charge card for user_<ID>: timeout from Stripe gateway',
- directionLabel: 'gateway_service -> payment_service'
- },
- {
- id: 'link_3',
- source: 'payment_service',
- target: 'database_replica',
- confidence: 0.96,
- avgDelayMs: 110.8,
- occurrences: 45,
- sourceTemplate: 'Database transaction failed: rollback initiated',
- targetTemplate: 'SQL Error: PG::ConnectionBad: PQconsumeInput() connection closed',
- directionLabel: 'payment_service -> database_replica'
- },
- {
- id: 'link_4',
- source: 'order_service',
- target: 'database_replica',
- confidence: 0.74,
- avgDelayMs: 154.1,
- occurrences: 19,
- sourceTemplate: 'WARN Order confirmation delay detected for order_<ID>',
- targetTemplate: 'SQL Error: PG::ConnectionBad: PQconsumeInput() connection closed',
- directionLabel: 'order_service -> database_replica'
- }
- ];
-
- setNodes(mockNodes);
- setLinks(mockLinks);
- // Auto-select the strongest link to showcase drill-down sidebars
- setSelectedLink(mockLinks[2]);
+ // Seed positions on a circle rather than at random. The physics loop below
+ // resolves the final layout either way, but a deterministic start means the
+ // same causal graph draws the same shape on every run — a topology that
+ // reshuffles itself on reload reads as though the services moved.
+ const seedPosition = (index: number, total: number) => {
+ const angle = (2 * Math.PI * index) / Math.max(1, total);
+ return {
+ x: 400 + Math.cos(angle) * 180,
+ y: 250 + Math.sin(angle) * 140,
+ };
  };
 
  // 1. Fetch available sources on mount
@@ -130,8 +79,6 @@ export default function ServiceTopology() {
  if (list.length > 0) setSelectedSource(list[0].path);
  })
  .catch(console.error);
-
- loadMockTopology();
  }, []);
 
  // 2. Timer for loading state
@@ -157,8 +104,12 @@ export default function ServiceTopology() {
  const result = await runAnalysisJob({ source: selectedSource, intelligence: true });
  
  if (!result.causal_links || result.causal_links.length === 0) {
- setError("Analysis complete, but no cross-service causal co-occurrences were found in these logs. Reverted to interactive demo data.");
- loadMockTopology();
+ // An empty result is a real answer about these logs. Falling back to a
+ // demo graph here presented five invented services as the user's own
+ // infrastructure, which is worse than showing nothing.
+ setNodes([]);
+ setLinks([]);
+ setError("Analysis complete: no cross-service causal co-occurrences were found in these logs. Causal links need log lines from at least two services within the correlation window.");
  return;
  }
 
@@ -174,12 +125,14 @@ export default function ServiceTopology() {
  const tgtId = link.target_service;
 
  // Initialize nodes if not exists
+ // Positions are assigned once the full node set is known, so the seed
+ // ring is evenly spaced instead of depending on discovery order.
  if (!derivedNodesMap[srcId]) {
  derivedNodesMap[srcId] = {
  id: srcId,
  label: srcId,
- x: 150 + Math.random() * 300,
- y: 150 + Math.random() * 300,
+ x: 0,
+ y: 0,
  vx: 0,
  vy: 0,
  size: 24,
@@ -191,8 +144,8 @@ export default function ServiceTopology() {
  derivedNodesMap[tgtId] = {
  id: tgtId,
  label: tgtId,
- x: 150 + Math.random() * 300,
- y: 150 + Math.random() * 300,
+ x: 0,
+ y: 0,
  vx: 0,
  vy: 0,
  size: 24,
@@ -219,8 +172,10 @@ export default function ServiceTopology() {
  });
 
  // Update node sizing based on cluster counts
- const derivedNodesList = Object.values(derivedNodesMap).map(node => ({
+ const allNodes = Object.values(derivedNodesMap);
+ const derivedNodesList = allNodes.map((node, idx) => ({
  ...node,
+ ...seedPosition(idx, allNodes.length),
  size: Math.min(40, Math.max(20, 20 + node.clusterCount * 1.5))
  }));
 
@@ -231,8 +186,11 @@ export default function ServiceTopology() {
  }
 
  } catch (err: any) {
- setError(err.message || 'API connection failed. Reverted to interactive demo data.');
- loadMockTopology();
+ // Never substitute demo data for a failed request — an unreachable API
+ // must not look like a working topology.
+ setNodes([]);
+ setLinks([]);
+ setError(err.message || 'Analysis request failed. The topology could not be built.');
  } finally {
  setLoading(false);
  }
@@ -677,6 +635,21 @@ export default function ServiceTopology() {
  </g>
  </svg>
  </div>
+
+ {/* Empty state. The canvas used to be pre-filled with a demo graph of five
+ invented services, which looked exactly like a real result. Nothing is
+ the honest answer until an analysis produces causal links. */}
+ {!loading && nodes.length === 0 && (
+ <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 pointer-events-none px-8 text-center">
+ <Network size={40} className="text-[var(--text-dimmed)]" strokeWidth={1.5} />
+ <p className="text-sm font-semibold text-[var(--text-secondary)]">No causal topology yet</p>
+ <p className="text-xs text-[var(--text-muted)] max-w-[380px] leading-relaxed">
+ {sources.length === 0
+ ? 'Add a log source first — the service graph is derived from causal co-occurrences across your own logs.'
+ : 'Select a source and run the correlation to build the graph from cross-service causal co-occurrences in those logs.'}
+ </p>
+ </div>
+ )}
 
  {/* Graph Legend overlay — dynamically built from actual nodes */}
  <div className="absolute bottom-4 left-4 bg-[var(--bg-input)]/80 backdrop-blur-md border border-[var(--border-subtle)] px-4 py-3 rounded-xl space-y-1.5 text-[10px] text-[var(--text-muted)] font-bold z-20 max-w-[220px]">

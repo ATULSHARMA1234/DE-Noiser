@@ -31,21 +31,37 @@ RUN uv sync --frozen --no-dev
 
 FROM python:3.12-slim-bookworm AS runner
 
+LABEL org.opencontainers.image.title="SemanticOS API" \
+      org.opencontainers.image.source="https://github.com/ATULSHARMA1234/DE-Noiser" \
+      org.opencontainers.image.licenses="MIT"
+
 WORKDIR /app
+
+# Run as a non-root user (uid must match the Helm chart's securityContext).
+RUN groupadd --system --gid 1001 semanticos \
+ && useradd --system --uid 1001 --gid semanticos --home-dir /app --shell /usr/sbin/nologin semanticos
 
 # Copy the virtual environment from the builder
 COPY --from=builder /app/.venv /app/.venv
-ENV PATH="/app/.venv/bin:$PATH"
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
 
 # Copy the source code and necessary files
 COPY src src
 COPY alembic alembic
 COPY alembic.ini .
 
-# Create data directory
-RUN mkdir -p data
+# Create the data directory and hand ownership to the non-root user.
+RUN mkdir -p data && chown -R semanticos:semanticos /app
+
+USER semanticos
 
 EXPOSE 8000
+
+# Liveness probe for plain `docker run` / compose (K8s uses the chart's probes).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+  CMD python -c "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health/live', timeout=3).status==200 else 1)" || exit 1
 
 # Run uvicorn directly
 CMD ["uvicorn", "denoiser.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]

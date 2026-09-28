@@ -1,0 +1,17 @@
+# Accepted Python dependency vulnerabilities.
+#
+# The dependency scan is a blocking CI gate. An entry here is a deliberate,
+# reviewed exception — not a way to make a red build green. Every line needs:
+#
+#   <VULN-ID>   # YYYY-MM-DD, <who accepted it>, <why it does not apply here>,
+#               # <what has to change before it can be removed>
+#
+# Review this file whenever the gate fails and at every release. An exception
+# with no expiry is a permanent hole with extra steps, so state the condition
+# that retires it. Prefer upgrading the dependency; an entry here is the
+# fallback for a CVE with no fix available or one that provably cannot be
+# reached from this codebase.
+#
+# Format is one pip-audit vulnerability id per line (GHSA-… or PYSEC-…).
+
+# (empty — no accepted exceptions)

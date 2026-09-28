@@ -14,7 +14,7 @@ export default function SourcesPage() {
  const [uploading, setUploading] = useState(false);
  const fileInputRef = useRef<HTMLInputElement>(null);
  const router = useRouter();
- const { tasks, executeTask, isTaskRunning } = useTasks();
+ const { tasks, executeTask, attachRemoteTask, isTaskRunning } = useTasks();
 
  const [confirmOpen, setConfirmOpen] = useState(false);
  const [confirmTitle, setConfirmTitle] = useState('');
@@ -47,7 +47,11 @@ export default function SourcesPage() {
  const handleAnalyze = (src: any) => {
  if (isAnalyzing(src)) return;
  
- executeTask(taskIdForSource(src.name), `Analyzing ${src.name}`, runAnalysis({ source: src.path, intelligence: true }));
+ const taskId = taskIdForSource(src.name);
+ executeTask(taskId, `Analyzing ${src.name}`, runAnalysis(
+ { source: src.path, intelligence: true },
+ (remoteId) => attachRemoteTask(taskId, remoteId),
+ ));
  
  router.push('/app');
  };

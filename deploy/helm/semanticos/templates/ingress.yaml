@@ -1,0 +1,55 @@
+{{- /*
+Ingress for the web UI and the API.
+
+values.yaml has documented an `ingress` block — className, hosts, paths, a
+per-path `backend` selector and TLS — since the chart was written, and no
+template ever consumed it. Setting `ingress.enabled=true` produced nothing at
+all: no object, no warning, and a `helm install` that reported success. This
+was found by rendering the chart rather than by reading it, which is the case
+for running `helm template` in CI.
+
+Each path names the service it routes to via `backend` (`web` or `api`), so a
+single host can put the UI at `/` and the API under `/api` without two Ingress
+resources.
+*/}}
+{{- if .Values.ingress.enabled }}
+{{- $fullName := include "semanticos.fullname" . }}
+{{- $servicePorts := dict "web" .Values.service.webPort "api" .Values.service.apiPort }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullName }}
+  labels:
+    {{- include "semanticos.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- range .Values.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- range .paths }}
+          {{- $backend := default "web" .backend }}
+          {{- if not (hasKey $servicePorts $backend) }}
+          {{- fail (printf "ingress path backend %q is not one of: web, api" $backend) }}
+          {{- end }}
+          - path: {{ .path }}
+            pathType: {{ default "Prefix" .pathType }}
+            backend:
+              service:
+                name: {{ $fullName }}-{{ $backend }}
+                port:
+                  number: {{ index $servicePorts $backend }}
+          {{- end }}
+    {{- end }}
+{{- end }}

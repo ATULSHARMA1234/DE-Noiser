@@ -3,6 +3,19 @@ from typing import Any
 
 FIELD_NAME = re.compile(r"^[A-Za-z0-9_]+$")
 
+#: Most terms a single query may contain. The AST is built left-associative and
+#: compiled by recursion, so N terms means N stack frames in compile_to_sql —
+#: a few thousand `AND`ed terms exhausted the interpreter's stack and surfaced
+#: as a 500. Capping the input keeps the failure a clear 400 at parse time.
+MAX_QUERY_TERMS = 256
+
+#: Longest raw query string accepted.
+MAX_QUERY_LENGTH = 8192
+
+
+class QueryTooComplex(ValueError):
+    """Raised when a query exceeds the parser's complexity bounds."""
+
 
 class QueryNode:
     pass
@@ -35,11 +48,21 @@ def parse_query(query_str: str) -> QueryNode:
     """
     # For a real implementation, we'd use pyparsing or similar.
     # This is a naive regex-based tokenization for the demo.
+    if query_str and len(query_str) > MAX_QUERY_LENGTH:
+        raise QueryTooComplex(
+            f"Query is {len(query_str)} characters; the limit is {MAX_QUERY_LENGTH}"
+        )
+
     # field:"quoted value" | field:bare-value (hyphens/dots/slashes ok) | "phrase" | word
     tokens = re.findall(r'([A-Za-z0-9_]+:"[^"]*"|[A-Za-z0-9_]+:[^\s"]+|"[^"]*"|\S+)', query_str)
 
     if not tokens:
         return TextMatch("")
+
+    if len(tokens) > MAX_QUERY_TERMS:
+        raise QueryTooComplex(
+            f"Query has {len(tokens)} terms; the limit is {MAX_QUERY_TERMS}"
+        )
 
     nodes = []
     for token in tokens:
