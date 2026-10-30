@@ -1,37 +1,30 @@
 import { test, expect } from '@playwright/test';
+import { watchForBreakage } from './guard';
 
-test.describe('Dashboards Page Features', () => {
-  test.beforeEach(async ({ page }) => {
-    await page.addInitScript(() => {
-      localStorage.setItem('token', 'test-token');
-      localStorage.setItem('user', JSON.stringify({id:1,role:'ADMIN'}));
-      localStorage.setItem('onboarding_completed', 'true');
-    });
-    await page.route('**/*', async (route) => {
-      if (route.request().url().includes(':8000/auth/me')) {
-        await route.fulfill({ status: 200, json: { id: 1, role: 'ADMIN', email: 'test@example.com' } });
-      } else if (route.request().url().includes(':8000/')) {
-        await route.fulfill({ status: 200, json: [] });
-      } else {
-        await route.continue();
-      }
-    });
-    await page.goto('/app/dashboards');
-  });
+const API = 'http://127.0.0.1:8000';
 
-  test('should render new dashboard button', async ({ page }) => {
-    await expect(page.getByRole('button', { name: 'New Dashboard' })).toBeVisible();
-  });
+test('create, open and delete a dashboard', async ({ page }) => {
+  const guard = watchForBreakage(page);
+  const name = `e2e-${Date.now()}`;
 
-  test('should open create dashboard modal', async ({ page }) => {
-    await page.getByRole('button', { name: 'New Dashboard' }).click();
-    
-    // Modal should appear
-    await expect(page.getByRole('heading', { name: 'Create Dashboard' })).toBeVisible();
-    await expect(page.getByPlaceholder('e.g. Production Overview')).toBeVisible();
-    
-    // Close modal
-    await page.getByRole('button', { name: 'Cancel' }).click();
-    await expect(page.getByRole('heading', { name: 'Create Dashboard' })).not.toBeVisible();
-  });
+  await page.goto('/app/dashboards');
+  await page.getByRole('button', { name: 'New Dashboard' }).click();
+  await page.getByPlaceholder('e.g. Production Overview').fill(name);
+  await page.getByRole('button', { name: 'Create', exact: true }).click();
+  await expect(page.getByText(name).first()).toBeVisible();
+
+  // Stored by the API, not just shown.
+  const stored = await (await page.request.get(`${API}/dashboards`)).json();
+  const created = stored.find((d: { name: string }) => d.name === name);
+  expect(created).toBeTruthy();
+
+  await page.goto('/app/dashboards');
+  const card = page.locator('div.group', { hasText: name });
+  await card.hover();
+  await card.locator('button').click();
+  await page.getByRole('button', { name: 'Confirm' }).click();
+  await expect(page.getByText(name)).toHaveCount(0);
+
+  expect((await page.request.get(`${API}/dashboards/${created.id}`)).status()).toBe(404);
+  guard.assertClean();
 });

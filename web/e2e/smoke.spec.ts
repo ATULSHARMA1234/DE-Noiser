@@ -1,43 +1,23 @@
 import { test, expect } from '@playwright/test';
+import { watchForBreakage } from './guard';
 
-test.describe('SemanticOS Smoke Tests', () => {
-  const routes = [
-    '/app',
-    '/app/explore',
-    '/app/dashboards',
-    '/app/incidents',
-    '/app/slos',
-    '/app/metrics',
-    '/app/traces',
-    '/app/alerts',
-    '/app/runbooks',
-    '/app/topology',
-    '/app/sources',
-    '/app/integrations',
-    '/app/audit',
-    '/app/users',
-    '/app/settings'
-  ];
+// Every page, against the real API, signed in as the seeded admin. The mocked
+// version of this answered every request with [] and so could not fail on
+// anything the backend did.
+const ROUTES = [
+  '/app', '/app/explore', '/app/dashboards', '/app/incidents', '/app/issues', '/app/slos',
+  '/app/metrics', '/app/monitors', '/app/traces', '/app/alerts', '/app/runbooks',
+  '/app/topology', '/app/sources', '/app/integrations', '/app/notebooks', '/app/runs',
+  '/app/live', '/app/audit', '/app/users', '/app/settings',
+];
 
-  for (const route of routes) {
-    test(`Route ${route} loads without crashing`, async ({ page }) => {
-      // Navigate to the route
-      await page.addInitScript(() => {
-        localStorage.setItem('token', 'test-token');
-        localStorage.setItem('user', JSON.stringify({id:1,role:'ADMIN'}));
-      localStorage.setItem('onboarding_completed', 'true');
-      });
-      await page.route('**/*', async (route) => {
-        if (route.request().url().includes(':8000/auth/me')) { await route.fulfill({ status: 200, json: { id: 1, role: 'ADMIN', email: 'test@example.com' } }); } else if (route.request().url().includes(':8000/')) {
-          await route.fulfill({ status: 200, json: [] });
-        } else {
-          await route.continue();
-        }
-      });
-      await page.goto(route);
-      
-      // Verify the main layout has rendered
-      await expect(page.locator('nav')).toBeVisible();
-    });
-  }
-});
+for (const route of ROUTES) {
+  test(`${route} loads against the real API`, async ({ page }) => {
+    const guard = watchForBreakage(page);
+    await page.goto(route);
+    await expect(page.locator('nav')).toBeVisible();
+    await expect(page).not.toHaveURL(/\/login/);
+    await page.waitForLoadState('networkidle');
+    guard.assertClean();
+  });
+}
