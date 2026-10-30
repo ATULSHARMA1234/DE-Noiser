@@ -275,6 +275,20 @@ class TestAuditTenantScoping:
         reads = [r for r in rows if (r.get("details") or {}).get("access") == "read"]
         assert reads, "read access to log data was not audited"
 
+    def test_date_range_narrows_the_trail_and_total_counts_all_pages(self, acme_client):
+        import datetime as dt
+
+        acme_client.put("/settings", json={"retention_days": 34})
+        future = (dt.datetime.now(dt.UTC) + dt.timedelta(days=1)).isoformat()
+        past = (dt.datetime.now(dt.UTC) - dt.timedelta(minutes=5)).isoformat()
+
+        assert acme_client.get("/audit/", params={"since": future}).json()["total"] == 0
+
+        recent = acme_client.get("/audit/", params={"since": past, "limit": 1}).json()
+        assert len(recent["data"]) == 1
+        assert recent["total"] >= 1
+        assert acme_client.get("/audit/", params={"until": past, "since": future}).json()["data"] == []
+
 
 class TestIngestValidation:
     """Anything JSON-shaped was accepted as a log line."""

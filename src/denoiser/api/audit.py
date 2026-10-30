@@ -120,6 +120,12 @@ class AuditMiddleware(BaseHTTPMiddleware):
         return response
 
 
+def _as_utc(value: datetime) -> datetime:
+    """A bound comparable with the stored column, which holds naive UTC. A
+    naive bound is taken to be UTC already."""
+    return value if value.tzinfo is None else value.astimezone(UTC).replace(tzinfo=None)
+
+
 #: A syslog datagram past ~8 KB is dropped by most collectors, and with it
 #: the whole event; a truncated diff is better than no record.
 _SIEM_CHANGES_LIMIT = 4000
@@ -171,6 +177,8 @@ def get_audit_logs(
     skip: int = Query(0, ge=0),
     action: str | None = None,
     user_id: int | None = None,
+    since: datetime | None = Query(None, description="Only records at or after this instant (ISO 8601)"),
+    until: datetime | None = Query(None, description="Only records before this instant (ISO 8601)"),
     scope: TenantScope = Depends(tenant_scope),
     _: User = Depends(require_role(["ADMIN"])),
 ):
@@ -186,6 +194,12 @@ def get_audit_logs(
         query = query.filter(AuditLog.action == action)
     if user_id:
         query = query.filter(AuditLog.user_id == user_id)
+    # "What happened during the incident window" is the question an audit log
+    # is opened to answer; without a range it meant paging back by hand.
+    if since:
+        query = query.filter(AuditLog.timestamp >= _as_utc(since))
+    if until:
+        query = query.filter(AuditLog.timestamp < _as_utc(until))
 
     logs = query.order_by(AuditLog.timestamp.desc()).offset(skip).limit(limit).all()
 
