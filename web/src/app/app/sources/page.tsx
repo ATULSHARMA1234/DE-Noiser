@@ -2,7 +2,7 @@
  
 import React, { useState, useEffect, useRef } from 'react';
 import { Plus, FileText, Upload, RefreshCw, HardDrive, Trash2, Play, Database, X, Cpu } from 'lucide-react';
-import { apiFetch, apiDelete, runAnalysis } from '@/lib/api';
+import { apiFetch, apiDelete, runAnalysis, pollTask } from '@/lib/api';
 import { useRouter } from 'next/navigation';
 import { useToast } from '@/context/ToastContext';
 import { ConfirmModal } from '@/components/ConfirmModal';
@@ -206,13 +206,21 @@ export default function SourcesPage() {
  const formData = new FormData();
  formData.append('file', file);
 
- await apiFetch('/sources/upload', {
+ const res = await apiFetch('/sources/upload', {
  method: 'POST',
  body: formData,
  });
 
  toast.success(`File ${file.name} uploaded successfully`);
  fetchSources();
+ // The organisation's "Auto-Analyze on Upload" setting queued a run.
+ if (res?.analysis?.status === 'queued') {
+ const taskId = taskIdForSource(res.name);
+ executeTask(taskId, `Analyzing ${res.name}`, pollTask(res.analysis.task_id));
+ attachRemoteTask(taskId, res.analysis.task_id);
+ } else if (res?.analysis?.status === 'not_queued') {
+ toast.error(`Auto-analyze did not start: ${res.analysis.detail}`);
+ }
  } catch (err: any) {
  toast.error(`Upload failed: ${err.message}`);
  } finally {

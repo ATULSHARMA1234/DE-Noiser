@@ -71,11 +71,11 @@ class TestSettingsAreShared:
         """This is the property a local file could not provide."""
         from denoiser.api.platform_settings import load_settings, save_settings
 
-        save_settings({**load_settings(), "sampling_threshold": 12345})
+        save_settings({**load_settings(), "s3_bucket": "replica-check"})
         # A fresh session stands in for another replica.
         other_replica = SessionLocal()
         try:
-            assert load_settings(db=other_replica)["sampling_threshold"] == 12345
+            assert load_settings(db=other_replica)["s3_bucket"] == "replica-check"
         finally:
             other_replica.close()
 

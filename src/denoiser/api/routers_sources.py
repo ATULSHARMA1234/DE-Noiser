@@ -145,7 +145,34 @@ async def upload_source(file: UploadFile = File(...), current_user: User = Depen
         "size_bytes": written,
         "size_human": _human_size(written),
         "status": "uploaded",
+        "analysis": _auto_analyze(safe_name, current_user.tenant_id),
     }
+
+
+def _auto_analyze(source: str, tenant_id: int | None) -> dict | None:
+    """Queue an analysis of a fresh upload when the organisation asked for it.
+
+    `auto_analyze` was a Settings toggle that nothing read. Queued, never run
+    inline: an upload must not wait on a whole analysis. If the broker is down
+    the upload has still succeeded, and the response says the analysis was not
+    started so the caller can start it by hand.
+    """
+    from denoiser.api.platform_settings import load_tenant_settings
+
+    if not load_tenant_settings(tenant_id).get("auto_analyze"):
+        return None
+
+    from denoiser.api.schemas import AnalysisRequest
+    from denoiser.workers.analysis_worker import run_analysis_task
+
+    payload = AnalysisRequest(source=source).model_dump()
+    payload["tenant_id"] = tenant_id
+    try:
+        task = run_analysis_task.delay(payload)
+    except Exception as e:
+        logger.warning("Auto-analyze of %s was not queued: %s", source, e)
+        return {"status": "not_queued", "detail": "The analysis queue is unavailable; run it from Sources."}
+    return {"status": "queued", "task_id": task.id}
 
 
 @router.delete("/sources/{filename}")

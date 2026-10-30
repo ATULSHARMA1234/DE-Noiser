@@ -92,7 +92,31 @@ def settings_view(tenant_id: int | None) -> dict:
     view = {**_platform_values(), **load_tenant_settings(tenant_id)}
     view = _mask_secrets(view)
     view["platform_managed"] = list(PLATFORM_SETTING_KEYS)
+    view["llm"] = llm_status()
     return view
+
+
+def llm_status() -> dict:
+    """The narrator this deployment actually uses, read from its configuration.
+
+    Settings offered a model dropdown (GPT-4o, Claude, ...) that nothing read;
+    the model is SLD_LLM_MODEL, against SLD_LLM_BASE_URL. Shown as it is, so
+    the page cannot promise a model the deployment is not running.
+    """
+    from urllib.parse import urlsplit
+
+    from denoiser.config import settings as intelligence
+    from denoiser.settings import _LOCAL_LLM_HOSTS
+
+    if not (intelligence.llm_api_key or intelligence.llm_base_url):
+        return {"configured": False, "model": None, "location": None}
+    host = (urlsplit(intelligence.llm_base_url or "").hostname or "").lower()
+    return {
+        "configured": True,
+        "model": intelligence.llm_model,
+        # No base URL means the provider's hosted default.
+        "location": "local" if host in _LOCAL_LLM_HOSTS else "external",
+    }
 
 
 def _platform_values() -> dict:

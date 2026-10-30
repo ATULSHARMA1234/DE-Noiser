@@ -705,7 +705,7 @@ export default function CommandCenter() {
 
  <div className="mt-5 pt-4 border-t border-[var(--border-subtle)] flex justify-between text-[10px] text-[var(--text-muted)]">
  <span>{clusterCount != null ? `${clusterCount.toLocaleString()} clusters` : 'Confidence: —'}</span>
- <span>Model: {settings?.llm_model || 'Llama 3.3-70B Local'}</span>
+ <span>Model: {settings?.llm?.configured ? settings.llm.model : 'none (heuristic summaries)'}</span>
  </div>
  </div>
 

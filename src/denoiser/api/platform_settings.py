@@ -31,7 +31,7 @@ SETTINGS_ROW_ID = 1
 #: the one deployment row, so a tenant's ADMIN set retention and redaction for
 #: every other tenant on the deployment.
 TENANT_SETTING_KEYS: tuple[str, ...] = (
-    "store_raw_logs", "redact_pii", "confidence_threshold", "retention_days",
+    "store_raw_logs", "redact_pii", "retention_days",
     "auto_analyze", "slack_webhook_url",
     "sso_provider", "sso_client_id", "sso_metadata_url", "sso_enabled",
 )
@@ -41,17 +41,13 @@ TENANT_SETTING_KEYS: tuple[str, ...] = (
 #: raw logs, uploads and archives go through: a tenant able to change it could
 #: point everyone's data at a bucket of its choosing.
 PLATFORM_SETTING_KEYS: tuple[str, ...] = (
-    "llm_model", "sampling_threshold",
     "s3_enabled", "s3_endpoint", "s3_bucket", "s3_access_key", "s3_secret_key", "s3_archive_days",
 )
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "store_raw_logs": True,
     "redact_pii": True,
-    "llm_model": "llama-3.3-70b",
-    "confidence_threshold": 70,
     "retention_days": 30,
-    "sampling_threshold": 50000,
     "auto_analyze": False,
     "s3_enabled": False,
     "s3_endpoint": os.getenv("S3_ENDPOINT", "http://localhost:9000"),

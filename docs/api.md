@@ -242,7 +242,7 @@ token is set.
 | PATCH | `/platform/tenants/{id}` | Update `domains` / `tier`. |
 | POST | `/platform/tenants/{id}/scim-token/rotate` | Re-issue the SCIM token. Returned once. |
 | DELETE | `/platform/tenants/{id}` | Offboard. Body must echo `{"confirm_name": "<name>"}`. |
-| GET/PUT | `/platform/settings` | Platform-wide settings: the shared object store (`s3_*`), `llm_model`, `sampling_threshold`. Organisation settings are refused (`400`). The raw-log and source stores pick up a changed bucket on restart. |
+| GET/PUT | `/platform/settings` | Platform-wide settings: the shared object store (`s3_*`). The LLM narrator is configured by environment (`SLD_LLM_*`) and reported read-only as `llm` in `/settings`. Organisation settings are refused (`400`). The raw-log and source stores pick up a changed bucket on restart. |
 
 **Domains.** `domains` are the email domains a customer owns. SSO and SCIM route
 federated identities by them, so registering one is what turns a
