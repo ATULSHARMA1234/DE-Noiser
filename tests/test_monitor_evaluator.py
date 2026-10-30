@@ -164,6 +164,48 @@ class TestAlerting:
         assert "Checkout 5xx" in alert.error
         assert alert.priority == "critical"
 
+    def test_alert_row_belongs_to_the_monitors_tenant(self, db):
+        """`/alerts` filters by tenant; a row without one reached nobody."""
+        m = _monitor(id=4243, tenant_id=7, status=STATUS_OK)
+        apply_result(db, m, evaluate_monitor(m, store=FakeStore(99)))
+        db.flush()
+        alert = db.query(AlertLog).filter(AlertLog.alert_fingerprint == "monitor_4243_CRITICAL").first()
+        assert alert.tenant_id == 7
+
+    def test_fired_monitor_is_delivered_to_its_tenants_channels(self, db, monkeypatch):
+        from denoiser.integrations import webhook_store
+        from denoiser.integrations.alert_router import alert_router
+
+        looked_up, sent = [], []
+        monkeypatch.setattr(webhook_store, "destinations_for_tenant",
+                            lambda _db, tenant_id: looked_up.append(tenant_id) or ["dest"])
+
+        async def fake_dispatch(alert, destinations=None):
+            sent.append((alert, destinations))
+            return []
+
+        monkeypatch.setattr(alert_router, "dispatch", fake_dispatch)
+        m = _monitor(id=4244, tenant_id=7, status=STATUS_OK, name="Checkout 5xx")
+        from denoiser.monitors.evaluator import notify
+        notify(db, m, evaluate_monitor(m, store=FakeStore(99)))
+
+        assert looked_up == [7]
+        alert, destinations = sent[0]
+        assert destinations == ["dest"]
+        assert alert.priority == "P0"
+        assert "Checkout 5xx" in alert.cluster_summary
+
+    def test_delivery_failure_does_not_raise(self, db, monkeypatch):
+        from denoiser.integrations import webhook_store
+        from denoiser.monitors.evaluator import notify
+
+        def boom(_db, _tenant_id):
+            raise RuntimeError("db gone")
+
+        monkeypatch.setattr(webhook_store, "destinations_for_tenant", boom)
+        m = _monitor(id=4245, status=STATUS_OK)
+        notify(db, m, evaluate_monitor(m, store=FakeStore(99)))
+
     def test_evaluation_state_is_recorded_even_when_healthy(self, db):
         m = _monitor(status="PENDING")
         apply_result(db, m, evaluate_monitor(m, store=FakeStore(2)))

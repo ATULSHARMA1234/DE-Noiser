@@ -155,6 +155,9 @@ def apply_result(db: Session, monitor: Monitor, result: EvaluationResult, now: d
         monitor.last_triggered_at = now
         if not is_muted(monitor, now):
             db.add(AlertLog(
+                # Without the owner the row was visible only to users who
+                # also have no tenant, i.e. to nobody who created a monitor.
+                tenant_id=monitor.tenant_id,
                 webhook_id="monitor_engine",
                 alert_fingerprint=f"monitor_{monitor.id}_{result.status}",
                 priority="critical" if result.status == STATUS_CRITICAL else "warning",
@@ -179,10 +182,57 @@ def evaluate_all(db: Session, store=None, now: datetime.datetime | None = None) 
         store = runtime.clickhouse_store()
 
     results = []
+    fired = []
     for monitor in monitors:
         result = evaluate_monitor(monitor, store=store, now=now)
-        apply_result(db, monitor, result, now=now)
+        if apply_result(db, monitor, result, now=now):
+            fired.append((monitor, result))
         results.append(result)
 
     db.commit()
+
+    # After the commit, for the same reason the analysis pipeline notifies
+    # after its own: webhook delivery retries for tens of seconds, and must not
+    # hold the transaction open while it does.
+    for monitor, result in fired:
+        notify(db, monitor, result)
     return results
+
+
+def _alert_payload(monitor: Monitor, result: EvaluationResult):
+    from denoiser.integrations.alert_router import AlertPayload
+
+    return AlertPayload(
+        source=f"monitor:{monitor.name}",
+        run_id=f"monitor-{monitor.id}",
+        priority="P0" if result.status == STATUS_CRITICAL else "P1",
+        cluster_id=monitor.id,
+        cluster_summary=f"Monitor '{monitor.name}' is {result.status}: {result.message}",
+        representative_log=monitor.query,
+        anomaly_score=result.value or 0.0,
+        causal_links=[],
+        intelligence=None,
+        keyword_flag=False,
+    )
+
+
+def notify(db: Session, monitor: Monitor, result: EvaluationResult) -> None:
+    """Deliver a fired monitor to its tenant's Slack/PagerDuty/webhook channels.
+
+    The AlertLog row alone only showed up on the Alerts page — nobody was paged.
+    A delivery failure is logged, not raised: the breach is already recorded,
+    and one dead endpoint must not stop the remaining monitors from notifying.
+    """
+    if monitor.tenant_id is None:
+        return
+    import asyncio
+
+    from denoiser.integrations import webhook_store
+    from denoiser.integrations.alert_router import alert_router
+
+    try:
+        destinations = webhook_store.destinations_for_tenant(db, monitor.tenant_id)
+        if destinations:
+            asyncio.run(alert_router.dispatch(_alert_payload(monitor, result), destinations=destinations))
+    except Exception as e:
+        logger.warning("Monitor %s (%s) alert delivery failed: %s", monitor.id, monitor.name, e)

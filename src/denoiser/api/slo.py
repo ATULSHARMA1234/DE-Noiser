@@ -67,6 +67,7 @@ def get_slo_status(slo_id: ResourceId, db: Session = Depends(get_db), scope: Ten
         ).first()
         if not existing:
             alert = AlertLog(
+                tenant_id=slo.tenant_id,
                 webhook_id="slo_engine",
                 alert_fingerprint=fingerprint,
                 priority="critical",
