@@ -13,6 +13,7 @@ platform could not answer:
 
 from __future__ import annotations
 
+import json
 import socket
 import threading
 
@@ -308,3 +309,26 @@ def client():
     from denoiser.api.main import app
 
     return TestClient(app)
+
+
+class TestSiemChanges:
+    """SIEM got `",".join(changes)` — field names, never the values."""
+
+    def test_forwards_the_diff_not_just_the_field_names(self):
+        from denoiser.api.audit import _siem_changes
+
+        rendered = _siem_changes({"retention_days": {"from": 30, "to": 7}})
+        assert json.loads(rendered) == {"retention_days": {"from": 30, "to": 7}}
+
+    def test_nothing_changed_sends_nothing(self):
+        from denoiser.api.audit import _siem_changes
+
+        assert _siem_changes(None) is None
+        assert _siem_changes({}) is None
+
+    def test_oversized_diff_is_truncated_not_dropped(self):
+        from denoiser.api.audit import _SIEM_CHANGES_LIMIT, _siem_changes
+
+        rendered = _siem_changes({"note": {"from": "", "to": "x" * 10_000}})
+        assert len(rendered) < _SIEM_CHANGES_LIMIT + 50
+        assert rendered.endswith("(truncated)")

@@ -1,4 +1,5 @@
 import contextlib
+import json
 import re
 from datetime import UTC, datetime
 
@@ -111,12 +112,32 @@ class AuditMiddleware(BaseHTTPMiddleware):
                 "resource_type": request.url.path,
                 "ip_address": ip_address,
                 "status_code": response.status_code,
-                "changes": ",".join(changes) if isinstance(changes, dict) else None,
+                "changes": _siem_changes(changes),
             }
             with contextlib.suppress(Exception):
                 await run_in_threadpool(forward, event)
 
         return response
+
+
+#: A syslog datagram past ~8 KB is dropped by most collectors, and with it
+#: the whole event; a truncated diff is better than no record.
+_SIEM_CHANGES_LIMIT = 4000
+
+
+def _siem_changes(changes) -> str | None:
+    """The diff itself, not only the names of the fields that moved.
+
+    Forwarding `",".join(changes)` told the SIEM *that* retention changed but
+    not from what to what, which is the half an investigation needs. Secret
+    values are already redacted by the handler before they reach here.
+    """
+    if not isinstance(changes, dict) or not changes:
+        return None
+    rendered = json.dumps(changes, separators=(",", ":"), sort_keys=True, default=str)
+    if len(rendered) > _SIEM_CHANGES_LIMIT:
+        rendered = rendered[:_SIEM_CHANGES_LIMIT] + "...(truncated)"
+    return rendered
 
 
 def record_changes(request: Request | None, changes: dict) -> None:
