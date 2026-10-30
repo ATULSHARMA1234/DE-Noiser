@@ -1,0 +1,73 @@
+# Redpanda instead of Apache Kafka.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.redpanda.yml up -d
+#
+# Redpanda is a single binary with no JVM and starts faster, which is why it was
+# the original default. It is licensed under the Business Source License 1.1:
+# running it inside your own infrastructure is permitted, offering it to third
+# parties as a managed service is not. If SemanticOS is ever hosted *for*
+# customers rather than run *by* them, that restriction reaches this container —
+# so the default stack ships Apache Kafka (Apache-2.0) and this file makes
+# Redpanda the deliberate choice of whoever deploys it.
+#
+# See DEPLOY.md § Licensing constraints on the bundled services.
+
+services:
+  # Compose has no way to delete a service an override inherits, so Kafka is put
+  # behind a profile that is never enabled. It stays declared and never starts.
+  kafka:
+    profiles:
+    - unused
+
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.2.7
+    container_name: semanticos-redpanda
+    command:
+    - redpanda
+    - start
+    - --smp 1
+    - --memory 1G
+    - --reserve-memory 0M
+    - --overprovisioned
+    - --node-id 0
+    - --kafka-addr PLAINTEXT://0.0.0.0:29092,OUTSIDE://0.0.0.0:9092
+    - --advertise-kafka-addr PLAINTEXT://redpanda:29092,OUTSIDE://localhost:9092
+    ports:
+    - 127.0.0.1:9092:9092
+    - 127.0.0.1:29092:29092
+    volumes:
+    - redpanda_data:/var/lib/redpanda/data
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - rpk cluster health --brokers localhost:29092 >/dev/null 2>&1
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+
+  api:
+    environment:
+      KAFKA_BROKER: redpanda:29092
+
+  worker:
+    environment:
+      KAFKA_BROKER: redpanda:29092
+
+  ingestion:
+    environment:
+      KAFKA_BROKER: redpanda:29092
+    # `!override` rather than a merge: Compose would otherwise keep the base
+    # file's dependency on `kafka` becoming healthy, and nothing is going to
+    # start it, so the consumer would wait for a broker that is not coming.
+    depends_on: !override
+      clickhouse:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+
+  syslog:
+    environment:
+      KAFKA_BROKER: redpanda:29092

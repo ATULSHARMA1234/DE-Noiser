@@ -13,11 +13,14 @@ from fastapi.testclient import TestClient
 @pytest.fixture(scope="module")
 def client():
     """Create a test client for the SemanticOS API with bypassed authentication."""
-    from denoiser.api.auth import get_current_user
-    from denoiser.api.main import app, verify_ingest_auth
+    from denoiser.api.auth import get_current_user, verify_ingest_auth
+    from denoiser.api.main import app
     from denoiser.storage.db import User
 
-    mock_user = User(id=1, email="admin@semanticos.io", role="ADMIN")
+    # Carries a tenant: every source/webhook/audit path is tenant-scoped now,
+    # so a user without one exercises the "unassigned" fallback rather than
+    # the behaviour a real signed-in operator gets.
+    mock_user = User(id=1, email="admin@semanticos.io", role="ADMIN", tenant_id=1)
     app.dependency_overrides[get_current_user] = lambda: mock_user
     app.dependency_overrides[verify_ingest_auth] = lambda: None
 
@@ -64,6 +67,21 @@ class TestSettingsEndpoint:
         assert response.status_code == 200
         data = response.json()
         assert data["retention_days"] == 60
+
+    def test_secrets_are_never_returned(self, client):
+        from denoiser.api.platform_settings import load_settings
+        from denoiser.api.routers_settings import SECRET_MASK
+
+        client.put("/settings", json={"s3_access_key": "AKIAREAL", "s3_secret_key": "real-secret"})
+        data = client.get("/settings").json()
+        assert data["s3_access_key"] == SECRET_MASK
+        assert data["s3_secret_key"] == SECRET_MASK
+
+        # Saving the page round-trips the mask; that must not overwrite the key.
+        client.put("/settings", json={**data, "retention_days": 61})
+        stored = load_settings()
+        assert stored["s3_access_key"] == "AKIAREAL"
+        assert stored["s3_secret_key"] == "real-secret"
 
 
 class TestIncidentsEndpoint:
@@ -154,14 +172,21 @@ class TestUploadPathTraversal:
             "/sources/upload",
             files={"file": ("../../escape.log", b"pwned", "text/plain")},
         )
-        # The traversal is collapsed to a bare filename inside data/, never above it.
+        # The traversal is collapsed to a bare filename, and the destination
+        # directory is chosen by the server from the authenticated tenant — the
+        # client never influences where the file lands.
         assert resp.status_code == 200
         assert resp.json()["name"] == "escape.log"
         path = resp.json()["path"]
         assert ".." not in path
-        assert path.endswith("/data/escape.log") or path.endswith("\\data\\escape.log")
-        import os
-        os.remove(path)
+        # The response no longer discloses the server's absolute layout.
+        assert path == "escape.log"
+
+        from denoiser.api.sources import tenant_dir
+
+        written = tenant_dir(1) / "escape.log"
+        assert written.is_file(), "upload should land in the tenant's own directory"
+        written.unlink()
 
     def test_dotdot_only_filename_rejected(self, client):
         resp = client.post(

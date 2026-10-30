@@ -1,0 +1,42 @@
+# Who must review what.
+#
+# Combined with a branch protection rule requiring code-owner review, this is
+# what stops a change to the tenant predicate or the auth path from merging on
+# one pair of eyes. The last matching pattern wins, so the specific entries at
+# the bottom override the catch-all at the top.
+#
+# Replace @ATULSHARMA1234 with the real teams (@org/security, @org/platform)
+# once there is more than one maintainer — a CODEOWNERS file naming one person
+# is a review requirement that person cannot satisfy alone.
+
+*                                   @ATULSHARMA1234
+
+# ── Security-critical: authentication, authorisation, tenant isolation ───────
+# A mistake in any of these is a cross-customer data disclosure, not a bug.
+/src/denoiser/api/auth.py           @ATULSHARMA1234
+/src/denoiser/api/abac.py           @ATULSHARMA1234
+/src/denoiser/api/scope.py          @ATULSHARMA1234
+/src/denoiser/api/saml.py           @ATULSHARMA1234
+/src/denoiser/api/oidc.py           @ATULSHARMA1234
+/src/denoiser/api/sso.py            @ATULSHARMA1234
+/src/denoiser/api/scim.py           @ATULSHARMA1234
+/src/denoiser/api/keys.py           @ATULSHARMA1234
+/src/denoiser/api/credentials.py    @ATULSHARMA1234
+/src/denoiser/api/tenancy.py        @ATULSHARMA1234
+/src/denoiser/api/middleware.py     @ATULSHARMA1234
+/src/denoiser/api/siem.py           @ATULSHARMA1234
+/src/denoiser/preprocessing/redaction.py  @ATULSHARMA1234
+
+# ── The data path ────────────────────────────────────────────────────────────
+# Owns the tenant predicate on every read and every write of customer data.
+/src/denoiser/storage/              @ATULSHARMA1234
+
+# ── Schema ───────────────────────────────────────────────────────────────────
+# Migrations are the one change that cannot be rolled back by redeploying.
+/alembic/versions/                  @ATULSHARMA1234
+
+# ── Release and deployment ───────────────────────────────────────────────────
+/.github/workflows/                 @ATULSHARMA1234
+/deploy/                            @ATULSHARMA1234
+/Dockerfile                         @ATULSHARMA1234
+/pyproject.toml                     @ATULSHARMA1234

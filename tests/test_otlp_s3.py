@@ -5,7 +5,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from denoiser.api.auth import get_password_hash
-from denoiser.api.main import _load_settings, _save_settings, app
+from denoiser.api.main import app
+from denoiser.api.platform_settings import load_settings as _load_settings
+from denoiser.api.platform_settings import save_settings as _save_settings
 from denoiser.storage.db import SessionLocal, Span, User, init_db
 
 

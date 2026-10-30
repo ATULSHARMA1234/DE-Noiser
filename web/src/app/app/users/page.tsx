@@ -2,8 +2,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { apiFetch, apiPost, apiDelete } from '@/lib/api';
-import { Users, UserPlus, Trash2, Shield, ShieldCheck, ShieldAlert, Loader2, Sparkles, X } from 'lucide-react';
+import { apiFetch, apiPost, apiPut, apiDelete } from '@/lib/api';
+import { Users, UserPlus, Trash2, Shield, ShieldCheck, ShieldAlert, Loader2, Sparkles, X, UserX, UserCheck } from 'lucide-react';
 import { useToast } from '@/context/ToastContext';
 import { ConfirmModal } from '@/components/ConfirmModal';
 
@@ -11,6 +11,7 @@ type ManagedUser = {
  id: number;
  email: string;
  role: string;
+ is_active: boolean;
 };
 
 export default function UserDirectoryPage() {
@@ -78,6 +79,24 @@ export default function UserDirectoryPage() {
  toast.success('Operator deleted successfully.');
  } catch (e: any) {
  toast.error(`Delete failed: ${e.message}`);
+ }
+ });
+ setConfirmOpen(true);
+ };
+
+ const handleToggleActive = (u: ManagedUser) => {
+ const action = u.is_active ? 'deactivate' : 'reactivate';
+ setConfirmTitle(u.is_active ? 'Deactivate Operator' : 'Reactivate Operator');
+ setConfirmMessage(u.is_active
+ ? `${u.email} will be signed out and unable to sign in until reactivated.`
+ : `${u.email} will be able to sign in again.`);
+ setConfirmCallback(() => async () => {
+ try {
+ await apiPut(`/users/${u.id}/${action}`, {});
+ await fetchUsers();
+ toast.success(u.is_active ? 'Operator deactivated.' : 'Operator reactivated.');
+ } catch (e: any) {
+ toast.error(`Could not ${action}: ${e.message}`);
  }
  });
  setConfirmOpen(true);
@@ -166,6 +185,11 @@ export default function UserDirectoryPage() {
  You
  </span>
  )}
+ {!u.is_active && (
+ <span className="text-[9px] font-bold tracking-wider bg-red-500/10 border border-red-500/20 px-2 py-0.5 rounded text-red-400 uppercase">
+ Inactive
+ </span>
+ )}
  <span className={`text-[10px] font-black tracking-wider px-2 py-0.5 rounded border uppercase ${
  u.role === 'ADMIN' ? 'bg-[var(--primary)] border-[var(--primary)] text-[var(--primary)]' :
  u.role === 'ANALYST' ? 'bg-cyan-500/10 border-cyan-500/20 text-cyan-400' :
@@ -180,7 +204,15 @@ export default function UserDirectoryPage() {
  <p className="text-[10px] text-[var(--text-muted)] font-mono">Operator context ID: #{u.id}</p>
  </div>
 
- <div className="mt-6 pt-4 border-t border-[var(--border-subtle)] flex justify-end">
+ <div className="mt-6 pt-4 border-t border-[var(--border-subtle)] flex justify-end gap-1">
+ <button
+ onClick={() => handleToggleActive(u)}
+ disabled={isSelf}
+ className="p-2 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] disabled:opacity-30 disabled:cursor-not-allowed hover:bg-[var(--bg-surface-hover)] transition-colors cursor-pointer border-none"
+ title={isSelf ? "Cannot deactivate your own account" : u.is_active ? "Deactivate operator" : "Reactivate operator"}
+ >
+ {u.is_active ? <UserX size={16} /> : <UserCheck size={16} />}
+ </button>
  <button
  onClick={() => handleDeleteUser(u.id)}
  disabled={isSelf}

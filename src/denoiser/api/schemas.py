@@ -6,9 +6,10 @@ Task 2: Strongly-typed input validation replaces raw dict payloads.
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # ── Analysis ─────────────────────────────────────────────────────────────────
 
@@ -94,6 +95,17 @@ class SettingsUpdate(BaseModel):
 
 # ── Ingestion ────────────────────────────────────────────────────────────────
 
+#: Maximum log entries accepted in a single /ingest call. Batches larger than
+#: this are rejected rather than queued: one request holding hundreds of
+#: thousands of entries occupies a worker for seconds and is indistinguishable
+#: from a request that will never finish. Shippers batch; they do not need to
+#: batch without bound.
+MAX_INGEST_BATCH = int(os.getenv("SEMANTICOS_MAX_INGEST_BATCH", "10000"))
+
+#: Maximum characters in a single log entry once serialised.
+MAX_INGEST_ENTRY_CHARS = int(os.getenv("SEMANTICOS_MAX_INGEST_ENTRY_CHARS", "262144"))
+
+
 class IngestPayload(BaseModel):
     """Structured ingestion payload. Accepts a list of log entries."""
     logs: list[Any] = Field(default_factory=list, description="Array of log entries (string or JSON objects)")
@@ -117,6 +129,43 @@ class IngestPayload(BaseModel):
             return {"logs": [data]}
         return {"logs": [data]}
 
+    @model_validator(mode="after")
+    def _validate_entries(self) -> IngestPayload:
+        """Reject batches that are too large, and entries that are not logs.
+
+        Previously any JSON value was accepted: ``[1, 2, null, true, [1,2]]``
+        ingested as six "log lines", so the store filled with rows that no
+        query could match and no parser could read. A log entry is either a
+        line of text or a structured record — nothing else.
+        """
+        if len(self.logs) > MAX_INGEST_BATCH:
+            raise ValueError(
+                f"Batch of {len(self.logs)} entries exceeds the limit of "
+                f"{MAX_INGEST_BATCH}; split it across multiple requests"
+            )
+
+        for index, entry in enumerate(self.logs):
+            if isinstance(entry, str):
+                if len(entry) > MAX_INGEST_ENTRY_CHARS:
+                    raise ValueError(
+                        f"Entry {index} is {len(entry)} characters, over the "
+                        f"{MAX_INGEST_ENTRY_CHARS} limit"
+                    )
+                continue
+            if isinstance(entry, dict):
+                # Cheap proxy for serialised size; the exact byte count is not
+                # worth a json.dumps of every entry on the hot path.
+                if len(str(entry)) > MAX_INGEST_ENTRY_CHARS:
+                    raise ValueError(
+                        f"Entry {index} exceeds the {MAX_INGEST_ENTRY_CHARS} character limit"
+                    )
+                continue
+            raise ValueError(
+                f"Entry {index} is {type(entry).__name__}; each log entry must be "
+                "a string or a JSON object"
+            )
+        return self
+
 
 # ── Connectors ───────────────────────────────────────────────────────────────
 
@@ -139,6 +188,10 @@ class DockerFetchRequest(BaseModel):
 class UserLogin(BaseModel):
     email: str
     password: str
+    # Only needed when one address and password authenticate in more than one
+    # organisation — a consultant working for two customers on the same
+    # deployment. Everyone else omits it and nothing about signing in changes.
+    tenant: str | None = None
 
 
 class UserResponse(BaseModel):
@@ -149,9 +202,9 @@ class UserResponse(BaseModel):
     is_active: bool = True
     department: str = "Engineering"
     environment_access: list[str] = Field(default_factory=list)
+    teams: list[str] = Field(default_factory=list)
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UserCreate(BaseModel):
@@ -164,5 +217,13 @@ class UserCreate(BaseModel):
 
 class TokenResponse(BaseModel):
     access_token: str
+    refresh_token: str | None = None
     token_type: str = "bearer"
     user: UserResponse
+
+
+class RefreshRequest(BaseModel):
+    # Optional: browsers hold the refresh token in an httpOnly cookie they
+    # cannot read, so they post an empty body and the handler reads the cookie.
+    # Programmatic clients still send it here.
+    refresh_token: str | None = None

@@ -13,12 +13,48 @@ interface Cell {
  result?: any;
  error?: string;
  isEditing?: boolean;
+ timeRange?: string; // relative window key for query cells (see TIME_RANGES)
+ ranAt?: string;     // ISO timestamp of the last run; drives the snapshot indicator
 }
 
 interface NotebookMeta {
  id: number;
  title: string;
  updated_at: string;
+}
+
+// Per-cell query window. An investigation of a past incident needs to pin the
+// range, otherwise every re-run drifts as new logs arrive.
+const TIME_RANGES: { key: string; label: string; ms: number | null }[] = [
+ { key: '15m', label: 'Last 15 min', ms: 15 * 60 * 1000 },
+ { key: '1h', label: 'Last 1 hour', ms: 60 * 60 * 1000 },
+ { key: '6h', label: 'Last 6 hours', ms: 6 * 60 * 60 * 1000 },
+ { key: '24h', label: 'Last 24 hours', ms: 24 * 60 * 60 * 1000 },
+ { key: '7d', label: 'Last 7 days', ms: 7 * 24 * 60 * 60 * 1000 },
+ { key: 'all', label: 'All time', ms: null },
+];
+
+const rangeLabel = (key?: string) => TIME_RANGES.find(r => r.key === key)?.label ?? 'Last 1 hour';
+
+// A result older than this is shown as a saved snapshot rather than a live read,
+// so a reopened notebook makes clear its results may no longer be current.
+const SNAPSHOT_AFTER_MS = 5 * 60 * 1000;
+
+function formatRanAt(iso?: string): string {
+ if (!iso) return '';
+ const then = new Date(iso).getTime();
+ if (Number.isNaN(then)) return '';
+ const diff = Date.now() - then;
+ if (diff < 60 * 1000) return 'just now';
+ if (diff < 60 * 60 * 1000) return `${Math.floor(diff / 60000)}m ago`;
+ if (diff < 24 * 60 * 60 * 1000) return `${Math.floor(diff / 3600000)}h ago`;
+ return new Date(iso).toLocaleString();
+}
+
+function isSnapshot(iso?: string): boolean {
+ if (!iso) return false;
+ const then = new Date(iso).getTime();
+ return !Number.isNaN(then) && Date.now() - then > SNAPSHOT_AFTER_MS;
 }
 
 export default function NotebooksPage() {
@@ -72,6 +108,11 @@ export default function NotebooksPage() {
      id: c.id || `c_${Date.now()}_${i}`,
      type: c.type || 'markdown',
      content: c.content || '',
+     // Restore the saved snapshot so the notebook reopens with its findings,
+     // not empty panels.
+     result: c.result,
+     ranAt: c.ranAt,
+     timeRange: c.timeRange || '1h',
      isEditing: false,
     }))
    );
@@ -88,7 +129,28 @@ export default function NotebooksPage() {
   try {
    const payload = {
     title,
-    cells: cells.map(c => ({ id: c.id, type: c.type, content: c.content })),
+    cells: cells.map(c => ({
+     id: c.id,
+     type: c.type,
+     content: c.content,
+     // Persist a query cell's result as a snapshot so reopening the notebook
+     // shows what was found rather than an empty panel. Trimmed to the
+     // displayed columns and capped so the stored JSON stays small.
+     ...(c.type === 'query'
+      ? {
+         timeRange: c.timeRange ?? '1h',
+         ranAt: c.ranAt,
+         result: Array.isArray(c.result)
+          ? c.result.slice(0, 50).map((r: any) => ({
+             timestamp: r.timestamp,
+             level: r.level,
+             source: r.source ?? r.service,
+             message: r.message,
+            }))
+          : undefined,
+        }
+      : {}),
+    })),
    };
 
    if (notebookId) {
@@ -146,7 +208,11 @@ export default function NotebooksPage() {
 
  const updateCell = (id: string, updates: Partial<Cell>) => {
   setCells(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c));
-  if (updates.content !== undefined) setDirty(true);
+  // A new result, a changed window, or edited content all mean there is
+  // something worth saving.
+  if (updates.content !== undefined || updates.result !== undefined || updates.timeRange !== undefined) {
+   setDirty(true);
+  }
  };
 
  const addCell = (type: 'markdown' | 'query') => {
@@ -154,7 +220,8 @@ export default function NotebooksPage() {
    id: `c_${Date.now()}`,
    type,
    content: type === 'markdown' ? 'Double click to edit markdown' : '',
-   isEditing: type === 'markdown'
+   isEditing: type === 'markdown',
+   ...(type === 'query' ? { timeRange: '1h' } : {}),
   };
   setCells(prev => [...prev, newCell]);
   setDirty(true);
@@ -165,20 +232,28 @@ export default function NotebooksPage() {
   setDirty(true);
  };
 
- const runQuery = async (id: string, query: string) => {
+ const runQuery = async (id: string, query: string, timeRange?: string) => {
   setIsRunning(prev => ({ ...prev, [id]: true }));
-  updateCell(id, { error: undefined, result: undefined });
-  
+  updateCell(id, { error: undefined });
+
   try {
+   const range = TIME_RANGES.find(r => r.key === timeRange) ?? TIME_RANGES[1];
+   const body: Record<string, unknown> = { query, limit: 50 };
+   // Convert the relative window to the absolute epoch-ms bounds the /query
+   // endpoint takes. 'All time' sends no bounds.
+   if (range.ms !== null) {
+    const now = new Date().getTime();
+    body.from_ts = now - range.ms;
+    body.to_ts = now;
+   }
    const response = await apiFetch('/query', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query, limit: 50 })
+    body: JSON.stringify(body),
    });
-   updateCell(id, { result: response.logs || [] });
+   updateCell(id, { result: response.logs || [], ranAt: new Date().toISOString(), timeRange: range.key });
   } catch (e: any) {
    const msg = typeof e?.message === 'string' ? e.message : JSON.stringify(e?.detail || e);
-   updateCell(id, { error: msg || 'Query failed' });
+   updateCell(id, { error: msg || 'Query failed', ranAt: new Date().toISOString() });
   } finally {
    setIsRunning(prev => ({ ...prev, [id]: false }));
   }
@@ -250,14 +325,22 @@ export default function NotebooksPage() {
        onChange={e => updateCell(cell.id, { content: e.target.value })}
        onKeyDown={e => {
         if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-         runQuery(cell.id, cell.content);
+         runQuery(cell.id, cell.content, cell.timeRange);
         }
        }}
        className="flex-1 bg-transparent px-3 py-2 font-mono text-sm text-[var(--text-primary)] outline-none"
        placeholder="e.g. status:ERROR"
       />
+      <select
+       value={cell.timeRange || '1h'}
+       onChange={e => updateCell(cell.id, { timeRange: e.target.value })}
+       className="bg-[var(--bg-surface)] border-l border-[var(--border)] px-2 text-xs text-[var(--text-secondary)] outline-none cursor-pointer"
+       title="Time window for this query"
+      >
+       {TIME_RANGES.map(r => <option key={r.key} value={r.key}>{r.label}</option>)}
+      </select>
       <button
-       onClick={() => runQuery(cell.id, cell.content)}
+       onClick={() => runQuery(cell.id, cell.content, cell.timeRange)}
        disabled={isRunning[cell.id] || !cell.content}
        className="bg-[var(--primary)] hover:bg-[var(--primary)] disabled:opacity-50 text-white px-4 flex items-center justify-center transition-colors"
        title="Run query (Cmd+Enter)"
@@ -274,8 +357,16 @@ export default function NotebooksPage() {
 
      {cell.result && (
       <div className="border border-[var(--border)] rounded bg-[var(--bg-app)] overflow-hidden">
-       <div className="bg-[var(--bg-surface)] px-3 py-1.5 text-[10px] font-bold text-[var(--text-secondary)] uppercase tracking-wider border-b border-[var(--border)]">
-        {cell.result.length === 0 ? 'No results found' : `${cell.result.length} results`}
+       <div className="bg-[var(--bg-surface)] px-3 py-1.5 border-b border-[var(--border)] flex items-center justify-between gap-3">
+        <span className="text-[10px] font-bold text-[var(--text-secondary)] uppercase tracking-wider">
+         {cell.result.length === 0 ? 'No results found' : `${cell.result.length} results`}
+        </span>
+        {cell.ranAt && (
+         <span className={`text-[10px] font-medium flex items-center gap-1.5 ${isSnapshot(cell.ranAt) ? 'text-amber-500' : 'text-[var(--text-muted)]'}`}>
+          {isSnapshot(cell.ranAt) && <span title="Saved snapshot — re-run to refresh against current data">⚠ snapshot</span>}
+          <span>{rangeLabel(cell.timeRange)} · {formatRanAt(cell.ranAt)}</span>
+         </span>
+        )}
        </div>
        {cell.result.length > 0 && (
         <div className="max-h-60 overflow-y-auto">

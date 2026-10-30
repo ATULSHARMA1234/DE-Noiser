@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { CheckCircle2, Clock, XCircle, Trash2, RefreshCw, GitCompare } from 'lucide-react';
+import { CheckCircle2, Clock, XCircle, Trash2, RefreshCw, GitCompare, FileText } from 'lucide-react';
 import { apiFetch, apiDelete } from '@/lib/api';
 import { useRouter } from 'next/navigation';
 import { useToast } from '@/context/ToastContext';
@@ -211,13 +211,21 @@ export default function AnalysisRunsPage() {
  </div>
  <div className="text-[var(--text-muted)] text-[10px]">Duration: {run.duration_sec?.toFixed(2)}s</div>
  </td>
- <td className="p-5 text-right flex justify-end">
- <button 
+ <td className="p-5 text-right">
+ <div className="flex justify-end items-center gap-3">
+ <button
+ onClick={() => router.push(`/app/runs/${run.id}`)}
+ className="inline-flex items-center gap-1.5 text-[var(--primary)] hover:underline text-xs font-semibold cursor-pointer bg-transparent border-none p-0"
+ >
+ <FileText size={13} /> Report
+ </button>
+ <button
  onClick={() => handleDelete(run.id)}
  className="text-[var(--text-muted)] hover:text-red-400 transition-colors cursor-pointer bg-transparent border-none"
  >
  <Trash2 size={14} />
  </button>
+ </div>
  </td>
  </tr>
  ))}

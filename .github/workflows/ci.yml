@@ -28,6 +28,22 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
+      # For the integration step. The unit suite substitutes this store, so
+      # nothing else in CI ever executes its SQL or validates its schema.
+      clickhouse:
+        image: clickhouse/clickhouse-server:24-alpine
+        env:
+          CLICKHOUSE_USER: default
+          CLICKHOUSE_PASSWORD: ""
+          CLICKHOUSE_DB: default
+        ports:
+          - 8123:8123
+        options: >-
+          --health-cmd "wget --spider -q http://localhost:8123/ping || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - uses: actions/checkout@v4
 
@@ -48,9 +64,41 @@ jobs:
       - name: Lint with ruff
         run: uv run ruff check src/ tests/
 
-      # Advisory: strict mypy is a goal, not yet met (tracked debt). Runs so the
-      # error count is visible on every PR, but does not block until it reaches 0.
-      - name: Type check with mypy (advisory)
+      # Blocking. `requests` has no default timeout, and ruff has no rule for
+      # this. The one call site that was missing one would have hung a worker
+      # thread per analysis run through a partial Slack outage, with nothing
+      # raising and nothing to alert on.
+      - name: Outbound HTTP calls must set a timeout
+        run: uv run python scripts/check_request_timeouts.py src/
+
+      # Blocking ratchet: these modules are strict-clean today and must stay that
+      # way. Grow this list as more modules reach zero errors — it is the
+      # mechanism that turns "advisory mypy" into real, incremental enforcement.
+      # --follow-imports=silent so only the listed files are gated, not their deps.
+      - name: Type check (enforced allowlist)
+        run: |
+          uv run mypy --follow-imports=silent \
+            src/denoiser/settings.py \
+            src/denoiser/query/parser.py \
+            src/denoiser/api/observability.py \
+            src/denoiser/preprocessing/redaction.py \
+            src/denoiser/preprocessing/normalization.py \
+            src/denoiser/exceptions.py \
+            src/denoiser/api/abac.py \
+            src/denoiser/api/alerts.py \
+            src/denoiser/api/otlp.py \
+            src/denoiser/api/schemas.py \
+            src/denoiser/api/siem.py \
+            src/denoiser/api/sources.py \
+            src/denoiser/api/versioning.py \
+            src/denoiser/storage/raw_log_sink.py \
+            src/denoiser/storage/source_store.py \
+            src/denoiser/workers/dead_letter.py \
+            src/denoiser/workers/heartbeat.py
+
+      # Advisory: strict mypy across the whole package is a goal, not yet met
+      # (tracked debt). Runs so the total error count is visible on every PR.
+      - name: Type check full package (advisory)
         continue-on-error: true
         run: uv run mypy src/denoiser
 
@@ -80,15 +128,41 @@ jobs:
 
       # Blocking: tests + coverage floor. The floor is a ratchet — raise it as
       # coverage improves; it must never silently exceed real coverage again.
+      # Real coverage is 75%; the floor sits just under so an unrelated PR is
+      # not failed by a rounding change, and it moves up as coverage does.
       - name: Test with pytest
-        run: uv run pytest --cov=src tests/ --cov-fail-under=60
+        run: uv run pytest --cov=src tests/ --cov-fail-under=73
 
-      # Advisory: surface known-vulnerable dependencies on every PR.
-      - name: Dependency vulnerability scan (advisory)
-        continue-on-error: true
+      # Blocking, and separate on purpose. The suite above substitutes the
+      # ClickHouse store, so its SQL is never executed and its schema is never
+      # checked — which is how the trace path spent its whole life writing None
+      # into a non-Nullable column, losing every batch, with the tests green.
+      #
+      # These run the same code against a real server. If the service below is
+      # unreachable they skip rather than fail, so this step cannot become a
+      # flaky gate — but a skipped run is visible in the log.
+      - name: Integration tests (real ClickHouse)
+        env:
+          CLICKHOUSE_HOST: localhost
+          CLICKHOUSE_PORT: "8123"
+          CLICKHOUSE_USER: default
+          CLICKHOUSE_PASSWORD: ""
+          CLICKHOUSE_DB: default
+        run: uv run pytest -m integration -v
+
+      # Blocking. This was advisory, which meant a known-vulnerable dependency
+      # could not fail a release — the exact control a vendor-security
+      # questionnaire asks about by name. Accepted CVEs go in
+      # .github/pip-audit-ignore.txt with a date and a reason, so an exception
+      # is a reviewed decision with an owner rather than a permanently green
+      # `continue-on-error`.
+      - name: Dependency vulnerability scan
         run: |
           uv export --format requirements-txt --no-dev --no-emit-project > requirements.txt
-          uvx pip-audit -r requirements.txt
+          IGNORES=$(grep -vE '^\s*(#|$)' .github/pip-audit-ignore.txt \
+            | awk '{print "--ignore-vuln " $1}' | tr '\n' ' ')
+          # shellcheck disable=SC2086
+          uvx pip-audit -r requirements.txt $IGNORES
 
   frontend-test:
     runs-on: ubuntu-latest
@@ -108,6 +182,12 @@ jobs:
       - name: Install dependencies
         run: npm ci --legacy-peer-deps
 
+      # Blocking, matching the Python scan. High and critical advisories fail
+      # the build; moderate and below are reported by `npm audit` locally and
+      # are not release-blocking.
+      - name: Dependency vulnerability scan
+        run: npm audit --audit-level=high
+
       # Blocking: type errors fail the build.
       - name: Type check
         run: npx tsc --noEmit
@@ -120,13 +200,154 @@ jobs:
       - name: Build
         run: npm run build
 
+  # The e2e suite existed and CI never ran it, so "it compiles" was the entire
+  # frontend quality bar and a broken route could ship. Its own job because it
+  # boots the API and the web server and is slower than the static checks.
+  frontend-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend dependencies
+        run: uv sync --frozen
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: './web/package-lock.json'
+
+      - name: Install frontend dependencies
+        working-directory: ./web
+        run: npm ci --legacy-peer-deps
+
+      - name: Install Playwright browsers
+        working-directory: ./web
+        run: npx playwright install --with-deps chromium
+
+      # playwright.config.ts starts both servers itself. SQLite and no external
+      # datastores: the suite exercises the UI against a real API, not the
+      # ingestion pipeline, so standing up Kafka and ClickHouse here would buy
+      # nothing but flakiness.
+      - name: Run Playwright
+        working-directory: ./web
+        env:
+          DATABASE_URL: sqlite:///./e2e.db
+          SEMANTICOS_ENV: development
+          SEMANTICOS_AUTO_MIGRATE: "1"
+          JWT_SECRET_KEY: e2e-only-not-a-real-secret-key-000000
+        run: npx playwright test --project=chromium
+
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: web/playwright-report/
+          retention-days: 7
+
+  # The chart was never rendered by anything. `helm lint` passes on a chart
+  # whose values are wired to nothing, which is how `ingress.enabled=true`
+  # spent the chart's whole life producing no object at all and reporting
+  # success. Rendering it — and validating the output against real Kubernetes
+  # schemas — is what catches that class of bug.
+  helm-chart:
+    runs-on: ubuntu-latest
+    env:
+      # Not a real secret. The chart requires a >=32-character key to render at
+      # all, and this exists only so the template can be exercised.
+      RENDER_KEY: ci-render-only-not-a-real-signing-key
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+
+      - name: Install kubeconform
+        run: |
+          curl -sSL -o kubeconform.tar.gz \
+            https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
+          tar xf kubeconform.tar.gz kubeconform
+          sudo mv kubeconform /usr/local/bin/
+
+      - name: Lint
+        run: |
+          helm lint deploy/helm/semanticos \
+            --set secrets.jwtSecretKey="$RENDER_KEY" --set postgres.password=pw
+
+      # The shape most installs actually use.
+      - name: Render and validate — defaults
+        run: |
+          helm template semanticos deploy/helm/semanticos \
+            --set secrets.jwtSecretKey="$RENDER_KEY" --set postgres.password=pw \
+            | kubeconform -summary -strict -kubernetes-version 1.29.0 -
+
+      # Every optional feature at once. Templates guarded by an `if` are the
+      # ones nobody renders, which is exactly where they rot.
+      - name: Render and validate — every feature enabled
+        run: |
+          helm template semanticos deploy/helm/semanticos \
+            --set secrets.jwtSecretKey="$RENDER_KEY" --set postgres.password=pw \
+            --set networkPolicy.enabled=true \
+            --set autoscaling.api.enabled=true \
+            --set autoscaling.ingestion.enabled=true \
+            --set autoscaling.web.enabled=true \
+            --set backup.enabled=true --set backup.bucket=semanticos-backups \
+            --set sharedStorage.sourceBucket=semanticos-sources \
+            --set sharedStorage.rawLogBucket=semanticos-raw \
+            --set config.multiReplica=1 \
+            --set ingress.enabled=true \
+            | kubeconform -summary -strict -kubernetes-version 1.29.0 -
+
+      # The guards must actually refuse. A `fail` that never fires is decoration.
+      - name: The misconfiguration guards refuse
+        run: |
+          set +e
+          helm template semanticos deploy/helm/semanticos \
+            --set secrets.jwtSecretKey="$RENDER_KEY" --set postgres.password=pw \
+            --set config.multiReplica=1 > /dev/null 2>&1
+          if [ $? -eq 0 ]; then
+            echo "multiReplica without shared storage should have failed"; exit 1
+          fi
+
+          helm template semanticos deploy/helm/semanticos \
+            --set secrets.jwtSecretKey="$RENDER_KEY" --set postgres.password=pw \
+            --set backup.enabled=true > /dev/null 2>&1
+          if [ $? -eq 0 ]; then
+            echo "backup without a bucket should have failed"; exit 1
+          fi
+
+          helm template semanticos deploy/helm/semanticos \
+            --set postgres.password=pw > /dev/null 2>&1
+          if [ $? -eq 0 ]; then
+            echo "a missing JWT signing key should have failed"; exit 1
+          fi
+          echo "all guards refused as expected"
+
   build-and-push:
-    needs: [backend-test, frontend-test]
+    needs: [backend-test, frontend-test, frontend-e2e, helm-chart]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+      # Required for keyless cosign signing and for the build provenance
+      # attestation: both exchange this token for a short-lived certificate,
+      # so there is no signing key to store or rotate.
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
 
@@ -137,16 +358,85 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      # github.repository is "ATULSHARMA1234/DE-Noiser", and container registry
+      # names must be lowercase — buildx rejects the tag outright. This job only
+      # runs on main, so the failure stayed invisible for as long as main went
+      # without a push, and no image was ever published.
+      #
+      # Emitted as a step output rather than into $GITHUB_ENV so it resolves
+      # statically: `env.` values written at runtime cannot be checked by the
+      # workflow linter, and a typo would surface as an empty image name at
+      # push time.
+      - name: Compute lowercase image prefix
+        id: image
+        run: |
+          echo "prefix=ghcr.io/$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
       - name: Build and push Backend
+        id: build-api
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          tags: ghcr.io/${{ github.repository }}/semanticos-api:${{ github.sha }},ghcr.io/${{ github.repository }}/semanticos-api:latest
+          # No `:latest`. A moving tag means two clusters that "run the same
+          # version" can be running different code, and a rollback has nothing
+          # to roll back to. Consumers pin the SHA tag or the digest.
+          tags: ${{ steps.image.outputs.prefix }}/semanticos-api:${{ github.sha }}
+          # SBOM and provenance travel with the image, so a customer's scanner
+          # can enumerate what is inside it without unpacking layers.
+          sbom: true
+          provenance: mode=max
 
       - name: Build and push Frontend
+        id: build-web
         uses: docker/build-push-action@v5
         with:
           context: ./web
           push: true
-          tags: ghcr.io/${{ github.repository }}/semanticos-web:${{ github.sha }},ghcr.io/${{ github.repository }}/semanticos-web:latest
+          tags: ${{ steps.image.outputs.prefix }}/semanticos-web:${{ github.sha }}
+          sbom: true
+          provenance: mode=max
+
+      # Keyless signing: the signature is bound to this workflow's identity and
+      # recorded in the public transparency log, so "was this image built by our
+      # pipeline from our source?" has a checkable answer.
+      #
+      #   cosign verify ghcr.io/…/semanticos-api@sha256:… \
+      #     --certificate-identity-regexp '^https://github\.com/ATULSHARMA1234/DE-Noiser/' \
+      #     --certificate-oidc-issuer https://token.actions.githubusercontent.com
+      - name: Sign the images
+        env:
+          COSIGN_YES: "true"
+        run: |
+          cosign sign "${{ steps.image.outputs.prefix }}/semanticos-api@${{ steps.build-api.outputs.digest }}"
+          cosign sign "${{ steps.image.outputs.prefix }}/semanticos-web@${{ steps.build-web.outputs.digest }}"
+
+      - name: Attest the backend build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ steps.image.outputs.prefix }}/semanticos-api
+          subject-digest: ${{ steps.build-api.outputs.digest }}
+          push-to-registry: true
+
+      - name: Attest the frontend build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ steps.image.outputs.prefix }}/semanticos-web
+          subject-digest: ${{ steps.build-web.outputs.digest }}
+          push-to-registry: true
+
+      - name: Record the published digests
+        run: |
+          {
+            echo "### Published images"
+            echo ""
+            echo "| image | digest |"
+            echo "| --- | --- |"
+            echo "| semanticos-api | \`${{ steps.build-api.outputs.digest }}\` |"
+            echo "| semanticos-web | \`${{ steps.build-web.outputs.digest }}\` |"
+            echo ""
+            echo "Deploy with \`--set image.tag=${{ github.sha }}\`."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -4,17 +4,25 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
 
+from denoiser import runtime
 from denoiser.api.auth import User, require_role
+from denoiser.api.scope import TenantScope, tenant_scope
 from denoiser.query.models import QueryCreateSchema, QueryRequestSchema, SavedQuerySchema
-from denoiser.query.parser import compile_to_sql, evaluate_in_memory, parse_plain_text_log, parse_query
-from denoiser.storage.clickhouse_store import ClickHouseStore
-from denoiser.storage.db import SavedQuery, get_db
+from denoiser.query.parser import (
+    QueryTooComplex,
+    evaluate_in_memory,
+    parse_plain_text_log,
+    parse_query,
+)
+from denoiser.storage.db import SavedQuery
 
 router = APIRouter(prefix="/query", tags=["query"])
-clickhouse_store = ClickHouseStore()
 
+#: Importing this router used to construct a `ClickHouseStore` at module scope,
+#: which connected and issued both `CREATE TABLE` statements as a side effect of
+#: the import — the exact thing `denoiser.runtime` exists to stop. The handle is
+#: now resolved per request, through the one seam.
 DATA_DIR = Path("data")
 
 def _get_all_memory_logs(from_ts: int | None = None, to_ts: int | None = None, file_name: str | None = None, tenant_id: int | None = None) -> list[dict]:
@@ -96,20 +104,25 @@ def execute_query(payload: QueryRequestSchema, current_user: User = Depends(requ
     """
     Execute a log query. Uses ClickHouse if available, else falls back to in-memory scanning of data/*.log
     """
-    ast = parse_query(payload.query)
+    try:
+        ast = parse_query(payload.query)
+    except QueryTooComplex as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
+    clickhouse_store = runtime.clickhouse_store()
     if clickhouse_store.client:
         try:
-            params = {'tenant_id': str(current_user.tenant_id)}
-            sql_where = compile_to_sql(ast, params)
-            sql_where = f"tenant_id = {{tenant_id:String}} AND ({sql_where})"
-
-            if payload.from_ts is not None:
-                sql_where += " AND timestamp >= toDateTime64({from_ts:Float64}, 3, 'UTC')"
-                params['from_ts'] = payload.from_ts / 1000.0
-            if payload.to_ts is not None:
-                sql_where += " AND timestamp <= toDateTime64({to_ts:Float64}, 3, 'UTC')"
-                params['to_ts'] = payload.to_ts / 1000.0
+            # The tenant predicate and the time bounds come from the store. They
+            # were typed out again here, which is how this route and
+            # `ClickHouseStore.query_logs` came to hold two copies of the same
+            # clause — and how the in-memory fallback below ended up with a
+            # third, conditional, one.
+            sql_where, params = clickhouse_store.scope(
+                current_user.tenant_id,
+                query_string=payload.query,
+                from_ts=payload.from_ts,
+                to_ts=payload.to_ts,
+            )
 
             if payload.group_by == 'pattern':
                 query = f"""
@@ -175,6 +188,7 @@ def get_facets(from_ts: int | None = None, to_ts: int | None = None, file_name: 
     """
     Get facet counts for source and level.
     """
+    clickhouse_store = runtime.clickhouse_store()
     if clickhouse_store.client:
         try:
             facets = clickhouse_store.get_facets(tenant_id=current_user.tenant_id, from_ts=from_ts, to_ts=to_ts)
@@ -204,6 +218,7 @@ def get_histogram(payload: QueryRequestSchema, current_user: User = Depends(requ
     """
     Get log counts bucketed by time.
     """
+    clickhouse_store = runtime.clickhouse_store()
     if clickhouse_store.client:
         try:
             buckets = clickhouse_store.get_histogram(
@@ -217,7 +232,10 @@ def get_histogram(payload: QueryRequestSchema, current_user: User = Depends(requ
             pass
 
     # In-memory fallback
-    ast = parse_query(payload.query)
+    try:
+        ast = parse_query(payload.query)
+    except QueryTooComplex as e:
+        raise HTTPException(status_code=400, detail=str(e))
     all_logs = _get_all_memory_logs(payload.from_ts, payload.to_ts, payload.file_name, current_user.tenant_id)
     matched_logs = [log for log in all_logs if evaluate_in_memory(ast, log)]
     
@@ -252,30 +270,40 @@ def get_histogram(payload: QueryRequestSchema, current_user: User = Depends(requ
     return {"status": "success", "buckets": sorted_buckets}
 
 @router.get("/saved", response_model=list[SavedQuerySchema])
-def list_saved_queries(db: Session = Depends(get_db), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
-    queries = db.query(SavedQuery).order_by(SavedQuery.created_at.desc()).all()
-    return queries
+def list_saved_queries(
+    scope: TenantScope = Depends(tenant_scope),
+    _: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"])),
+):
+    return scope.query(SavedQuery).order_by(SavedQuery.created_at.desc()).all()
 
 
 @router.post("/saved", response_model=SavedQuerySchema)
-def create_saved_query(payload: QueryCreateSchema, db: Session = Depends(get_db), current_user: User = Depends(require_role(["ANALYST", "ADMIN"]))):
+def create_saved_query(
+    payload: QueryCreateSchema,
+    scope: TenantScope = Depends(tenant_scope),
+    current_user: User = Depends(require_role(["ANALYST", "ADMIN"])),
+):
     sq = SavedQuery(
         name=payload.name,
         query_text=payload.query_text,
-        user_id=current_user.id
+        user_id=current_user.id,
     )
-    db.add(sq)
-    db.commit()
-    db.refresh(sq)
+    scope.add(sq)
+    scope.db.commit()
+    scope.db.refresh(sq)
     return sq
 
 
 @router.delete("/saved/{query_id}")
-def delete_saved_query(query_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_role(["ANALYST", "ADMIN"]))):
-    sq = db.query(SavedQuery).filter(SavedQuery.id == query_id).first()
+def delete_saved_query(
+    query_id: int,
+    scope: TenantScope = Depends(tenant_scope),
+    _: User = Depends(require_role(["ANALYST", "ADMIN"])),
+):
+    sq = scope.query(SavedQuery).filter(SavedQuery.id == query_id).first()
     if not sq:
         raise HTTPException(status_code=404, detail="Saved query not found")
-    db.delete(sq)
-    db.commit()
+    scope.db.delete(sq)
+    scope.db.commit()
     return {"status": "deleted"}
 

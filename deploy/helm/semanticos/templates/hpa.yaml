@@ -1,0 +1,47 @@
+{{- /*
+Horizontal autoscaling for the stateless tiers.
+
+Off by default: an HPA without metrics-server installed is an object that never
+scales anything and reports `<unknown>` targets forever, which is worse than
+not having one. Turn it on per component in values.yaml once the cluster has a
+metrics pipeline.
+
+The API deployment omits its own `replicas` field when its HPA is enabled, so a
+`helm upgrade` does not reset the replica count the autoscaler just chose.
+
+Scale-down is deliberately slower than scale-up: shedding capacity during a
+lull that turns out to be the gap between two bursts is how an autoscaler makes
+an incident worse.
+*/}}
+{{- range $component := (list "api" "ingestion" "web") }}
+{{- $scaling := index $.Values.autoscaling $component }}
+{{- if $scaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "semanticos.fullname" $ }}-{{ $component }}
+  labels:
+    {{- include "semanticos.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $component }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "semanticos.fullname" $ }}-{{ $component }}
+  minReplicas: {{ $scaling.minReplicas }}
+  maxReplicas: {{ $scaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ $scaling.targetCPUUtilizationPercentage }}
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30
+    scaleDown:
+      stabilizationWindowSeconds: 300
+{{- end }}
+{{- end }}

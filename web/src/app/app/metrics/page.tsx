@@ -101,22 +101,43 @@ export default function MetricsPage() {
  No Data
  </div>
  );
- 
- const min = 0;
- const max = Math.max(...dataPoints.map((d: any) => d.value), 1);
- const range = max - min;
- 
- const points = dataPoints.map((d: any, i: number) => {
- const x = (i / (dataPoints.length - 1)) * 100;
- const y = 100 - ((d.value - min) / range) * 100;
+
+ const values = dataPoints.map((d: any) => Number(d.value) || 0);
+ const max = Math.max(...values, 1);
+ const latest = values[values.length - 1];
+
+ // The polyline is drawn in a 0–100 coordinate space, so the SVG needs a
+ // viewBox to map it onto the box. Without one the coordinates were read as
+ // pixels and the whole series drew inside a 100px corner — the panel looked
+ // empty however much data the rule had.
+ const points = values.map((value, i) => {
+ const x = values.length === 1 ? 50 : (i / (values.length - 1)) * 100;
+ const y = 100 - (value / max) * 100;
  return `${x},${y}`;
- }).join(' ');
+ });
 
  return (
  <div className="h-24 w-full relative group">
- <svg className="w-full h-full" preserveAspectRatio="none">
- <polyline points={points} fill="none" stroke="#a855f7" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+ <svg className="w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
+ <polyline
+ points={`0,100 ${points.join(' ')} 100,100`}
+ fill="#a855f7" fillOpacity="0.12" stroke="none"
+ />
+ <polyline
+ points={points.join(' ')}
+ fill="none" stroke="#a855f7" strokeWidth="2" vectorEffect="non-scaling-stroke"
+ />
+ {values.length === 1 && (
+ <circle cx={points[0].split(',')[0]} cy={points[0].split(',')[1]} r="2" fill="#a855f7" vectorEffect="non-scaling-stroke" />
+ )}
  </svg>
+ <div className="absolute top-0 right-0 text-xs text-[var(--text-secondary)]">
+ <span className="text-[var(--text-primary)] font-semibold">{latest.toLocaleString()}</span>
+ <span className="ml-1 text-[10px]">now · peak {max.toLocaleString()}</span>
+ </div>
+ <div className="absolute bottom-0 left-0 text-[10px] text-[var(--text-muted)]">
+ {dataPoints.length} point{dataPoints.length === 1 ? '' : 's'}
+ </div>
  </div>
  );
  };

@@ -16,3 +16,123 @@
 {{- define "semanticos.chart" -}}
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 {{- end }}
+
+{{- define "semanticos.labels" -}}
+helm.sh/chart: {{ include "semanticos.chart" . }}
+app.kubernetes.io/name: {{ include "semanticos.name" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end }}
+
+{{- define "semanticos.secretName" -}}
+{{- .Values.secrets.existingSecret | default (printf "%s-secrets" (include "semanticos.fullname" .)) -}}
+{{- end }}
+
+{{- define "semanticos.serviceAccountName" -}}
+{{- if .Values.serviceAccount.create -}}
+{{- default (include "semanticos.fullname" .) .Values.serviceAccount.name -}}
+{{- else -}}
+{{- default "default" .Values.serviceAccount.name -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Refuse an install that the API would refuse to start under.
+
+`SEMANTICOS_MULTI_REPLICA=1` makes the API fail at boot when no shared storage
+is configured, because uploads held on one pod's disk are invisible to every
+other replica. Catching it here turns that into an error at `helm install`
+rather than a CrashLoopBackOff that an operator has to read pod logs to
+diagnose.
+*/}}
+{{- define "semanticos.validateSharedStorage" -}}
+{{- if .Values.config.multiReplica }}
+{{- if not .Values.sharedStorage.sourceBucket }}
+{{- fail "config.multiReplica is set but sharedStorage.sourceBucket is empty. Uploads held on one pod's disk are invisible to the other replicas; set the bucket, or unset config.multiReplica." }}
+{{- end }}
+{{- if not .Values.sharedStorage.rawLogBucket }}
+{{- fail "config.multiReplica is set but sharedStorage.rawLogBucket is empty. The raw ingest copy would be split across pods; set the bucket, or unset config.multiReplica." }}
+{{- end }}
+{{- end }}
+{{- if and .Values.backup.enabled (not .Values.backup.bucket) }}
+{{- fail "backup.enabled is true but backup.bucket is empty. The backup job would have nowhere to upload to." }}
+{{- end }}
+{{- end }}
+
+{{/*
+Common environment block for every application pod. Secrets are referenced from
+the managed/created Secret; non-sensitive config comes straight from values.
+*/}}
+{{- define "semanticos.env" -}}
+{{- include "semanticos.validateSharedStorage" . -}}
+- name: DATABASE_URL
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "semanticos.secretName" . }}
+      key: database-url
+- name: JWT_SECRET_KEY
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "semanticos.secretName" . }}
+      key: jwt-secret-key
+- name: SEMANTICOS_ADMIN_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "semanticos.secretName" . }}
+      key: admin-password
+- name: INGEST_API_KEY
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "semanticos.secretName" . }}
+      key: ingest-api-key
+- name: SCIM_BEARER_TOKEN
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "semanticos.secretName" . }}
+      key: scim-bearer-token
+- name: CLICKHOUSE_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "semanticos.secretName" . }}
+      key: clickhouse-password
+- name: REDIS_URL
+  value: {{ .Values.redis.url | quote }}
+- name: CLICKHOUSE_HOST
+  value: {{ .Values.clickhouse.host | quote }}
+- name: CLICKHOUSE_PORT
+  value: {{ .Values.clickhouse.port | quote }}
+- name: CLICKHOUSE_USER
+  value: {{ .Values.clickhouse.user | quote }}
+- name: KAFKA_BROKER
+  value: {{ .Values.kafka.broker | quote }}
+- name: CORS_ALLOWED_ORIGINS
+  value: {{ .Values.config.corsAllowedOrigins | quote }}
+- name: SEMANTICOS_ENV
+  value: {{ .Values.config.environment | quote }}
+- name: SEMANTICOS_AUTO_MIGRATE
+  value: {{ .Values.config.autoMigrate | quote }}
+- name: SEMANTICOS_SCHEDULER_ENABLED
+  value: {{ .Values.config.schedulerEnabled | quote }}
+- name: INGEST_RATE_LIMIT_REQUESTS
+  value: {{ .Values.config.ingestRateLimitRequests | quote }}
+- name: INGEST_RATE_LIMIT_WINDOW_SECONDS
+  value: {{ .Values.config.ingestRateLimitWindowSeconds | quote }}
+- name: METRICS_TOKEN
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "semanticos.secretName" . }}
+      key: metrics-token
+{{- if .Values.sharedStorage.sourceBucket }}
+- name: SOURCE_BUCKET
+  value: {{ .Values.sharedStorage.sourceBucket | quote }}
+{{- end }}
+{{- if .Values.sharedStorage.rawLogBucket }}
+- name: RAW_LOG_BUCKET
+  value: {{ .Values.sharedStorage.rawLogBucket | quote }}
+{{- end }}
+{{- if .Values.config.multiReplica }}
+- name: SEMANTICOS_MULTI_REPLICA
+  value: {{ .Values.config.multiReplica | quote }}
+{{- end }}
+{{- end }}

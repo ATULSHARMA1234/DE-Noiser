@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Shield, Cpu, HardDrive, Save, Check, RefreshCw, Webhook, Plus, Trash2, TestTube2, Bell, CheckCircle2, XCircle, AlertTriangle, ChevronDown, Cloud } from 'lucide-react';
+import Link from 'next/link';
+import { Shield, Cpu, HardDrive, Save, Check, RefreshCw, Webhook, Plus, Trash2, TestTube2, Bell, CheckCircle2, XCircle, AlertTriangle, ChevronDown, Cloud, ShieldAlert, ChevronRight } from 'lucide-react';
 import { apiFetch, apiPut, apiPost, apiDelete } from '@/lib/api';
 import { useToast } from '@/context/ToastContext';
 import { ConfirmModal } from '@/components/ConfirmModal';
@@ -289,6 +290,18 @@ export default function SettingsPage() {
  ))}
  </div>
  </div>
+
+ {/* Audit trail */}
+ <Link href="/app/audit" className="flex items-center justify-between bg-[var(--bg-card)] rounded-xl p-6 shadow-sm hover:bg-[var(--bg-surface-hover)] transition-colors">
+ <div>
+ <h2 className="text-sm font-bold text-[var(--text-primary)] mb-1">Security &amp; Audit Logs</h2>
+ <p className="text-xs text-[var(--text-muted)]">Who changed what and when, including every settings change on this page.</p>
+ </div>
+ <div className="flex items-center gap-2 text-[var(--text-muted)]">
+ <ShieldAlert size={24} className="text-[var(--primary)]" />
+ <ChevronRight size={16} />
+ </div>
+ </Link>
 
  {/* LLM */}
  <div className="bg-[var(--bg-card)] border-none rounded-xl p-6 shadow-sm">

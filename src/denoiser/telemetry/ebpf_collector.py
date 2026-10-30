@@ -1,11 +1,61 @@
 import json
 import logging
+import os
 import platform
 import threading
 import time
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# The event_type values the BPF program emits. Kept here so consumers name the
+# events rather than carrying magic numbers around.
+EVENT_TYPES = {
+    1: "tcp_retransmit",
+    2: "oom_kill",
+}
+
+
+def events_path() -> Path:
+    """Where kernel events are written. Follows the platform data directory."""
+    return Path(os.getenv("SEMANTICOS_DATA_DIR", "data")) / "ebpf_events.jsonl"
+
+
+def read_events(since_ms: int | None = None, limit: int = 5000) -> list[dict[str, Any]]:
+    """Read recorded kernel events, newest last.
+
+    The collector wrote this file and nothing ever read it, so TCP retransmits
+    and OOM kills were captured and discarded. This is the read side.
+    """
+    path = events_path()
+    if not path.exists():
+        return []
+
+    events: list[dict[str, Any]] = []
+    try:
+        with open(path) as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                try:
+                    event = json.loads(line)
+                except ValueError:
+                    continue
+                ts = event.get("timestamp")
+                if not isinstance(ts, (int, float)):
+                    continue
+                if since_ms is not None and ts < since_ms:
+                    continue
+                event["event_name"] = EVENT_TYPES.get(event.get("event_type"), "unknown")
+                events.append(event)
+    except OSError as e:
+        logger.error(f"Could not read eBPF events: {e}")
+        return []
+
+    events.sort(key=lambda e: e.get("timestamp", 0))
+    return events[-limit:]
+
 
 class EBPFCollector:
     """
@@ -19,7 +69,7 @@ class EBPFCollector:
         self._running = False
         self._thread: threading.Thread | None = None
 
-        self.events_path = Path("data") / "ebpf_events.jsonl"
+        self.events_path = events_path()
 
         if not self.is_supported:
             logger.warning(f"eBPF tracing is not supported on {self.os_type}. eBPFCollector disabled.")

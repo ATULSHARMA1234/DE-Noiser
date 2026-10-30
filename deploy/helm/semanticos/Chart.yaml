@@ -2,5 +2,5 @@ apiVersion: v2
 name: semanticos
 description: A Helm chart for Kubernetes deployment of SemanticOS
 type: application
-version: 0.1.0
+version: 0.2.0
 appVersion: "2.0.0"

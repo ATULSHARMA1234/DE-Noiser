@@ -42,6 +42,13 @@ services:
     ports:
       - "8123:8123" # HTTP port
       - "9002:9000" # Native port (host 9000 is used by MinIO)
+    # The app reads CLICKHOUSE_USER/PASSWORD from .env; without the same values
+    # here the container comes up with an empty default password and every query
+    # fails authentication ("code: 194"), which looks like ClickHouse being down.
+    environment:
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-default}
     volumes:
       - clickhouse_data:/var/lib/clickhouse
     healthcheck:

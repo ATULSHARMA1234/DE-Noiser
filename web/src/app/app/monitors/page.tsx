@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { apiFetch } from '@/lib/api';
 import { useToast } from '@/context/ToastContext';
-import { Bell, Plus, Edit2, Trash2, X, Activity, AlertTriangle, Terminal, BellOff, ChevronDown } from 'lucide-react';
+import { Bell, Plus, Edit2, Trash2, X, Activity, AlertTriangle, Terminal, BellOff, ChevronDown, Play, Power } from 'lucide-react';
 import { ConfirmModal } from '@/components/ConfirmModal';
 
 export default function MonitorsPage() {
@@ -31,6 +31,7 @@ export default function MonitorsPage() {
   severity: 'warning',
   threshold_critical: '',
   threshold_warning: '',
+  window_seconds: '300',
   enabled: true
  });
 
@@ -70,6 +71,7 @@ export default function MonitorsPage() {
     severity: monitor.severity || 'warning',
     threshold_critical: monitor.threshold_critical?.toString() || '',
     threshold_warning: monitor.threshold_warning?.toString() || '',
+    window_seconds: (monitor.window_seconds ?? 300).toString(),
     enabled: monitor.enabled !== false
    });
   } else {
@@ -82,6 +84,7 @@ export default function MonitorsPage() {
     severity: 'warning',
     threshold_critical: '',
     threshold_warning: '',
+    window_seconds: '300',
     enabled: true
    });
   }
@@ -95,6 +98,7 @@ export default function MonitorsPage() {
     ...formData,
     threshold_critical: formData.threshold_critical ? parseFloat(formData.threshold_critical) : null,
     threshold_warning: formData.threshold_warning ? parseFloat(formData.threshold_warning) : null,
+    window_seconds: parseInt(formData.window_seconds, 10) || 300,
    };
 
    if (editingMonitor) {
@@ -145,6 +149,43 @@ export default function MonitorsPage() {
   } catch (e: any) {
    toast({ title: 'Failed to update monitor state', description: e.message, type: 'error' });
   }
+ };
+
+ // Run a monitor's query now instead of waiting for the next scheduled pass.
+ const [testingId, setTestingId] = useState<number | null>(null);
+ const runNow = async (monitor: any) => {
+  setTestingId(monitor.id);
+  try {
+   const res = await apiFetch(`/monitors/${monitor.id}/evaluate`, { method: 'POST' });
+   toast({
+    title: `${monitor.name}: ${res.status}`,
+    description: res.message,
+    type: res.status === 'CRITICAL' || res.status === 'ERROR' ? 'error' : 'info',
+   });
+   fetchMonitors();
+  } catch (e: any) {
+   toast({ title: 'Evaluation failed', description: e.message, type: 'error' });
+  } finally {
+   setTestingId(null);
+  }
+ };
+
+ const STATUS_STYLE: Record<string, string> = {
+  CRITICAL: 'bg-red-500/10 text-red-500 border border-red-500/20',
+  WARNING: 'bg-amber-500/10 text-amber-500 border border-amber-500/20',
+  OK: 'bg-green-500/10 text-green-500 border border-green-500/20',
+  NO_DATA: 'bg-zinc-500/10 text-zinc-400 border border-zinc-500/20',
+  ERROR: 'bg-red-500/10 text-red-400 border border-red-500/20',
+  PENDING: 'bg-zinc-500/10 text-zinc-500 border border-zinc-500/20',
+ };
+
+ const relativeTime = (iso: string | null) => {
+  if (!iso) return 'never';
+  const secs = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+  if (secs < 60) return `${secs}s ago`;
+  if (secs < 3600) return `${Math.round(secs / 60)}m ago`;
+  if (secs < 86400) return `${Math.round(secs / 3600)}h ago`;
+  return `${Math.round(secs / 86400)}d ago`;
  };
 
  const handleMute = async (monitorId: number, minutes: number) => {
@@ -208,7 +249,7 @@ export default function MonitorsPage() {
         <th className="px-6 py-3 font-medium">Status</th>
         <th className="px-6 py-3 font-medium">Name</th>
         <th className="px-6 py-3 font-medium">Query</th>
-        <th className="px-6 py-3 font-medium">Type</th>
+        <th className="px-6 py-3 font-medium">Last check</th>
         <th className="px-6 py-3 font-medium text-right">Actions</th>
        </tr>
       </thead>
@@ -219,12 +260,13 @@ export default function MonitorsPage() {
          <tr key={m.id} className="hover:bg-[var(--bg-app)] transition-colors">
           <td className="px-6 py-4">
            <div className="flex items-center gap-2">
-            <button 
-             onClick={() => toggleEnabled(m)}
-             className={`px-2 py-1 rounded text-xs font-bold ${m.enabled ? 'bg-green-500/10 text-green-500 border border-green-500/20' : 'bg-zinc-500/10 text-zinc-500 border border-zinc-500/20'}`}
+            {/* Evaluation result, not merely whether the row is switched on. */}
+            <span
+             className={`px-2 py-1 rounded text-xs font-bold ${STATUS_STYLE[m.status] || STATUS_STYLE.PENDING}`}
+             title={m.last_error || (m.last_value != null ? `${m.last_value} matches in the last ${Math.round((m.window_seconds || 300) / 60)}m` : 'Not evaluated yet')}
             >
-             {m.enabled ? 'ACTIVE' : 'DISABLED'}
-            </button>
+             {m.enabled ? (m.status || 'PENDING').replace('_', ' ') : 'DISABLED'}
+            </span>
             {mutedRemaining && (
              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-500 border border-amber-500/20">
               <BellOff size={10} /> MUTED {mutedRemaining}
@@ -232,16 +274,37 @@ export default function MonitorsPage() {
             )}
            </div>
           </td>
-          <td className="px-6 py-4 font-semibold text-[var(--text-primary)]">{m.name}</td>
-          <td className="px-6 py-4 font-mono text-xs truncate max-w-md">{m.query}</td>
-          <td className="px-6 py-4 text-xs font-medium tracking-wider uppercase text-[var(--text-muted)]">
-           <span className="flex items-center gap-1">
-            {m.type === 'log alert' ? <Terminal size={12} /> : <Activity size={12} />}
-            {m.type}
+          <td className="px-6 py-4 font-semibold text-[var(--text-primary)]">
+           {m.name}
+           <span className="flex items-center gap-1 text-[10px] font-normal uppercase tracking-wider text-[var(--text-muted)] mt-0.5">
+            {m.type === 'log alert' ? <Terminal size={10} /> : <Activity size={10} />}
+            {m.type} · {Math.round((m.window_seconds || 300) / 60)}m window
            </span>
+          </td>
+          <td className="px-6 py-4 font-mono text-xs truncate max-w-md">{m.query}</td>
+          <td className="px-6 py-4 text-xs">
+           <div className="text-[var(--text-primary)]">
+            {m.last_value != null ? `${m.last_value} matches` : '—'}
+           </div>
+           <div className="text-[10px] text-[var(--text-muted)]">{relativeTime(m.last_evaluated_at)}</div>
           </td>
           <td className="px-6 py-4 text-right">
            <div className="flex items-center justify-end gap-1">
+            <button
+             onClick={() => runNow(m)}
+             disabled={testingId === m.id}
+             className="p-1.5 hover:bg-[var(--bg-surface-hover)] rounded text-[var(--text-secondary)] hover:text-green-400 transition-colors disabled:opacity-40"
+             title="Run this query now"
+            >
+             <Play size={16} className={testingId === m.id ? 'animate-pulse' : ''} />
+            </button>
+            <button
+             onClick={() => toggleEnabled(m)}
+             className={`p-1.5 hover:bg-[var(--bg-surface-hover)] rounded transition-colors ${m.enabled ? 'text-green-500' : 'text-[var(--text-muted)]'}`}
+             title={m.enabled ? 'Disable monitor' : 'Enable monitor'}
+            >
+             <Power size={16} />
+            </button>
             {/* Mute dropdown */}
             <div className="relative">
              <button
@@ -379,6 +442,24 @@ export default function MonitorsPage() {
            className="w-full bg-[var(--bg-input)] border border-[var(--border)] rounded px-3 py-2 text-sm text-[var(--text-primary)] focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition-all"
           />
          </div>
+        </div>
+
+        <div>
+         <label className="block text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)] mb-1.5">Evaluation Window</label>
+         <select
+          value={formData.window_seconds}
+          onChange={e => setFormData({...formData, window_seconds: e.target.value})}
+          className="w-full bg-[var(--bg-input)] border border-[var(--border)] rounded px-3 py-2 text-sm text-[var(--text-primary)] focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition-all"
+         >
+          <option value="300">Last 5 minutes</option>
+          <option value="900">Last 15 minutes</option>
+          <option value="3600">Last hour</option>
+          <option value="21600">Last 6 hours</option>
+          <option value="86400">Last 24 hours</option>
+         </select>
+         <p className="text-[10px] text-[var(--text-muted)] mt-1">
+          Matches are counted over this window each minute. With no thresholds set, any match alerts.
+         </p>
         </div>
 
         <div>
