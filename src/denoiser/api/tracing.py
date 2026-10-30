@@ -235,7 +235,9 @@ def list_traces(
 
             return traces
         except Exception:
-            pass  # Fall through to in-memory
+            # Logged, then the SQLite copy answers. Silently passing hid a
+            # ClickHouse outage behind "no traces" for as long as it lasted.
+            logger.exception("Trace listing: ClickHouse query failed, falling back to SQLite")
 
     # SQLite fallback
     try:
@@ -298,8 +300,10 @@ def list_traces(
             
         return filtered
     except Exception:
+        # Both stores failed. An empty list here reads as "nothing was traced",
+        # which is a different answer from "we could not look".
         logger.exception("Trace listing fell back to SQLite and failed")
-        return []
+        raise HTTPException(status_code=503, detail="Trace storage is unavailable")
 
 @router.get("/{trace_id}", response_model=TraceSchema)
 def get_trace(
@@ -374,7 +378,7 @@ def get_trace(
                     spans=spans
                 )
         except Exception:
-            pass  # Fall through to in-memory
+            logger.exception("Trace lookup: ClickHouse query failed, falling back to SQLite")
 
     # SQLite fallback
     try:
@@ -424,5 +428,5 @@ def get_trace(
         raise
     except Exception:
         logger.exception("Trace lookup fell back to SQLite and failed")
-        raise HTTPException(status_code=404, detail="Trace not found")
+        raise HTTPException(status_code=503, detail="Trace storage is unavailable")
 
