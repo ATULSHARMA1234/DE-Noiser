@@ -32,7 +32,7 @@ router = APIRouter(tags=["Settings"])
 
 @router.get("/settings")
 def get_settings(current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
-    return _load_settings()
+    return _mask_secrets(_load_settings())
 
 
 @router.put("/settings")
@@ -45,6 +45,12 @@ def update_settings(
 
     current = _load_settings()
     updates = new_settings.model_dump(exclude_unset=True)
+    # The settings page sends back every field it was given, including the
+    # mask in place of each secret. That means "unchanged", not "set it to
+    # the mask".
+    for key in _SECRET_SETTING_KEYS:
+        if updates.get(key) == SECRET_MASK:
+            del updates[key]
 
     # Capture what moved before the write. Settings govern retention and
     # redaction, so "someone changed settings and got a 200" is not a usable
@@ -55,12 +61,25 @@ def update_settings(
 
     current.update(updates)
     _save_settings(current)
-    return current
+    return _mask_secrets(current)
 
 
 #: Settings whose values are credentials — recorded as changed, never with the
 #: value itself, or the audit log becomes a place to read secrets from.
 _SECRET_SETTING_KEYS = ("s3_secret_key", "s3_access_key", "slack_webhook_url", "sso_client_id")
+
+
+#: Stands in for a secret that is set. Every role can read settings, and a
+#: VIEWER able to read the S3 keys could read the archive they unlock.
+SECRET_MASK = "********"
+
+
+def _mask_secrets(settings: dict) -> dict:
+    masked = dict(settings)
+    for key in _SECRET_SETTING_KEYS:
+        if masked.get(key):
+            masked[key] = SECRET_MASK
+    return masked
 
 
 def _redact_secret_changes(changes: dict) -> None:
