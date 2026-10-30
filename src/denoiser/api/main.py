@@ -24,6 +24,7 @@ from denoiser.api import incidents as incidents_router
 from denoiser.api import runs as runs_router
 from denoiser.api import sources as source_registry
 from denoiser.api import webhooks as webhooks_router
+from denoiser.api.cookies import CSRF_HEADER
 from denoiser.api.middleware import (
     BodySizeLimitMiddleware,
     CorrelationIDMiddleware,
@@ -56,7 +57,9 @@ app.add_middleware(
     allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-    allow_headers=["Authorization", "Content-Type", "X-API-Key", "Bypass-Tunnel-Reminder"],
+    # X-CSRF-Token is sent on every unsafe request by the web client; without
+    # it here a cross-origin frontend's preflight failed every write.
+    allow_headers=["Authorization", "Content-Type", "X-API-Key", CSRF_HEADER],
 )
 # Coarse per-IP DoS guard on /ingest. Configurable, and much higher than the
 # 100/minute it was hardcoded to: a single Fluent Bit shipper flushing once a

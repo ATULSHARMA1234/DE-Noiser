@@ -194,3 +194,19 @@ class TestUploadPathTraversal:
             files={"file": ("..", b"pwned", "text/plain")},
         )
         assert resp.status_code == 400
+
+
+class TestCors:
+    def test_preflight_allows_the_csrf_header_the_web_client_sends(self, client, monkeypatch):
+        """Every unsafe request from the web app carries X-CSRF-Token."""
+        from denoiser.api.cookies import CSRF_HEADER
+        from denoiser.settings import get_settings
+
+        origin = get_settings().cors_origin_list[0]
+        res = client.options("/settings", headers={
+            "Origin": origin,
+            "Access-Control-Request-Method": "PUT",
+            "Access-Control-Request-Headers": f"content-type,{CSRF_HEADER.lower()}",
+        })
+        assert res.status_code == 200
+        assert CSRF_HEADER.lower() in res.headers["access-control-allow-headers"].lower()
