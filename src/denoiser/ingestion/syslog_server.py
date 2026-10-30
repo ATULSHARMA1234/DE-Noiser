@@ -386,16 +386,17 @@ def _resolve_tenant_id() -> str:
     override = os.getenv("SYSLOG_TENANT_ID")
     if override:
         return override
+    # No "default_tenant" fallback: rows filed under an owner no user can hold
+    # are stored and never seen, which is worse than refusing to start.
+    from denoiser.storage.db import SessionLocal, Tenant
+    db = SessionLocal()
     try:
-        from denoiser.storage.db import SessionLocal, Tenant
-        db = SessionLocal()
-        try:
-            tenant = db.query(Tenant).order_by(Tenant.id).first()
-            return str(tenant.id) if tenant else "default_tenant"
-        finally:
-            db.close()
-    except Exception:
-        return "default_tenant"
+        tenant = db.query(Tenant).order_by(Tenant.id).first()
+    finally:
+        db.close()
+    if tenant is None:
+        raise RuntimeError("No workspace exists to attribute syslog to; set SYSLOG_TENANT_ID or run init_db")
+    return str(tenant.id)
 
 
 def main() -> None:

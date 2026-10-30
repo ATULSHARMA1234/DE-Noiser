@@ -8,7 +8,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from denoiser import runtime
-from denoiser.api.auth import User, require_role
+from denoiser.api.auth import User, require_role, verify_ingest_auth
 from denoiser.api.pagination import MAX_PAGE_SIZE
 from denoiser.api.scope import TenantScope, tenant_scope
 from denoiser.logging import get_logger
@@ -33,8 +33,6 @@ router = APIRouter(
 import contextlib
 from datetime import UTC, datetime, timedelta
 
-from fastapi import Header
-
 DATA_DIR = Path("data")
 
 
@@ -47,17 +45,17 @@ from denoiser.storage.db import Span
 async def ingest_traces(
     payload: dict[Any, Any] = Body(...),
     db: Session = Depends(get_db),
-    api_key: str = Header(None, alias="x-api-key")
+    tenant_id: int = Depends(verify_ingest_auth),
 ):
     """
     Ingest OpenTelemetry traces via HTTP JSON.
+
+    Authenticated like every other ingest path. It used to accept a missing or
+    unknown key and file the spans under a shared "default_tenant", so anyone
+    who could reach the port could write traces, and no real tenant could
+    read them.
     """
     try:
-        from denoiser.storage.db import Tenant
-        tenant = db.query(Tenant).filter(Tenant.api_key == api_key).first() if api_key else None
-        # Default fallback for testing if no key is provided
-        tenant_id = tenant.id if tenant else "default_tenant"
-
         producer = runtime.kafka_producer()
         if producer:
             payload["_tenant_id"] = tenant_id

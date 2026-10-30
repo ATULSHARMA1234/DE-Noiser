@@ -171,3 +171,21 @@ class TestARetriedBatchDoesNotAccumulate:
         # but none of it was new.
         assert second.json()["spans_ingested"] == 2
         assert second.json()["spans_stored"] == 0
+
+
+class TestTraceHttpIngestAuth:
+    """`/traces/v1/traces` took a missing key as "default_tenant" and stored the spans."""
+
+    @pytest.fixture
+    def client(self):
+        from denoiser.api.main import app
+        return TestClient(app)
+
+    @pytest.mark.parametrize("headers", [{}, {"X-API-Key": "not-a-real-key"}])
+    def test_unauthenticated_ingest_is_refused(self, client, monkeypatch, headers):
+        store = _RecordingStore()
+        monkeypatch.setattr(runtime, "clickhouse_store", lambda: store)
+        monkeypatch.setattr(runtime, "kafka_producer", lambda: None)
+        res = client.post("/traces/v1/traces", json=_payload(), headers=headers)
+        assert res.status_code == 401
+        assert store.rows == []

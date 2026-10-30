@@ -70,7 +70,14 @@ def _resolve_tenant(api_key: str, db: Session) -> str:
     static = os.getenv("INGEST_API_KEY") or ("semanticos-ingest-key-123" if is_testing() else None)
     if static and api_key == static:
         default = db.query(Tenant).order_by(Tenant.id).first()
-        return str(default.id) if default else "default_tenant"
+        if default:
+            return str(default.id)
+        # Same answer as verify_ingest_auth: "default_tenant" is an owner no
+        # user can hold, so the batch would be stored and never seen.
+        raise HTTPException(
+            status_code=503,
+            detail="Ingest is authenticated but not attributable to a workspace; retry the batch.",
+        )
     raise HTTPException(status_code=401, detail="Invalid token")
 
 

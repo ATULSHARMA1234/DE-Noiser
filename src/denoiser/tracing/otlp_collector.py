@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from denoiser.utils.time import utcfromtimestamp, utcnow
 
 
-def process_otlp_traces(db: Session, payload: dict, tenant_id: str = "default_tenant"):
+def process_otlp_traces(db: Session, payload: dict, tenant_id: str | int):
     """
     Process OpenTelemetry HTTP JSON payload and store spans in the database.
     OTLP JSON format: https://opentelemetry.io/docs/specs/otlp/#json-protobuf-encoding

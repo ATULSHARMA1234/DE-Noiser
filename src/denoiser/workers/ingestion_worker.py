@@ -120,7 +120,12 @@ async def run_ingestion_worker():
                 for msg in msgs:
                     try:
                         payload = json.loads(msg.value.decode("utf-8"))
-                        tenant_id = payload.pop("_tenant_id", "default_tenant")
+                        # Every producer stamps the owner. A message without one
+                        # goes to the DLQ rather than into a "default_tenant"
+                        # bucket no user can read.
+                        if "_tenant_id" not in payload:
+                            raise ValueError("message carries no _tenant_id")
+                        tenant_id = payload.pop("_tenant_id")
                         st["batch"].append((payload, tenant_id))
                     except Exception as e:
                         # A malformed message must not stall the partition; quarantine
