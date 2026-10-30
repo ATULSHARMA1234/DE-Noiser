@@ -86,7 +86,7 @@ class RunRequest:
     tenant_id: Any = None
     baseline: str | None = None
     intelligence: bool = False
-    top_n: int = 3
+    top_n: int = 10
     max_lines: int = DEFAULT_MAX_ANALYSIS_LINES
     run_id: str = ""
 
@@ -100,7 +100,9 @@ class RunRequest:
             tenant_id=request_dict.get("tenant_id"),
             baseline=request_dict.get("baseline"),
             intelligence=bool(request_dict.get("intelligence", False)),
-            top_n=request_dict.get("top_n", 3),
+            # Same default as the /analyze schema. Runs started any other way
+            # (auto-analyze on upload, schedules) used to narrate only 3.
+            top_n=request_dict.get("top_n", 10),
             max_lines=resolve_max_lines(request_dict),
             run_id=run_id or f"run_{uuid.uuid4().hex[:8]}",
         )

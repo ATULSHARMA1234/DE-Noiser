@@ -68,3 +68,29 @@ def test_a_malformed_response_ends_in_the_heuristic_fallback():
     assert payload
     assert isinstance(payload.get("failure_domain"), str)
     assert payload.get("incident_summary")
+
+
+def test_heuristic_summary_says_so():
+    """The UI badges a heuristic summary; it can only do that if the payload says which it is."""
+    from denoiser.intelligence.llm import IncidentIntelligence
+
+    assert IncidentIntelligence(enabled=False).generate_summary([], None)["narrator"] == "heuristic"
+
+
+def test_model_summary_says_so():
+    from types import SimpleNamespace
+
+    from denoiser.intelligence.llm import IncidentIntelligence
+
+    intelligence = IncidentIntelligence(enabled=False)
+    reply = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(
+        content='{"incident_summary": "Pool exhausted", "failure_domain": "DB"}'))])
+    intelligence.enabled = True
+    intelligence.client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **_: reply)))
+    assert intelligence.generate_summary([], None)["narrator"] == "llm"
+
+
+def test_runs_not_started_through_the_api_narrate_ten_clusters_not_three():
+    from denoiser.analysis.pipeline import RunRequest
+
+    assert RunRequest.from_dict({"source": "app.log"}).top_n == 10
