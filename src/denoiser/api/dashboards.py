@@ -172,7 +172,12 @@ def get_widget_data(
         # one (`since`); otherwise default to the last 14 days. Day count is
         # clamped so a 15m window still renders a sane single-bucket series.
         now = utcnow()
-        start = since if since is not None else now - datetime.timedelta(days=14)
+        if since is not None:
+            start = since
+        else:
+            # Fourteen whole days, today included. `now - 14 days` drew fifteen
+            # bars, the oldest covering only part of its day, so it undercounted.
+            start = datetime.datetime.combine(now.date() - datetime.timedelta(days=13), datetime.time.min)
         days = max(1, min(90, (now.date() - start.date()).days + 1))
         buckets = {(now.date() - datetime.timedelta(days=days - 1 - i)).isoformat(): 0 for i in range(days)}
         rows = (
