@@ -9,7 +9,7 @@ whoever runs the deployment, and is disabled entirely until that is set.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -17,6 +17,7 @@ from denoiser.api.credentials import generate_api_key, secrets_match
 from denoiser.api.idp_registry import PROTOCOLS, describe, upsert_provider
 from denoiser.api.keys import read_secret
 from denoiser.api.pagination import ResourceId
+from denoiser.api.schemas import SettingsUpdate
 from denoiser.api.tenancy import (
     conflicting_domains,
     domain_of,
@@ -561,3 +562,57 @@ def get_erasure(
             f"{record.completed_at.isoformat()}."
         ),
     }
+
+
+# ── Platform-wide settings ───────────────────────────────────────────────────
+
+
+@router.get("/settings")
+def get_platform_settings(_: bool = Depends(require_platform_operator)):
+    """The settings no single organisation may change: the shared object store
+    and the analysis engine. Secrets are masked here too."""
+    from denoiser.api.routers_settings import _mask_secrets, _platform_values
+
+    return _mask_secrets(_platform_values())
+
+
+@router.put("/settings")
+def update_platform_settings(
+    payload: SettingsUpdate,
+    request: Request,
+    _: bool = Depends(require_platform_operator),
+):
+    """Change platform-wide settings. Organisation settings are each tenant's
+    own, set through `/settings` by its ADMIN, and are refused here so that one
+    endpoint cannot quietly become a way to rewrite every tenant at once.
+
+    The raw-log and source stores are built from the S3 settings when the
+    process starts, so a changed bucket takes effect for those on restart.
+    """
+    from denoiser.api.audit import diff_fields, record_changes
+    from denoiser.api.platform_settings import (
+        PLATFORM_SETTING_KEYS,
+        load_settings,
+        save_settings,
+    )
+    from denoiser.api.routers_settings import (
+        _mask_secrets,
+        _platform_values,
+        _redact_secret_changes,
+        drop_echoed_masks,
+    )
+
+    updates = drop_echoed_masks(payload.model_dump(exclude_unset=True))
+    tenant_keys = sorted(k for k in updates if k not in PLATFORM_SETTING_KEYS)
+    if tenant_keys:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Set per organisation through /settings, not here: {', '.join(tenant_keys)}",
+        )
+
+    changes = diff_fields(_platform_values(), updates)
+    _redact_secret_changes(changes)
+    record_changes(request, changes)
+
+    save_settings({**load_settings(), **updates})
+    return _mask_secrets(_platform_values())

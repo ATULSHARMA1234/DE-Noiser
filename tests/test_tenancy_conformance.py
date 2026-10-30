@@ -136,6 +136,10 @@ NOT_ADDRESSABLE = {
     # name a subscription id at all — that is the row that decides what they have
     # paid for. Its isolation is asserted in tests/test_billing_and_entitlements.py.
     "Subscription",
+    # One per organisation, keyed by tenant_id and reached only as "the
+    # caller's own" through /settings; there is no id to name. Isolation is
+    # asserted in tests/test_tenant_settings.py.
+    "TenantSetting",
 }
 
 

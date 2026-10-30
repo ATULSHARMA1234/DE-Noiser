@@ -593,7 +593,7 @@ class ClickHouseStore:
                 from denoiser.api.platform_settings import build_redactor
                 from denoiser.preprocessing.redaction import redact_value
 
-                redactor = build_redactor()
+                redactor = build_redactor(tenant_id)
                 # Whole-record, not just `message`: the raw JSON is stored
                 # alongside it and is searchable, so redacting one and not the
                 # other leaves the data exactly where a query would find it.

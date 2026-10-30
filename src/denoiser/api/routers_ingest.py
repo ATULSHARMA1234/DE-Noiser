@@ -54,7 +54,7 @@ async def ingest_logs(payload: IngestPayload, tenant_id: int = Depends(verify_in
             redact_batch,
         )
 
-        body = redact_batch(body)
+        body = redact_batch(body, tenant_id)
 
         # Serialize each entry once and append the whole batch in a single write.
         serialized = [
@@ -69,7 +69,7 @@ async def ingest_logs(payload: IngestPayload, tenant_id: int = Depends(verify_in
         # The copy goes through the sink rather than straight to a local file:
         # a per-pod `data/live_stream.log` is what forced the API to a single
         # replica. See denoiser.storage.raw_log_sink.
-        if raw_log_storage_enabled():
+        if raw_log_storage_enabled(tenant_id):
             await run_in_threadpool(runtime.raw_log_sink().write, tenant_id, serialized)
 
         # Hyperscale ingestion (Phase 24): Push to Redpanda/Kafka instead of ClickHouse directly.

@@ -11,14 +11,21 @@ from __future__ import annotations
 from fastapi import (
     APIRouter,
     Depends,
+    HTTPException,
     Request,
 )
 
 from denoiser.api.auth import (
     require_role,
 )
+from denoiser.api.platform_settings import (
+    DEFAULT_SETTINGS,
+    PLATFORM_SETTING_KEYS,
+    TENANT_SETTING_KEYS,
+    load_tenant_settings,
+    save_tenant_settings,
+)
 from denoiser.api.platform_settings import load_settings as _load_settings
-from denoiser.api.platform_settings import save_settings as _save_settings
 from denoiser.api.schemas import SettingsUpdate
 from denoiser.logging import get_logger
 from denoiser.storage.db import User
@@ -29,10 +36,15 @@ router = APIRouter(tags=["Settings"])
 
 
 # ─── SETTINGS — Persistent configuration ─────────────────────────────────────
+#
+# What a tenant sees is its own settings plus the platform-wide ones, the
+# latter read-only (`platform_managed` names them; the operator changes them at
+# `/platform/settings`). This was one deployment-wide document that any
+# tenant's ADMIN could rewrite for everyone.
 
 @router.get("/settings")
 def get_settings(current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
-    return _mask_secrets(_load_settings())
+    return settings_view(current_user.tenant_id)
 
 
 @router.put("/settings")
@@ -43,25 +55,56 @@ def update_settings(
 ):
     from denoiser.api.audit import diff_fields, record_changes
 
-    current = _load_settings()
-    updates = new_settings.model_dump(exclude_unset=True)
-    # The settings page sends back every field it was given, including the
-    # mask in place of each secret. That means "unchanged", not "set it to
-    # the mask".
-    for key in _SECRET_SETTING_KEYS:
-        if updates.get(key) == SECRET_MASK:
-            del updates[key]
+    tenant_id = current_user.tenant_id
+    if tenant_id is None:
+        raise HTTPException(status_code=400, detail="Settings belong to an organisation; this account has none")
+
+    updates = drop_echoed_masks(new_settings.model_dump(exclude_unset=True))
+
+    # The page sends every field back, platform ones included, so an
+    # unchanged platform value is ignored. A changed one is refused rather
+    # than dropped: a 200 would tell the ADMIN it took effect.
+    platform = _platform_values()
+    refused = sorted(
+        k for k, v in updates.items()
+        if k in PLATFORM_SETTING_KEYS and v != platform.get(k)
+    )
+    if refused:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Managed by the platform operator, not per organisation: {', '.join(refused)}",
+        )
+    updates = {k: v for k, v in updates.items() if k in TENANT_SETTING_KEYS}
 
     # Capture what moved before the write. Settings govern retention and
     # redaction, so "someone changed settings and got a 200" is not a usable
     # audit record — the previous value is the part an investigation needs.
-    changes = diff_fields(current, updates)
+    changes = diff_fields(load_tenant_settings(tenant_id), updates)
     _redact_secret_changes(changes)
     record_changes(request, changes)
 
-    current.update(updates)
-    _save_settings(current)
-    return _mask_secrets(current)
+    if updates:
+        save_tenant_settings(tenant_id, updates)
+    return settings_view(tenant_id)
+
+
+def settings_view(tenant_id: int | None) -> dict:
+    view = {**_platform_values(), **load_tenant_settings(tenant_id)}
+    view = _mask_secrets(view)
+    view["platform_managed"] = list(PLATFORM_SETTING_KEYS)
+    return view
+
+
+def _platform_values() -> dict:
+    platform = _load_settings()
+    return {k: platform.get(k, DEFAULT_SETTINGS.get(k)) for k in PLATFORM_SETTING_KEYS}
+
+
+def drop_echoed_masks(updates: dict) -> dict:
+    """The settings page sends back every field it was given, including the
+    mask in place of each secret. That means "unchanged", not "set it to the
+    mask"."""
+    return {k: v for k, v in updates.items() if not (k in _SECRET_SETTING_KEYS and v == SECRET_MASK)}
 
 
 #: Settings whose values are credentials — recorded as changed, never with the

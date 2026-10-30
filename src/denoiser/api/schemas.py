@@ -87,6 +87,7 @@ class SettingsUpdate(BaseModel):
     s3_bucket: str | None = None
     s3_access_key: str | None = None
     s3_secret_key: str | None = None
+    s3_archive_days: int | None = Field(None, ge=1, le=3650)
     sso_provider: str | None = None
     sso_client_id: str | None = None
     sso_metadata_url: str | None = None

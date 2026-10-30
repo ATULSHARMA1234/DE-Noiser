@@ -227,7 +227,7 @@ def ingest(state: RunState, on_chunk: Callable[[list[dict]], None] | None = None
 
     reader = LogReader()
     timestamps = TimestampExtractor()
-    redactor = build_redactor()
+    redactor = build_redactor(request.tenant_id)
 
     for original, src_path in resolved:
         if state.truncated:

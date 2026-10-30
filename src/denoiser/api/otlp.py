@@ -52,12 +52,12 @@ async def ingest_otlp_logs(request: Request, tenant_id: int = Depends(verify_ing
     # was on, and it was: for the other path.
     #
     # This is the endpoint the README tells enterprises to use.
-    extracted_logs = redact_batch(extracted_logs)
+    extracted_logs = redact_batch(extracted_logs, tenant_id)
 
     # The redundant raw copy, through the shared sink rather than a per-pod
     # file — see denoiser.storage.raw_log_sink. Both implementations block, so
     # it runs off the event loop.
-    if raw_log_storage_enabled():
+    if raw_log_storage_enabled(tenant_id):
         await run_in_threadpool(
             runtime.raw_log_sink().write, tenant_id, [json.dumps(log) for log in extracted_logs]
         )

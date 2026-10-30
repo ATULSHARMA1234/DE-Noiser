@@ -69,19 +69,23 @@ class TestSettingsEndpoint:
         assert data["retention_days"] == 60
 
     def test_secrets_are_never_returned(self, client):
-        from denoiser.api.platform_settings import load_settings
+        from denoiser.api.platform_settings import load_settings, save_settings
         from denoiser.api.routers_settings import SECRET_MASK
 
-        client.put("/settings", json={"s3_access_key": "AKIAREAL", "s3_secret_key": "real-secret"})
-        data = client.get("/settings").json()
-        assert data["s3_access_key"] == SECRET_MASK
-        assert data["s3_secret_key"] == SECRET_MASK
+        original = load_settings()
+        save_settings({**original, "s3_access_key": "AKIAREAL", "s3_secret_key": "real-secret"})
+        try:
+            data = client.get("/settings").json()
+            assert data["s3_access_key"] == SECRET_MASK
+            assert data["s3_secret_key"] == SECRET_MASK
 
-        # Saving the page round-trips the mask; that must not overwrite the key.
-        client.put("/settings", json={**data, "retention_days": 61})
-        stored = load_settings()
-        assert stored["s3_access_key"] == "AKIAREAL"
-        assert stored["s3_secret_key"] == "real-secret"
+            # Saving the page round-trips the mask; that must not overwrite the key.
+            assert client.put("/settings", json={**data, "retention_days": 61}).status_code == 200
+            stored = load_settings()
+            assert stored["s3_access_key"] == "AKIAREAL"
+            assert stored["s3_secret_key"] == "real-secret"
+        finally:
+            save_settings(original)
 
 
 class TestIncidentsEndpoint:

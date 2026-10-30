@@ -497,6 +497,21 @@ class Tenant(Base):
     scim_token_rotated_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=utcnow)
 
+class TenantSetting(Base):
+    """One organisation's own settings, as a JSON document.
+
+    Settings were a single deployment-wide row, so any tenant's ADMIN set
+    retention and PII redaction for every other tenant. Keys absent here fall
+    back to the deployment row (see `denoiser.api.platform_settings`), which is
+    how existing tenants keep today's values without a data migration.
+    """
+    __tablename__ = "tenant_settings"
+
+    tenant_id = Column(Integer, primary_key=True)
+    data = Column(JSON, nullable=False, default=dict)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+
 class PlatformSetting(Base):
     """Deployment-wide operator settings, as a single JSON document.
 
