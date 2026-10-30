@@ -12,6 +12,7 @@ from denoiser.api.auth import User, require_role
 from denoiser.api.entitlements import FEATURE_AUTOMATION, require_feature
 from denoiser.api.pagination import ResourceId
 from denoiser.api.scope import TenantScope, tenant_scope
+from denoiser.automation.step_secrets import SECRET_MASK, masked_steps, seal_steps
 from denoiser.storage.db import Runbook, RunbookExecution, get_db
 from denoiser.utils.time import iso_utc
 
@@ -60,6 +61,16 @@ class RunbookExecutionResponseSchema(BaseModel):
 _DESTINATION_KEYS = ("url", "slack_webhook_url", "jira_url")
 
 
+def _public(rb: Runbook) -> dict[str, Any]:
+    return {
+        "id": rb.id,
+        "name": rb.name,
+        "trigger_condition": rb.trigger_condition or {},
+        "steps": masked_steps(rb.steps),
+        "enabled": rb.enabled,
+    }
+
+
 def _reject_disallowed_destinations(steps: list[dict[str, Any]] | None) -> None:
     """Refuse to save a runbook that points at somewhere we must not fetch.
 
@@ -76,7 +87,9 @@ def _reject_disallowed_destinations(steps: list[dict[str, Any]] | None) -> None:
             continue
         for key in _DESTINATION_KEYS:
             value = step.get(key)
-            if not value:
+            # The mask stands for the stored value, which was checked when it
+            # was saved and is re-checked at execution.
+            if not value or value == SECRET_MASK:
                 continue
             try:
                 validate_destination(value)
@@ -90,7 +103,7 @@ def _reject_disallowed_destinations(steps: list[dict[str, Any]] | None) -> None:
 @router.get("", response_model=list[RunbookResponseSchema])
 def list_runbooks(scope: TenantScope = Depends(tenant_scope), current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
     runbooks = scope.query(Runbook).order_by(Runbook.created_at.desc()).all()
-    return runbooks
+    return [_public(rb) for rb in runbooks]
 
 @router.post("", response_model=RunbookResponseSchema)
 def create_runbook(payload: RunbookCreateSchema, db: Session = Depends(get_db), scope: TenantScope = Depends(tenant_scope), current_user: User = Depends(require_role(["ANALYST", "ADMIN"]))):
@@ -98,13 +111,13 @@ def create_runbook(payload: RunbookCreateSchema, db: Session = Depends(get_db), 
     rb = Runbook(
         name=payload.name,
         trigger_condition=payload.trigger_condition,
-        steps=payload.steps,
+        steps=seal_steps(payload.steps),
         enabled=payload.enabled
     )
     scope.add(rb)
     db.commit()
     db.refresh(rb)
-    return rb
+    return _public(rb)
 
 class RunbookUpdateSchema(BaseModel):
     name: str | None = None
@@ -133,13 +146,14 @@ def update_runbook(
     changes = payload.model_dump(exclude_unset=True)
     if "steps" in changes:
         _reject_disallowed_destinations(changes["steps"])
+        changes["steps"] = seal_steps(changes["steps"], previous=rb.steps)
 
     for field, value in changes.items():
         setattr(rb, field, value)
 
     db.commit()
     db.refresh(rb)
-    return rb
+    return _public(rb)
 
 
 @router.post("/{runbook_id}/run", response_model=dict)

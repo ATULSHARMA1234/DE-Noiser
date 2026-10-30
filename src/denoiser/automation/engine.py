@@ -54,6 +54,9 @@ def execute_runbook_step(step: dict, incident: Incident, execution_logs: list):
     """
     Execute a runbook step with real API integrations.
     """
+    from denoiser.automation.step_secrets import opened_step
+
+    step = opened_step(step)
     action_type = step.get("action", "unknown")
     execution_logs.append(f"[{utcnow().isoformat()}] Starting step: {step.get('name', 'Unnamed step')}")
     
