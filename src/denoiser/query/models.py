@@ -1,6 +1,8 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
+
+from denoiser.query.parser import validate_lql
 
 
 class SavedQuerySchema(BaseModel):
@@ -16,6 +18,8 @@ class SavedQuerySchema(BaseModel):
 class QueryCreateSchema(BaseModel):
     name: str
     query_text: str
+
+    _valid_query = field_validator("query_text")(validate_lql)
 
 class QueryRequestSchema(BaseModel):
     query: str
