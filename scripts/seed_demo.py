@@ -8,7 +8,7 @@ Usage:
     SEED_PASSWORD='<admin-password>' python3 scripts/seed_demo.py [API_BASE]
 
   API_BASE defaults to https://localhost/api (the all-in-one nginx deploy).
-  For the public box:  python3 scripts/seed_demo.py https://20.2.90.156.nip.io/api
+  For a deployed box:  python3 scripts/seed_demo.py https://<your-domain>/api
   Admin email defaults to admin@semanticos.io (override with SEED_EMAIL).
 
 Only stdlib is used. TLS verification is disabled so self-signed certs work.
