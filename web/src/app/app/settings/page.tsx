@@ -73,10 +73,10 @@ function errorMessage(error: unknown) {
 
 // ── Toggle ────────────────────────────────────────────────────────────────────
 
-function Toggle({ checked, onChange }: { checked: boolean; onChange: () => void }) {
+function Toggle({ checked, onChange, disabled = false }: { checked: boolean; onChange: () => void; disabled?: boolean }) {
  return (
- <label className="relative inline-flex items-center cursor-pointer">
- <input type="checkbox" checked={checked} onChange={onChange} className="sr-only peer" />
+ <label className={`relative inline-flex items-center ${disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}>
+ <input type="checkbox" checked={checked} onChange={onChange} disabled={disabled} className="sr-only peer" />
  <div className="w-11 h-6 bg-[var(--bg-track)] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[var(--primary)]"></div>
  </label>
  );
@@ -97,6 +97,10 @@ const CHANNEL_ICONS: Record<string, string> = {
 
 export default function SettingsPage() {
  const { toast } = useToast();
+ // Keys the platform operator owns (the shared object store, the analysis
+ // engine). Shown, but not editable by an organisation's ADMIN.
+ const [platformManaged, setPlatformManaged] = useState<string[]>([]);
+ const locked = (key: string) => platformManaged.includes(key);
  const [settings, setSettings] = useState<SettingsState>({
  store_raw_logs: true,
  redact_pii: true,
@@ -148,7 +152,9 @@ export default function SettingsPage() {
  ]).then(([settingsData, webhookData, deliveryData]) => {
  if (!active) return;
  if (settingsData) {
- setSettings(prev => ({ ...prev, ...(settingsData as Partial<SettingsState>) }));
+ const { platform_managed, ...values } = settingsData as Partial<SettingsState> & { platform_managed?: string[] };
+ setPlatformManaged(platform_managed ?? []);
+ setSettings(prev => ({ ...prev, ...values }));
  }
  setWebhooks(webhookData as WebhookDest[]);
  setDeliveryLog(deliveryData as DeliveryRecord[]);
@@ -160,7 +166,8 @@ export default function SettingsPage() {
 
  const handleSave = async () => {
  try {
- await apiPut('/settings', settings);
+ // Only what this organisation owns; the API refuses changes to the rest.
+ await apiPut('/settings', Object.fromEntries(Object.entries(settings).filter(([k]) => !locked(k))));
  setSaved(true);
  toast.success('Settings saved successfully');
  setTimeout(() => setSaved(false), 2000);
@@ -315,14 +322,17 @@ export default function SettingsPage() {
  <div className="space-y-6">
  <div>
  <p className="text-xs font-bold text-[var(--text-secondary)] mb-2">Active Model</p>
- <select value={settings.llm_model} onChange={e => updateSetting('llm_model', e.target.value)}
- className="w-full bg-[var(--bg-input)] border border-[var(--border)] text-[var(--text-primary)] text-sm rounded-md px-4 py-2.5 outline-none appearance-none cursor-pointer">
+ <select value={settings.llm_model} onChange={e => updateSetting('llm_model', e.target.value)} disabled={locked('llm_model')}
+ className="w-full bg-[var(--bg-input)] border border-[var(--border)] text-[var(--text-primary)] text-sm rounded-md px-4 py-2.5 outline-none appearance-none cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed">
  <option value="llama-3.3-70b">Llama 3.3-70B (Local / Default)</option>
  <option value="llama-3.1-8b">Llama 3.1-8B (Fast / Lightweight)</option>
  <option value="gpt-4o">GPT-4o (Cloud / OpenAI)</option>
  <option value="claude-sonnet">Claude Sonnet (Cloud / Anthropic)</option>
  <option value="local-fallback">Local Heuristic Fallback (No LLM)</option>
  </select>
+ {locked('llm_model') && (
+ <p className="text-[10px] text-[var(--text-muted)] mt-1">Managed by your platform operator for every organisation on this deployment.</p>
+ )}
  </div>
  <div>
  <p className="text-xs font-bold text-[var(--text-secondary)] mb-4">Diagnosis Confidence Threshold</p>
@@ -354,9 +364,12 @@ export default function SettingsPage() {
  </div>
  <div>
  <p className="text-xs font-bold text-[var(--text-secondary)] mb-2">Neural Sampling Threshold</p>
- <input type="number" value={settings.sampling_threshold}
+ <input type="number" value={settings.sampling_threshold} disabled={locked('sampling_threshold')}
  onChange={e => updateSetting('sampling_threshold', parseInt(e.target.value) || 50000)}
- className="w-full bg-[var(--bg-input)] border border-[var(--border)] text-[var(--text-primary)] text-sm rounded-md px-4 py-2.5 outline-none" />
+ className="w-full bg-[var(--bg-input)] border border-[var(--border)] text-[var(--text-primary)] text-sm rounded-md px-4 py-2.5 outline-none disabled:opacity-60 disabled:cursor-not-allowed" />
+ {locked('sampling_threshold') && (
+ <p className="text-[10px] text-[var(--text-muted)] mt-1">Managed by your platform operator for every organisation on this deployment.</p>
+ )}
  </div>
  </div>
  </div>
@@ -367,6 +380,9 @@ export default function SettingsPage() {
  <div>
  <h2 className="text-sm font-bold text-[var(--text-primary)] mb-1">Object Storage Archive</h2>
  <p className="text-xs text-[var(--text-muted)]">Compress and archive logs past the retention window to S3-compatible storage.</p>
+ {locked('s3_bucket') && (
+ <p className="text-[10px] text-[var(--text-muted)] mt-1">Shared by every organisation on this deployment, so only your platform operator can change it.</p>
+ )}
  </div>
  <Cloud size={24} className="text-cyan-400" />
  </div>
@@ -376,32 +392,32 @@ export default function SettingsPage() {
  <p className="text-sm font-bold text-[var(--text-primary)] mb-1">Enable S3/MinIO Archival</p>
  <p className="text-[10px] text-[var(--text-muted)]">The retention scheduler uploads compressed old logs before deleting local copies.</p>
  </div>
- <Toggle checked={settings.s3_enabled} onChange={() => updateSetting('s3_enabled', !settings.s3_enabled)} />
+ <Toggle checked={settings.s3_enabled} onChange={() => updateSetting('s3_enabled', !settings.s3_enabled)} disabled={locked('s3_enabled')} />
  </div>
  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
  <div>
  <p className="text-xs font-bold text-[var(--text-secondary)] mb-2">Endpoint</p>
  <input value={settings.s3_endpoint}
- onChange={e => updateSetting('s3_endpoint', e.target.value)}
- className="w-full bg-[var(--bg-input)] border border-[var(--border)] text-[var(--text-primary)] text-sm rounded-md px-4 py-2.5 outline-none font-mono" />
+ onChange={e => updateSetting('s3_endpoint', e.target.value)} disabled={locked('s3_endpoint')}
+ className="w-full bg-[var(--bg-input)] border border-[var(--border)] text-[var(--text-primary)] text-sm rounded-md px-4 py-2.5 outline-none font-mono disabled:opacity-60 disabled:cursor-not-allowed" />
  </div>
  <div>
  <p className="text-xs font-bold text-[var(--text-secondary)] mb-2">Bucket</p>
  <input value={settings.s3_bucket}
- onChange={e => updateSetting('s3_bucket', e.target.value)}
- className="w-full bg-[var(--bg-input)] border border-[var(--border)] text-[var(--text-primary)] text-sm rounded-md px-4 py-2.5 outline-none font-mono" />
+ onChange={e => updateSetting('s3_bucket', e.target.value)} disabled={locked('s3_bucket')}
+ className="w-full bg-[var(--bg-input)] border border-[var(--border)] text-[var(--text-primary)] text-sm rounded-md px-4 py-2.5 outline-none font-mono disabled:opacity-60 disabled:cursor-not-allowed" />
  </div>
  <div>
  <p className="text-xs font-bold text-[var(--text-secondary)] mb-2">Access Key</p>
  <input value={settings.s3_access_key}
- onChange={e => updateSetting('s3_access_key', e.target.value)}
- className="w-full bg-[var(--bg-input)] border border-[var(--border)] text-[var(--text-primary)] text-sm rounded-md px-4 py-2.5 outline-none font-mono" />
+ onChange={e => updateSetting('s3_access_key', e.target.value)} disabled={locked('s3_access_key')}
+ className="w-full bg-[var(--bg-input)] border border-[var(--border)] text-[var(--text-primary)] text-sm rounded-md px-4 py-2.5 outline-none font-mono disabled:opacity-60 disabled:cursor-not-allowed" />
  </div>
  <div>
  <p className="text-xs font-bold text-[var(--text-secondary)] mb-2">Secret Key</p>
  <input type="password" value={settings.s3_secret_key}
- onChange={e => updateSetting('s3_secret_key', e.target.value)}
- className="w-full bg-[var(--bg-input)] border border-[var(--border)] text-[var(--text-primary)] text-sm rounded-md px-4 py-2.5 outline-none font-mono" />
+ onChange={e => updateSetting('s3_secret_key', e.target.value)} disabled={locked('s3_secret_key')}
+ className="w-full bg-[var(--bg-input)] border border-[var(--border)] text-[var(--text-primary)] text-sm rounded-md px-4 py-2.5 outline-none font-mono disabled:opacity-60 disabled:cursor-not-allowed" />
  </div>
  </div>
  </div>
