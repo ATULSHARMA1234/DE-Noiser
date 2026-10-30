@@ -81,28 +81,43 @@ async def archive_old_logs_to_s3():
 
 async def cleanup_database_records():
     """
-    Deletes AnalysisRun and AuditLog records older than the configured retention_days.
+    Deletes AnalysisRun and AuditLog records older than their tenant's retention_days.
+
+    Per tenant: this used one deployment-wide value, so one organisation's
+    ADMIN choosing 7 days deleted every other organisation's history at 7 days
+    too. Rows with no tenant use the deployment value.
     """
     logger.info("Running Database Retention Scheduler Job...")
-    retention_days = int(get_retention_days())
     import datetime
 
+    from denoiser.api.platform_settings import load_tenant_settings
+    from denoiser.storage.db import AnalysisRun, AuditLog, SessionLocal, Tenant
     from denoiser.utils.time import utcnow
-    cutoff_time = utcnow() - datetime.timedelta(days=retention_days)
 
+    def cutoff(tenant_id):
+        days = int(load_tenant_settings(tenant_id, db).get("retention_days") or get_retention_days())
+        return utcnow() - datetime.timedelta(days=days)
+
+    db = SessionLocal()
     try:
-        from denoiser.storage.db import AnalysisRun, AuditLog, SessionLocal
-        db = SessionLocal()
-
-        # Delete old AnalysisRuns
-        deleted_runs = db.query(AnalysisRun).filter(AnalysisRun.created_at < cutoff_time).delete()
-
-        # Delete old AuditLogs
-        deleted_logs = db.query(AuditLog).filter(AuditLog.timestamp < cutoff_time).delete()
+        deleted_runs = deleted_logs = 0
+        for (tenant_id,) in [*db.query(Tenant.id).all(), (None,)]:
+            before = cutoff(tenant_id)
+            runs = db.query(AnalysisRun).filter(AnalysisRun.created_at < before)
+            logs = db.query(AuditLog).filter(AuditLog.timestamp < before)
+            if tenant_id is None:
+                runs = runs.filter(AnalysisRun.tenant_id.is_(None))
+                logs = logs.filter(AuditLog.tenant_id.is_(None))
+            else:
+                runs = runs.filter(AnalysisRun.tenant_id == tenant_id)
+                logs = logs.filter(AuditLog.tenant_id == tenant_id)
+            deleted_runs += runs.delete(synchronize_session=False)
+            deleted_logs += logs.delete(synchronize_session=False)
 
         db.commit()
         logger.info(f"Deleted {deleted_runs} old analysis runs and {deleted_logs} old audit logs.")
     except Exception as e:
+        db.rollback()
         logger.error(f"Failed to cleanup database records: {e}")
     finally:
         db.close()

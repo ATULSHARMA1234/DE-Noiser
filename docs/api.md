@@ -220,7 +220,7 @@ reassigned on every run.
 | Method | Path | Role | Notes |
 |--------|------|------|-------|
 | GET/POST/DELETE | `/users` … | ADMIN | Manage operators. `GET` is **paginated**. |
-| GET/PUT | `/settings` | VIEWER+/ADMIN | Read / update platform settings. Stored in the database, so every API replica sees the same values. |
+| GET/PUT | `/settings` | VIEWER+/ADMIN | The caller's organisation's settings (retention, PII redaction, raw-log copy, auto-analyze, SSO), plus the platform-wide ones read-only; `platform_managed` lists those. A PUT that changes a platform-wide value is `403`. Secrets are always masked. |
 | GET | `/admin/usage` | ADMIN | Per-day ingest volume (logs, bytes, traces) and the tenant's retention tier. |
 | POST | `/admin/usage/recalculate` | ADMIN | Re-meter today immediately. Does not apply retention. |
 | GET | `/vitals` · `/metrics/current` | VIEWER+ | Vitals of the **SemanticOS host**, not the monitored fleet; the response carries `scope` and `host`. |
@@ -242,6 +242,7 @@ token is set.
 | PATCH | `/platform/tenants/{id}` | Update `domains` / `tier`. |
 | POST | `/platform/tenants/{id}/scim-token/rotate` | Re-issue the SCIM token. Returned once. |
 | DELETE | `/platform/tenants/{id}` | Offboard. Body must echo `{"confirm_name": "<name>"}`. |
+| GET/PUT | `/platform/settings` | Platform-wide settings: the shared object store (`s3_*`), `llm_model`, `sampling_threshold`. Organisation settings are refused (`400`). The raw-log and source stores pick up a changed bucket on restart. |
 
 **Domains.** `domains` are the email domains a customer owns. SSO and SCIM route
 federated identities by them, so registering one is what turns a

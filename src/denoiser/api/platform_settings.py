@@ -18,14 +18,32 @@ from pathlib import Path
 from typing import Any
 
 from denoiser.logging import get_logger
-from denoiser.storage.db import PlatformSetting, SessionLocal
+from denoiser.storage.db import PlatformSetting, SessionLocal, TenantSetting
 from denoiser.utils.time import utcnow
 
 logger = get_logger(__name__)
 
-# One row holds the whole document. These are deployment-wide operator settings,
-# not per-tenant ones, so there is exactly one of them.
+# One row holds the deployment-wide document. Per-tenant values live in
+# `tenant_settings`; this row also supplies their defaults (see below).
 SETTINGS_ROW_ID = 1
+
+#: Settings each organisation owns and its ADMIN may change. They were all on
+#: the one deployment row, so a tenant's ADMIN set retention and redaction for
+#: every other tenant on the deployment.
+TENANT_SETTING_KEYS: tuple[str, ...] = (
+    "store_raw_logs", "redact_pii", "confidence_threshold", "retention_days",
+    "auto_analyze", "slack_webhook_url",
+    "sso_provider", "sso_client_id", "sso_metadata_url", "sso_enabled",
+)
+
+#: Settings that configure shared infrastructure, changed only by the platform
+#: operator (`/platform/settings`). `s3_*` is the object store every tenant's
+#: raw logs, uploads and archives go through: a tenant able to change it could
+#: point everyone's data at a bucket of its choosing.
+PLATFORM_SETTING_KEYS: tuple[str, ...] = (
+    "llm_model", "sampling_threshold",
+    "s3_enabled", "s3_endpoint", "s3_bucket", "s3_access_key", "s3_secret_key", "s3_archive_days",
+)
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "store_raw_logs": True,
@@ -110,6 +128,63 @@ def save_settings(settings: dict[str, Any], db=None) -> dict[str, Any]:
             db.close()
 
 
+# ── Per-tenant settings ─────────────────────────────────────────────────────
+
+def load_tenant_settings(tenant_id: int | None, db=None) -> dict[str, Any]:
+    """One tenant's settings: its own values over the deployment row's.
+
+    The deployment row is the fallback rather than DEFAULT_SETTINGS alone so
+    that, on upgrade, every existing tenant keeps exactly the values it had
+    under the shared row until it saves its own. ``tenant_id=None`` answers
+    with the deployment values, which is what unscoped callers always got.
+    """
+    base = load_settings(db)
+    merged = {k: base.get(k, DEFAULT_SETTINGS.get(k)) for k in TENANT_SETTING_KEYS}
+    if tenant_id is None:
+        return merged
+    # Ingest paths carry the tenant as a string (it is a String column in
+    # ClickHouse); the key here is an integer.
+    tenant_id = int(tenant_id)
+
+    owns_session = db is None
+    db = db or SessionLocal()
+    try:
+        row = db.query(TenantSetting).filter(TenantSetting.tenant_id == tenant_id).first()
+        if row and row.data:
+            merged.update({k: v for k, v in row.data.items() if k in TENANT_SETTING_KEYS})
+        return merged
+    finally:
+        if owns_session:
+            db.close()
+
+
+def save_tenant_settings(tenant_id: int, updates: dict[str, Any], db=None) -> dict[str, Any]:
+    """Merge ``updates`` (tenant keys only) into one tenant's row."""
+    unknown = set(updates) - set(TENANT_SETTING_KEYS)
+    if unknown:
+        raise ValueError(f"Not tenant settings: {sorted(unknown)}")
+
+    owns_session = db is None
+    db = db or SessionLocal()
+    try:
+        row = db.query(TenantSetting).filter(TenantSetting.tenant_id == tenant_id).first()
+        if row is None:
+            row = TenantSetting(tenant_id=tenant_id, data={})
+            db.add(row)
+        # A new dict, not an in-place update: a mutated JSON value is not
+        # detected as a change, and the write would silently not happen.
+        row.data = {**(row.data or {}), **updates}
+        row.updated_at = utcnow()
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        if owns_session:
+            db.close()
+    return load_tenant_settings(tenant_id)
+
+
 # ── Compliance switches ─────────────────────────────────────────────────────
 #
 # `redact_pii` and `store_raw_logs` were stored, exposed in the Settings API and
@@ -121,36 +196,36 @@ def save_settings(settings: dict[str, Any], db=None) -> dict[str, Any]:
 # These helpers are the read side. Every write path that persists log content
 # consults them.
 
-def redaction_enabled() -> bool:
-    """Whether ingested log content must be redacted before it is stored."""
+def redaction_enabled(tenant_id: int | None = None) -> bool:
+    """Whether this tenant's ingested log content must be redacted before it is stored."""
     try:
-        return bool(load_settings().get("redact_pii", True))
+        return bool(load_tenant_settings(tenant_id).get("redact_pii", True))
     except Exception:
         # Fail closed: if the setting cannot be read, redact.
         return True
 
 
-def raw_log_storage_enabled() -> bool:
-    """Whether raw ingested lines may be written to the local data directory."""
+def raw_log_storage_enabled(tenant_id: int | None = None) -> bool:
+    """Whether this tenant's raw ingested lines may be kept as a forensic copy."""
     try:
-        return bool(load_settings().get("store_raw_logs", True))
+        return bool(load_tenant_settings(tenant_id).get("store_raw_logs", True))
     except Exception:
         # Fail closed: if the setting cannot be read, do not write to disk.
         return False
 
 
-def build_redactor():
-    """A Redactor configured from current platform settings.
+def build_redactor(tenant_id: int | None = None):
+    """A Redactor configured from the tenant's current settings.
 
     Constructed per call rather than cached, so an operator toggling redaction
     takes effect on the next batch instead of at the next restart.
     """
     from denoiser.preprocessing.redaction import Redactor
 
-    return Redactor(enabled=redaction_enabled())
+    return Redactor(enabled=redaction_enabled(tenant_id))
 
 
-def redact_batch(logs: list) -> list:
+def redact_batch(logs: list, tenant_id: int | None = None) -> list:
     """Redact a batch of ingested records, whatever shape they are in.
 
     Call this once at the ingest boundary, before the batch reaches *any* sink.
@@ -171,5 +246,5 @@ def redact_batch(logs: list) -> list:
 
     from denoiser.preprocessing.redaction import redact_value
 
-    redactor = build_redactor()
+    redactor = build_redactor(tenant_id)
     return [redact_value(entry, redactor) for entry in logs]

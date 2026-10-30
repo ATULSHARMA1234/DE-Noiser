@@ -44,7 +44,7 @@ async def _persist(records: list[dict[str, Any]], tenant_id: str) -> int:
     # Off the event loop because both implementations block (disk or a PUT).
     from denoiser.api.platform_settings import raw_log_storage_enabled
 
-    if raw_log_storage_enabled():
+    if raw_log_storage_enabled(tenant_id):
         await run_in_threadpool(
             runtime.raw_log_sink().write, tenant_id, [json.dumps(r) for r in records]
         )

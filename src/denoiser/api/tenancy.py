@@ -159,6 +159,9 @@ TENANT_SCOPED_MODELS = (
     # issuer registered would keep routing assertions to a tenant that no
     # longer exists.
     "TenantIdentityProvider",
+    # Their retention, redaction and SSO choices. Left behind, a later tenant
+    # given the same id would inherit them.
+    "TenantSetting",
     # The commercial record for this workspace. A departing customer's
     # subscription must go with them: leaving it behind means a re-created
     # workspace with the same id inherits somebody else's plan, and it holds the

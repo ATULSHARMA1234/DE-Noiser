@@ -76,7 +76,7 @@ def sink(monkeypatch):
     s = _CapturingSink()
     monkeypatch.setattr(runtime, "raw_log_sink", lambda: s)
     monkeypatch.setattr(
-        "denoiser.api.platform_settings.raw_log_storage_enabled", lambda: True
+        "denoiser.api.platform_settings.raw_log_storage_enabled", lambda *_: True
     )
     return s
 
