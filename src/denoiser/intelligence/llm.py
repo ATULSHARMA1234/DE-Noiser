@@ -82,7 +82,9 @@ class IncidentIntelligence:
             else:
                 try:
                     self.client = OpenAI(
-                        api_key=settings.llm_api_key or "dummy-key",
+                        # The client insists on a key; a local OpenAI-compatible
+                        # server (Ollama, vLLM) ignores it. This is not a secret.
+                        api_key=settings.llm_api_key or "unused-local-endpoint",
                         base_url=settings.llm_base_url,
                     )
                 except Exception as e:
@@ -140,7 +142,9 @@ class IncidentIntelligence:
                     temperature=0.2,
                     response_format={"type": "json_object"},
                 )
-                return _normalise_payload(json.loads(response.choices[0].message.content))
+                payload = _normalise_payload(json.loads(response.choices[0].message.content))
+                payload["narrator"] = "llm"
+                return payload
             except Exception as e:
                 logger.warning(f"LLM API attempt {attempt + 1} failed: {e}")
                 if attempt < max_retries - 1:
@@ -161,7 +165,10 @@ class IncidentIntelligence:
                 "Verify API keys for AI-driven root cause analysis.",
                 "Check for recent infrastructure changes."
             ],
-            "cluster_summaries": ["Pattern detected (Local Heuristic)" for _ in clusters]
+            "cluster_summaries": ["Pattern detected (Local Heuristic)" for _ in clusters],
+            # Read by the UI to say this was not written by a model. Without it
+            # the template text above was presented as the AI's diagnosis.
+            "narrator": "heuristic",
         }
 
     def narrate_causal_links(

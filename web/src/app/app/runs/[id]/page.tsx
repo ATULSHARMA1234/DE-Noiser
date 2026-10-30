@@ -214,6 +214,16 @@ export default function AnalysisReport() {
         <div className="lg:col-span-2 bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-xl p-6">
           <h2 className="text-sm font-semibold text-[var(--text-primary)] mb-5 flex items-center gap-2">
             <ShieldAlert size={15} className="text-[var(--signal-crit)]" /> Incident Summary
+            {/* Runs from before `narrator` existed are recognised by the
+                heuristic's fixed failure domain. */}
+            {intelligence && (intelligence.narrator === 'heuristic' || intelligence.failure_domain === 'System / Local Analysis') && (
+              <span
+                className="ml-auto text-[10px] font-medium px-2 py-0.5 rounded border border-[var(--border)] text-[var(--text-muted)]"
+                title="No LLM was configured or reachable for this run, so this summary is a template filled from cluster counts, not a diagnosis. Configure one under Settings → Local Intelligence."
+              >
+                Heuristic summary, not AI
+              </span>
+            )}
           </h2>
 
           {intelligence ? (

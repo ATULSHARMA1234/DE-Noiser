@@ -15,9 +15,11 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import os
+import re
 import time
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
 import httpx
@@ -66,6 +68,17 @@ def _describe_transport_failure(exc: Exception) -> str:
 
 # ── Enumerations ─────────────────────────────────────────────────────────────
 
+def dedup_window_seconds() -> int:
+    """How long a delivered alert suppresses the same alert to the same channel.
+
+    ALERT_DEDUP_WINDOW_SECONDS, default five minutes; 0 turns it off.
+    """
+    try:
+        return max(0, int(os.getenv("ALERT_DEDUP_WINDOW_SECONDS", "300")))
+    except ValueError:
+        return 300
+
+
 class ChannelType(StrEnum):
     SLACK          = "slack"
     PAGERDUTY      = "pagerduty"
@@ -77,6 +90,7 @@ class DeliveryStatus(StrEnum):
     DELIVERED  = "delivered"
     FAILED     = "failed"
     SKIPPED    = "skipped"   # Priority filter did not match
+    DEDUPLICATED = "deduplicated"  # Same alert already delivered here within the window
 
 
 # ── Data models ───────────────────────────────────────────────────────────────
@@ -148,11 +162,25 @@ class AlertPayload:
     intelligence: dict | None
     keyword_flag: bool
     timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+    #: The normalised log pattern, when the caller has one. Preferred over
+    #: ``representative_log`` for the fingerprint because it carries no ids.
+    template: str | None = None
 
     @property
     def fingerprint(self) -> str:
-        raw = f"{self.cluster_id}:{self.priority}:{self.source}"
+        """Identity of *what is wrong*, stable across runs.
+
+        This hashed ``cluster_id``, which HDBSCAN renumbers on every run, so the
+        same failure re-analysed every few minutes was a new alert each time and
+        nothing could recognise a repeat.
+        """
+        pattern = self.template or _VOLATILE.sub("*", self.representative_log or "")
+        raw = f"{self.source}:{self.priority}:{pattern}"
         return hashlib.sha256(raw.encode()).hexdigest()[:8]
+
+
+#: UUIDs and numbers: what differs between two lines of the same failure.
+_VOLATILE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|[0-9]+")
 
 
 # ── Priority ordering ─────────────────────────────────────────────────────────
@@ -365,6 +393,17 @@ class AlertRouter:
         for cfg in candidates:
             if not cfg.enabled:
                 continue
+            if self._recently_delivered(cfg, alert):
+                # Alert-storm guard: the same failure, re-detected by every
+                # analysis or monitor tick, paged the same channel each time.
+                self._record(DeliveryRecord(
+                    webhook_id=cfg.id,
+                    alert_fingerprint=alert.fingerprint,
+                    priority=alert.priority,
+                    status=DeliveryStatus.DEDUPLICATED,
+                    tenant_id=cfg.tenant_id,
+                ))
+                continue
             if not _should_route(alert.priority, cfg.min_priority):
                 rec = DeliveryRecord(
                     webhook_id=cfg.id,
@@ -473,6 +512,41 @@ class AlertRouter:
         self._record(rec)
         logger.error("Alert delivery permanently failed", extra={"dest": cfg.name, "error": last_error})
         return rec
+
+    def _recently_delivered(self, cfg: WebhookConfig, alert: AlertPayload) -> bool:
+        """Whether this alert reached this destination within the dedup window."""
+        window = dedup_window_seconds()
+        if window <= 0:
+            return False
+        since = (datetime.now(UTC) - timedelta(seconds=window)).isoformat()
+
+        def _match(webhook_id, fingerprint, status, timestamp) -> bool:
+            return (webhook_id == cfg.id and fingerprint == alert.fingerprint
+                    and status == DeliveryStatus.DELIVERED.value and timestamp >= since)
+
+        # The database is what spans workers and restarts; the in-memory log
+        # covers destinations without a tenant (the unit-test registry).
+        if cfg.tenant_id is None:
+            return any(_match(r.webhook_id, r.alert_fingerprint, r.status.value, r.timestamp)
+                       for r in self._delivery_log)
+        try:
+            from denoiser.storage.db import AlertLog, SessionLocal
+
+            db = SessionLocal()
+            try:
+                return db.query(AlertLog.id).filter(
+                    AlertLog.tenant_id == cfg.tenant_id,
+                    AlertLog.webhook_id == cfg.id,
+                    AlertLog.alert_fingerprint == alert.fingerprint,
+                    AlertLog.status == DeliveryStatus.DELIVERED.value,
+                    AlertLog.timestamp >= since,
+                ).first() is not None
+            finally:
+                db.close()
+        except Exception as e:
+            # Unable to tell: deliver. A duplicate page beats a missed one.
+            logger.warning(f"Alert dedup lookup failed, delivering anyway: {e}")
+            return False
 
     def _record(self, rec: DeliveryRecord) -> None:
         """Keep the record in memory and persist it against the owning tenant.

@@ -1,4 +1,13 @@
 x-backend-env: &id001
+  # Production unless told otherwise: it is what turns on the startup safety
+  # checks, Secure cookies, and the refusal to fabricate connector data. This
+  # file is the shipped install, and it used to run every deployment as
+  # "development". Set SEMANTICOS_ENV=development in .env for local hacking.
+  SEMANTICOS_ENV: ${SEMANTICOS_ENV:-production}
+  # Production defaults to SSO-only login. A Compose install usually has no IdP
+  # wired up yet, so password login stays on until you turn it off.
+  SEMANTICOS_ALLOW_LOCAL_LOGIN: ${SEMANTICOS_ALLOW_LOCAL_LOGIN:-true}
+  METRICS_TOKEN: ${METRICS_TOKEN:-}
   DATABASE_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD\
     \ is required \u2014 copy .env.example to .env and set it}@db:5432/${POSTGRES_DB:-semanticos}"
   REDIS_URL: redis://redis:6379/0
@@ -19,6 +28,7 @@ x-backend-env: &id001
   SLD_LLM_API_KEY: ${SLD_LLM_API_KEY:-}
   SLD_LLM_MODEL: ${SLD_LLM_MODEL:-}
   SLD_LLM_BASE_URL: ${SLD_LLM_BASE_URL:-}
+  LLM_ALLOW_EXTERNAL: ${LLM_ALLOW_EXTERNAL:-}
 services:
   web:
     build:
