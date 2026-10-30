@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from denoiser import runtime
 from denoiser.api.auth import User, require_role
 from denoiser.api.scope import TenantScope, tenant_scope
+from denoiser.logging import get_logger
 from denoiser.query.models import QueryCreateSchema, QueryRequestSchema, SavedQuerySchema
 from denoiser.query.parser import (
     QueryTooComplex,
@@ -17,6 +18,8 @@ from denoiser.query.parser import (
 )
 from denoiser.storage.db import SavedQuery
 
+logger = get_logger(__name__)
+
 router = APIRouter(prefix="/query", tags=["query"])
 
 #: Importing this router used to construct a `ClickHouseStore` at module scope,
@@ -24,6 +27,29 @@ router = APIRouter(prefix="/query", tags=["query"])
 #: the import — the exact thing `denoiser.runtime` exists to stop. The handle is
 #: now resolved per request, through the one seam.
 DATA_DIR = Path("data")
+
+
+def file_fallback_allowed() -> bool:
+    """Whether Explore may answer from `data/*.log` when ClickHouse cannot.
+
+    A development aid. The files are a shared directory, not a tenant's data,
+    and in production a ClickHouse outage answered by scanning them looked like
+    a working search over the wrong logs. ALLOW_FILE_QUERY_FALLBACK overrides
+    in either direction, as ALLOW_SIMULATED_CONNECTORS does for connectors.
+    """
+    import os
+
+    from denoiser.settings import get_settings, is_testing
+
+    explicit = os.getenv("ALLOW_FILE_QUERY_FALLBACK")
+    if explicit is not None:
+        return explicit.lower() in ("1", "true", "yes")
+    return is_testing() or not get_settings().is_production
+
+
+def _require_file_fallback() -> None:
+    if not file_fallback_allowed():
+        raise HTTPException(status_code=503, detail="The log store is unavailable; try again shortly.")
 
 def _get_all_memory_logs(from_ts: int | None = None, to_ts: int | None = None, file_name: str | None = None, tenant_id: int | None = None) -> list[dict]:
     """Helper to read and parse all .log files in DATA_DIR for in-memory fallbacks.
@@ -35,9 +61,9 @@ def _get_all_memory_logs(from_ts: int | None = None, to_ts: int | None = None, f
         return logs
 
     if file_name:
-        # Only scan the requested file
-        target = DATA_DIR / file_name
-        log_files = [target] if target.exists() else []
+        # A bare name inside DATA_DIR: "../" in the parameter used to walk out.
+        target = DATA_DIR / Path(file_name).name
+        log_files = [target] if target.suffix == ".log" and target.is_file() else []
     else:
         log_files = list(DATA_DIR.glob("*.log"))
 
@@ -89,7 +115,9 @@ def _get_all_memory_logs(from_ts: int | None = None, to_ts: int | None = None, f
 def list_log_files(current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
     """List all .log files available in the data directory."""
     files = []
-    if DATA_DIR.exists():
+    # Nothing to choose from where the file fallback is off; listing a shared
+    # directory's names to every tenant was a leak in its own right.
+    if file_fallback_allowed() and DATA_DIR.exists():
         for f in sorted(DATA_DIR.glob("*.log")):
             files.append({
                 "name": f.name,
@@ -159,10 +187,9 @@ def execute_query(payload: QueryRequestSchema, current_user: User = Depends(requ
 
             return {"status": "success", "engine": "clickhouse", "logs": logs}
         except Exception:
-            # Fallback to in-memory
-            pass
+            logger.exception("Explore query failed in ClickHouse")
 
-    # In-memory fallback
+    _require_file_fallback()
     all_logs = _get_all_memory_logs(payload.from_ts, payload.to_ts, payload.file_name, current_user.tenant_id)
     matched_logs = [log for log in all_logs if evaluate_in_memory(ast, log)]
     
@@ -194,9 +221,9 @@ def get_facets(from_ts: int | None = None, to_ts: int | None = None, file_name: 
             facets = clickhouse_store.get_facets(tenant_id=current_user.tenant_id, from_ts=from_ts, to_ts=to_ts)
             return {"status": "success", "facets": facets}
         except Exception:
-            pass
-            
-    # In-memory fallback
+            logger.exception("Explore facets failed in ClickHouse")
+
+    _require_file_fallback()
     all_logs = _get_all_memory_logs(from_ts, to_ts, file_name, current_user.tenant_id)
     source_counts = {}
     level_counts = {}
@@ -229,9 +256,9 @@ def get_histogram(payload: QueryRequestSchema, current_user: User = Depends(requ
             )
             return {"status": "success", "buckets": buckets}
         except Exception:
-            pass
+            logger.exception("Explore histogram failed in ClickHouse")
 
-    # In-memory fallback
+    _require_file_fallback()
     try:
         ast = parse_query(payload.query)
     except QueryTooComplex as e:
