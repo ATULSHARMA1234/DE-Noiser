@@ -36,7 +36,10 @@
 		reverse_proxy api:8000
 	}
 
-	handle_path /stream* {
+	# `handle`, not `handle_path`: the API serves the WebSocket at `/stream`
+	# itself, so stripping the prefix sent every Live Stream connection to `/`
+	# and it was refused before it opened.
+	handle /stream* {
 		reverse_proxy api:8000
 	}
 
