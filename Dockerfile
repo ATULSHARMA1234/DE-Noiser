@@ -33,7 +33,7 @@ FROM python:3.12-slim-bookworm AS runner
 
 LABEL org.opencontainers.image.title="SemanticOS API" \
       org.opencontainers.image.source="https://github.com/ATULSHARMA1234/DE-Noiser" \
-      org.opencontainers.image.licenses="MIT"
+      org.opencontainers.image.licenses="Elastic-2.0"
 
 WORKDIR /app
 
