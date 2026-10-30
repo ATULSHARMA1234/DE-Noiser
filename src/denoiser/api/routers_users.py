@@ -152,3 +152,16 @@ def deactivate_user(user_id: ResourceId, db: Session = Depends(get_db), current_
     db.commit()
     db.refresh(user)
     return {"status": "deactivated", "id": user_id, "is_active": user.is_active}
+
+
+@router.put("/users/{user_id}/reactivate")
+def reactivate_user(user_id: ResourceId, db: Session = Depends(get_db), current_user: User = Depends(require_role(["ADMIN"]))):
+    """Restore a deactivated operator. Deactivation was one-way: the only way
+    back was deleting the user and recreating them, which loses their audit
+    attribution."""
+    user = _tenant_user(db, user_id, current_user)
+
+    user.is_active = True
+    db.commit()
+    db.refresh(user)
+    return {"status": "reactivated", "id": user_id, "is_active": user.is_active}

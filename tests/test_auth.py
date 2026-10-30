@@ -156,6 +156,14 @@ def test_admin_deactivate_endpoint(db_session: Session):
         deact_by_admin = client.put(f"/users/{analyst_user.id}/deactivate", headers=headers)
         assert deact_by_admin.status_code == 200
         assert deact_by_admin.json()["is_active"] is False
+        assert client.post("/auth/login", json={"email": analyst_email, "password": pwd}).status_code != 200
+
+        # Deactivation is reversible, and only by an admin
+        assert client.put(f"/users/{analyst_user.id}/reactivate", headers=analyst_headers).status_code in (401, 403)
+        react = client.put(f"/users/{analyst_user.id}/reactivate", headers=headers)
+        assert react.status_code == 200
+        assert react.json()["is_active"] is True
+        assert client.post("/auth/login", json={"email": analyst_email, "password": pwd}).status_code == 200
 
         # Admin cannot deactivate self
         deact_self = client.put(f"/users/{admin_user.id}/deactivate", headers=headers)
