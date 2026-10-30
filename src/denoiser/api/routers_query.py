@@ -42,7 +42,7 @@ class LogQuery(BaseModel):
 @router.post("/v1/logs/query")
 def query_logs_api(payload: LogQuery, current_user: User = Depends(require_role(["VIEWER", "ANALYST", "ADMIN"]))):
     """Execute a Log Query Language (LQL) search against the unified ClickHouse log stream."""
-    from denoiser.query.parser import QueryTooComplex
+    from denoiser.query.parser import QueryError
 
     try:
         results = runtime.clickhouse_store().query_logs(
@@ -53,7 +53,7 @@ def query_logs_api(payload: LogQuery, current_user: User = Depends(require_role(
             to_ts=payload.to_ts
         )
         return {"status": "success", "count": len(results), "results": results}
-    except QueryTooComplex as e:
+    except QueryError as e:
         # A query the parser refuses is a bad request, not a server fault; it
         # previously surfaced as an opaque 500 with nothing actionable in it.
         raise HTTPException(status_code=400, detail=str(e))

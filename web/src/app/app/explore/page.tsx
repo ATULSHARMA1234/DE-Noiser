@@ -217,7 +217,8 @@ export default function ExplorePage() {
  type="text" 
  value={query}
  onChange={(e) => setQuery(e.target.value)}
- placeholder='e.g. level:ERROR AND "connection timeout" OR service:payment' 
+ placeholder='e.g. level:ERROR "connection timeout" -service:healthcheck' 
+ title={'Search syntax: free text or "exact phrase" · field:value · status:>=500 · path:/api/* · trace_id:* (present) · user.id:42 (nested) · AND (implicit), OR, NOT or -term, (parentheses). Operators are upper-case.'}
  className="w-full bg-transparent border-none py-3 px-3 text-sm font-mono text-[var(--text-primary)] focus:outline-none focus:ring-0"
  />
  </div>
@@ -255,6 +256,10 @@ export default function ExplorePage() {
  <button onClick={() => handleSampleClick('service:payment AND level:ERROR')} className="hover:text-[var(--signal-info)]">service:payment AND level:ERROR</button>
  <span>•</span>
  <button onClick={() => handleSampleClick('"database connection failed"')} className="hover:text-[var(--signal-info)]">&quot;exact phrase&quot;</button>
+ <span>•</span>
+ <button onClick={() => handleSampleClick('status:>=500 -level:DEBUG')} className="hover:text-[var(--signal-info)]">status:&gt;=500 -level:DEBUG</button>
+ <span>•</span>
+ <button onClick={() => handleSampleClick('(db OR cache) AND timeout')} className="hover:text-[var(--signal-info)]">(db OR cache) AND timeout</button>
  </div>
  </div>
 

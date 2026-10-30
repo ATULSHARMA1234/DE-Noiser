@@ -2,12 +2,13 @@ import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
 from denoiser.api.auth import User, require_role
 from denoiser.api.pagination import ResourceId
 from denoiser.api.scope import TenantScope, tenant_scope
+from denoiser.query.parser import validate_lql
 from denoiser.storage.db import Monitor, get_db
 from denoiser.utils.time import iso_utc, utcnow
 
@@ -24,6 +25,8 @@ class MonitorCreateSchema(BaseModel):
     window_seconds: int = 300
     enabled: bool = True
 
+    _valid_query = field_validator("query")(validate_lql)
+
 class MonitorUpdateSchema(BaseModel):
     name: str | None = None
     type: str | None = None
@@ -34,6 +37,8 @@ class MonitorUpdateSchema(BaseModel):
     threshold_warning: float | None = None
     window_seconds: int | None = None
     enabled: bool | None = None
+
+    _valid_query = field_validator("query")(validate_lql)
 
 
 def _monitor_to_dict(m: Monitor, now: datetime.datetime) -> dict[str, Any]:

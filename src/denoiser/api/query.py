@@ -11,7 +11,7 @@ from denoiser.api.scope import TenantScope, tenant_scope
 from denoiser.logging import get_logger
 from denoiser.query.models import QueryCreateSchema, QueryRequestSchema, SavedQuerySchema
 from denoiser.query.parser import (
-    QueryTooComplex,
+    QueryError,
     evaluate_in_memory,
     parse_plain_text_log,
     parse_query,
@@ -134,7 +134,7 @@ def execute_query(payload: QueryRequestSchema, current_user: User = Depends(requ
     """
     try:
         ast = parse_query(payload.query)
-    except QueryTooComplex as e:
+    except QueryError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
     clickhouse_store = runtime.clickhouse_store()
@@ -245,6 +245,14 @@ def get_histogram(payload: QueryRequestSchema, current_user: User = Depends(requ
     """
     Get log counts bucketed by time.
     """
+    # Parsed up front, as /query does. It used to be parsed only on the file
+    # fallback, so a malformed query raised inside the ClickHouse branch, was
+    # taken for an outage, and answered 503 instead of saying what was wrong.
+    try:
+        ast = parse_query(payload.query)
+    except QueryError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     clickhouse_store = runtime.clickhouse_store()
     if clickhouse_store.client:
         try:
@@ -259,10 +267,6 @@ def get_histogram(payload: QueryRequestSchema, current_user: User = Depends(requ
             logger.exception("Explore histogram failed in ClickHouse")
 
     _require_file_fallback()
-    try:
-        ast = parse_query(payload.query)
-    except QueryTooComplex as e:
-        raise HTTPException(status_code=400, detail=str(e))
     all_logs = _get_all_memory_logs(payload.from_ts, payload.to_ts, payload.file_name, current_user.tenant_id)
     matched_logs = [log for log in all_logs if evaluate_in_memory(ast, log)]
     
