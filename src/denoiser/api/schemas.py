@@ -76,10 +76,7 @@ class IncidentResponse(BaseModel):
 class SettingsUpdate(BaseModel):
     store_raw_logs: bool | None = None
     redact_pii: bool | None = None
-    llm_model: str | None = None
-    confidence_threshold: int | None = Field(None, ge=0, le=100)
     retention_days: int | None = Field(None, ge=1, le=365)
-    sampling_threshold: int | None = Field(None, ge=1000)
     auto_analyze: bool | None = None
     slack_webhook_url: str | None = None
     s3_enabled: bool | None = None

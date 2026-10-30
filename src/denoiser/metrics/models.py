@@ -1,6 +1,8 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
+
+from denoiser.query.parser import validate_lql
 
 
 class MetricRuleCreateSchema(BaseModel):
@@ -8,6 +10,8 @@ class MetricRuleCreateSchema(BaseModel):
     query: str
     aggregation: str = "count"
     window_seconds: int = 60
+
+    _valid_query = field_validator("query")(validate_lql)
 
 class MetricRuleSchema(BaseModel):
     id: int

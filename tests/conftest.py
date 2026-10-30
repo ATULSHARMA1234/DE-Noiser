@@ -83,3 +83,49 @@ def _reset_runtime_handles():
 
     yield
     runtime.reset()
+
+
+@pytest.fixture
+def two_orgs():
+    """Two throwaway organisations and a way to act as someone in either.
+
+    Yields ``(a, b, as_user)``: two tenant ids, and ``as_user(tenant_id,
+    role="ADMIN")`` returning a TestClient signed in as that role there. Every
+    row either tenant owns in the tables these suites write is removed after.
+    """
+    import uuid
+
+    from fastapi.testclient import TestClient
+
+    from denoiser.api.auth import get_current_user
+    from denoiser.api.main import app
+    from denoiser.storage import db as models
+
+    models.init_db()
+    session = models.SessionLocal()
+    ids = []
+    for _ in range(2):
+        tenant = models.Tenant(name=f"org-{uuid.uuid4().hex[:8]}")
+        session.add(tenant)
+        session.commit()
+        session.refresh(tenant)
+        ids.append(tenant.id)
+
+    def as_user(tenant_id, role="ADMIN"):
+        user = models.User(id=800000 + tenant_id, email=f"{role.lower()}{tenant_id}@org.test",
+                           role=role, tenant_id=tenant_id)
+        app.dependency_overrides[get_current_user] = lambda: user
+        return TestClient(app)
+
+    try:
+        yield ids[0], ids[1], as_user
+    finally:
+        app.dependency_overrides.clear()
+        for name in ("Incident", "Dashboard", "MetricRule", "ExtractedMetric", "Integration",
+                     "DeploymentMarker", "TenantSetting", "AnalysisRun", "ServiceLevelObjective",
+                     "AuditLog"):
+            model = getattr(models, name)
+            session.query(model).filter(model.tenant_id.in_(ids)).delete(synchronize_session=False)
+        session.query(models.Tenant).filter(models.Tenant.id.in_(ids)).delete(synchronize_session=False)
+        session.commit()
+        session.close()

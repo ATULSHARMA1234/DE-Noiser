@@ -36,10 +36,7 @@ interface DeliveryRecord {
 interface SettingsState {
  store_raw_logs: boolean;
  redact_pii: boolean;
- llm_model: string;
- confidence_threshold: number;
  retention_days: number;
- sampling_threshold: number;
  auto_analyze: boolean;
  s3_enabled: boolean;
  s3_endpoint: string;
@@ -49,6 +46,13 @@ interface SettingsState {
 }
 
 type SettingKey = keyof SettingsState;
+
+// The narrator the deployment actually runs, from its environment. Read-only.
+interface LlmStatus {
+ configured: boolean;
+ model: string | null;
+ location: 'local' | 'external' | null;
+}
 type BooleanSettingKey = 'store_raw_logs' | 'redact_pii' | 'auto_analyze';
 
 interface NewWebhook {
@@ -97,17 +101,15 @@ const CHANNEL_ICONS: Record<string, string> = {
 
 export default function SettingsPage() {
  const { toast } = useToast();
- // Keys the platform operator owns (the shared object store, the analysis
- // engine). Shown, but not editable by an organisation's ADMIN.
+ // Keys the platform operator owns (the shared object store). Shown, but not
+ // editable by an organisation's ADMIN.
  const [platformManaged, setPlatformManaged] = useState<string[]>([]);
  const locked = (key: string) => platformManaged.includes(key);
+ const [llm, setLlm] = useState<LlmStatus | null>(null);
  const [settings, setSettings] = useState<SettingsState>({
  store_raw_logs: true,
  redact_pii: true,
- llm_model: 'llama-3.3-70b',
- confidence_threshold: 70,
  retention_days: 30,
- sampling_threshold: 50000,
  auto_analyze: false,
  s3_enabled: false,
  s3_endpoint: 'http://localhost:9000',
@@ -152,8 +154,9 @@ export default function SettingsPage() {
  ]).then(([settingsData, webhookData, deliveryData]) => {
  if (!active) return;
  if (settingsData) {
- const { platform_managed, ...values } = settingsData as Partial<SettingsState> & { platform_managed?: string[] };
+ const { platform_managed, llm: llmStatus, ...values } = settingsData as Partial<SettingsState> & { platform_managed?: string[]; llm?: LlmStatus };
  setPlatformManaged(platform_managed ?? []);
+ setLlm(llmStatus ?? null);
  setSettings(prev => ({ ...prev, ...values }));
  }
  setWebhooks(webhookData as WebhookDest[]);
@@ -315,43 +318,35 @@ export default function SettingsPage() {
  <div className="flex items-center justify-between mb-6 pb-6 border-b border-[var(--border-subtle)]">
  <div>
  <h2 className="text-sm font-bold text-[var(--text-primary)] mb-1">Local Intelligence (LLM)</h2>
- <p className="text-xs text-[var(--text-muted)]">Configure the model used for root-cause diagnosis.</p>
+ <p className="text-xs text-[var(--text-muted)]">The model that writes incident narratives, as this deployment is configured.</p>
  </div>
  <Cpu size={24} className="text-[var(--primary)]" />
  </div>
- <div className="space-y-6">
- <div>
- <p className="text-xs font-bold text-[var(--text-secondary)] mb-2">Active Model</p>
- <select value={settings.llm_model} onChange={e => updateSetting('llm_model', e.target.value)} disabled={locked('llm_model')}
- className="w-full bg-[var(--bg-input)] border border-[var(--border)] text-[var(--text-primary)] text-sm rounded-md px-4 py-2.5 outline-none appearance-none cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed">
- <option value="llama-3.3-70b">Llama 3.3-70B (Local / Default)</option>
- <option value="llama-3.1-8b">Llama 3.1-8B (Fast / Lightweight)</option>
- <option value="gpt-4o">GPT-4o (Cloud / OpenAI)</option>
- <option value="claude-sonnet">Claude Sonnet (Cloud / Anthropic)</option>
- <option value="local-fallback">Local Heuristic Fallback (No LLM)</option>
- </select>
- {locked('llm_model') && (
- <p className="text-[10px] text-[var(--text-muted)] mt-1">Managed by your platform operator for every organisation on this deployment.</p>
+ {llm?.configured ? (
+ <div className="space-y-1">
+ <p className="text-xs font-bold text-[var(--text-secondary)]">Active Model</p>
+ <p className="text-sm font-mono text-[var(--text-primary)]">{llm.model}</p>
+ <p className="text-[10px] text-[var(--text-muted)]">
+ {llm.location === 'local'
+ ? 'Runs on your own infrastructure; log content stays on-box.'
+ : 'A hosted endpoint: representative log lines are sent to it for each analysed run.'}
+ </p>
+ </div>
+ ) : (
+ <p className="text-xs text-[var(--text-secondary)]">
+ No model is configured, so incident summaries are heuristic templates and are labelled that way.
+ Your platform operator sets one with <code className="font-mono">SLD_LLM_BASE_URL</code> and <code className="font-mono">SLD_LLM_MODEL</code>.
+ </p>
  )}
- </div>
- <div>
- <p className="text-xs font-bold text-[var(--text-secondary)] mb-4">Diagnosis Confidence Threshold</p>
- <div className="flex items-center gap-4">
- <input type="range" min="0" max="100" value={settings.confidence_threshold}
- onChange={e => updateSetting('confidence_threshold', parseInt(e.target.value))}
- className="w-full h-1.5 bg-[var(--bg-track)] rounded-lg appearance-none cursor-pointer accent-[var(--primary)]" />
- <span className="text-xs text-[var(--text-secondary)] font-mono w-10 text-right">{settings.confidence_threshold}%</span>
- </div>
- </div>
- </div>
+ <p className="text-[10px] text-[var(--text-muted)] mt-4">Set by your platform operator through the deployment&apos;s environment.</p>
  </div>
 
  {/* Retention */}
  <div className="bg-[var(--bg-card)] border-none rounded-xl p-6 shadow-sm">
  <div className="flex items-center justify-between mb-6 pb-6 border-b border-[var(--border-subtle)]">
  <div>
- <h2 className="text-sm font-bold text-[var(--text-primary)] mb-1">Retention &amp; Engine Performance</h2>
- <p className="text-xs text-[var(--text-muted)]">Manage disk usage and memory consumption.</p>
+ <h2 className="text-sm font-bold text-[var(--text-primary)] mb-1">Retention</h2>
+ <p className="text-xs text-[var(--text-muted)]">How long this organisation&apos;s analysis runs and audit records are kept.</p>
  </div>
  <HardDrive size={24} className="text-blue-500" />
  </div>
@@ -361,15 +356,6 @@ export default function SettingsPage() {
  <input type="number" value={settings.retention_days}
  onChange={e => updateSetting('retention_days', parseInt(e.target.value) || 30)}
  className="w-full bg-[var(--bg-input)] border border-[var(--border)] text-[var(--text-primary)] text-sm rounded-md px-4 py-2.5 outline-none" />
- </div>
- <div>
- <p className="text-xs font-bold text-[var(--text-secondary)] mb-2">Neural Sampling Threshold</p>
- <input type="number" value={settings.sampling_threshold} disabled={locked('sampling_threshold')}
- onChange={e => updateSetting('sampling_threshold', parseInt(e.target.value) || 50000)}
- className="w-full bg-[var(--bg-input)] border border-[var(--border)] text-[var(--text-primary)] text-sm rounded-md px-4 py-2.5 outline-none disabled:opacity-60 disabled:cursor-not-allowed" />
- {locked('sampling_threshold') && (
- <p className="text-[10px] text-[var(--text-muted)] mt-1">Managed by your platform operator for every organisation on this deployment.</p>
- )}
  </div>
  </div>
  </div>

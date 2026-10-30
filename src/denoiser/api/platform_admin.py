@@ -569,8 +569,8 @@ def get_erasure(
 
 @router.get("/settings")
 def get_platform_settings(_: bool = Depends(require_platform_operator)):
-    """The settings no single organisation may change: the shared object store
-    and the analysis engine. Secrets are masked here too."""
+    """The settings no single organisation may change: the shared object store.
+    Secrets are masked here too."""
     from denoiser.api.routers_settings import _mask_secrets, _platform_values
 
     return _mask_secrets(_platform_values())

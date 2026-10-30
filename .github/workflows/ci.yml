@@ -240,6 +240,12 @@ jobs:
       # datastores: the suite exercises the UI against a real API, not the
       # ingestion pipeline, so standing up Kafka and ClickHouse here would buy
       # nothing but flakiness.
+      #
+      # The specs used to intercept every request to the API and answer `[]`,
+      # signed in with a fake token, so this job passed whatever the backend
+      # did. They now sign in as the admin the API seeds (the two passwords
+      # below must match) and drive the real API; `fixtures` holds the one
+      # rendering test that deliberately uses fixed payloads.
       - name: Run Playwright
         working-directory: ./web
         env:
@@ -247,7 +253,10 @@ jobs:
           SEMANTICOS_ENV: development
           SEMANTICOS_AUTO_MIGRATE: "1"
           JWT_SECRET_KEY: e2e-only-not-a-real-secret-key-000000
-        run: npx playwright test --project=chromium
+          SEMANTICOS_ADMIN_PASSWORD: e2e-only-Admin-Passw0rd
+          E2E_ADMIN_PASSWORD: e2e-only-Admin-Passw0rd
+          CORS_ALLOWED_ORIGINS: http://127.0.0.1:3000
+        run: npx playwright test --project=chromium --project=fixtures
 
       - name: Upload the report
         if: always()
