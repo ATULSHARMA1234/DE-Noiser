@@ -730,6 +730,7 @@ def pending_alert(state: RunState) -> Any:
         causal_links=state.formatted_links,
         intelligence=state.llm_payload,
         keyword_flag=first.get("keyword_flag", False),
+        template=first.get("representative_template"),
     )
 
 

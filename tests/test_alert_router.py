@@ -207,3 +207,63 @@ class TestDelivery:
         assert len(delivered) >= 1
         assert delivered[0]["webhook_id"] == cfg.id
         assert delivered[0]["priority"] == "P0"
+
+
+class TestAlertStormDedup:
+    """The same failure, re-detected every run, paged the same channel every run."""
+
+    def test_fingerprint_survives_cluster_renumbering_and_volatile_ids(self):
+        a1, a2 = _make_alert("P0"), _make_alert("P0")
+        a2.cluster_id = 99
+        a1.representative_log = "ERROR db: pool exhausted after 30s (req 4f1c2d9e-1a2b-4c3d-9e8f-0123456789ab)"
+        a2.representative_log = "ERROR db: pool exhausted after 31s (req 7a7a7a7a-1a2b-4c3d-9e8f-0123456789ab)"
+        assert a1.fingerprint == a2.fingerprint
+
+    def test_different_failures_have_different_fingerprints(self):
+        a1, a2 = _make_alert("P0"), _make_alert("P0")
+        a2.representative_log = "ERROR payments: card gateway timeout"
+        assert a1.fingerprint != a2.fingerprint
+
+    @pytest.mark.asyncio
+    async def test_repeat_within_window_is_not_delivered_again(self, respx_mock):
+        import httpx
+
+        router = AlertRouter()
+        cfg = _make_cfg(min_priority="P1")
+        router.register(cfg)
+        route = respx_mock.post(cfg.url).mock(return_value=httpx.Response(200))
+
+        await router.dispatch(_make_alert("P0"))
+        await router.dispatch(_make_alert("P0"))
+
+        assert route.call_count == 1
+        statuses = [r["status"] for r in router.get_delivery_log()]
+        assert sorted(statuses) == ["deduplicated", "delivered"]
+
+    @pytest.mark.asyncio
+    async def test_window_zero_turns_dedup_off(self, respx_mock, monkeypatch):
+        import httpx
+
+        monkeypatch.setenv("ALERT_DEDUP_WINDOW_SECONDS", "0")
+        router = AlertRouter()
+        cfg = _make_cfg(min_priority="P1")
+        router.register(cfg)
+        route = respx_mock.post(cfg.url).mock(return_value=httpx.Response(200))
+
+        await router.dispatch(_make_alert("P0"))
+        await router.dispatch(_make_alert("P0"))
+        assert route.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_a_failed_delivery_does_not_suppress_the_retry(self, respx_mock):
+        import httpx
+
+        router = AlertRouter()
+        router.MAX_RETRIES = 1
+        cfg = _make_cfg(min_priority="P1")
+        router.register(cfg)
+        route = respx_mock.post(cfg.url).mock(return_value=httpx.Response(500))
+
+        await router.dispatch(_make_alert("P0"))
+        await router.dispatch(_make_alert("P0"))
+        assert route.call_count == 2
